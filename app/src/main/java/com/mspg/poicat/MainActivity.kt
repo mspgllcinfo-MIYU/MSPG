@@ -1,5 +1,6 @@
 package com.mspg.poicat
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -33,6 +34,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,12 +62,23 @@ private enum class AppTab(val label: String) {
 }
 
 class MainActivity : ComponentActivity() {
+    private val incomingSendIntent = mutableStateOf<Intent?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        incomingSendIntent.value = intent.takeIf { it.action == Intent.ACTION_SEND }
         setContent {
             PoiCatTheme {
-                AppRoot()
+                AppRoot(incomingSendIntent = incomingSendIntent.value, onIncomingSendIntentConsumed = { incomingSendIntent.value = null })
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.action == Intent.ACTION_SEND) {
+            incomingSendIntent.value = intent
         }
     }
 }
@@ -81,10 +94,21 @@ private fun PoiCatTheme(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun AppRoot() {
+private fun AppRoot(incomingSendIntent: Intent?, onIncomingSendIntentConsumed: () -> Unit) {
     var selectedTab by remember { mutableStateOf(AppTab.HOME) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    var sharedPoiDraft by remember { mutableStateOf<PoiDraft?>(null) }
+    LaunchedEffect(incomingSendIntent) {
+        val draft = extractSharedDraft(context, incomingSendIntent)
+        if (draft != null) {
+            sharedPoiDraft = draft
+            selectedTab = AppTab.POI
+        }
+        if (incomingSendIntent != null) onIncomingSendIntentConsumed()
+    }
 
     fun showNotReady(feature: String) {
         scope.launch { snackbarHostState.showSnackbar("$feature は準備中です") }
@@ -123,7 +147,12 @@ private fun AppRoot() {
                     onTapCat = { showNotReady("猫AI") },
                     onAddMemo = { showNotReady("プチメモ") },
                 )
-                AppTab.POI -> PlaceholderScreen("POI（ポイ送受信）", "Phase 2 で実装予定")
+                AppTab.POI -> PoiScreen(
+                    prefill = sharedPoiDraft,
+                    onPrefillConsumed = { sharedPoiDraft = null },
+                    snackbarHostState = snackbarHostState,
+                    scope = scope,
+                )
                 AppTab.CAL -> PlaceholderScreen("カレンダー", "Phase 4 で実装予定")
                 AppTab.MEMO -> PlaceholderScreen("プチメモ", "Phase 4 で実装予定")
                 AppTab.AI -> PlaceholderScreen("猫AI", "Phase 5 で実装予定")
