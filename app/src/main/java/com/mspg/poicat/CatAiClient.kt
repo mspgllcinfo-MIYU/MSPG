@@ -5,7 +5,7 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 
-/** 猫AIサーバー（Firebase Cloud Functions想定）への問い合わせ。呼び出し側でIOスレッドから呼ぶこと。 */
+/** 猫AIサーバー（Cloudflare Workers想定）への問い合わせ。呼び出し側でIOスレッドから呼ぶこと。 */
 object CatAiClient {
     class NotConfiguredException : Exception("猫AIのサーバーURLが未設定です")
 

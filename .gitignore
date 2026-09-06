@@ -9,9 +9,7 @@
 .cxx/
 app/build/
 
-# Firebase Cloud Functions
-functions/node_modules/
-.firebase/
-firebase-debug.log
-firebase-debug.*.log
+# Cloudflare Workers
+worker/node_modules/
+.wrangler/
 
