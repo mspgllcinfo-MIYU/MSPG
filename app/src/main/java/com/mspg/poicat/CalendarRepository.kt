@@ -4,27 +4,25 @@ import androidx.compose.runtime.mutableStateListOf
 import java.time.LocalDate
 import java.util.UUID
 
-/** Ver.1では「自分だけ / 2人共有」は選択項目のみ。実際の共有同期はFirebase導入後。 */
+/** Ver.1では予定は常に2人共有（「自分だけ」の選択肢はない）。 */
 data class ScheduleEntry(
     val id: String,
     val date: LocalDate,
     val time: String?,
     val title: String,
-    val shared: Boolean,
 )
 
 object CalendarRepository {
     private val _schedules = mutableStateListOf<ScheduleEntry>()
     val schedules: List<ScheduleEntry> get() = _schedules
 
-    fun addSchedule(date: LocalDate, time: String, title: String, shared: Boolean) {
+    fun addSchedule(date: LocalDate, time: String, title: String) {
         _schedules.add(
             ScheduleEntry(
                 id = UUID.randomUUID().toString(),
                 date = date,
                 time = time.trim().takeIf { it.isNotBlank() },
                 title = title.trim(),
-                shared = shared,
             ),
         )
     }

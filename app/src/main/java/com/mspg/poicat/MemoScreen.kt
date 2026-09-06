@@ -114,11 +114,5 @@ private fun MemoListRow(memo: PetitMemo) {
                 }
             }
         }
-        Text(
-            text = if (memo.shared) "2人共有" else "自分だけ",
-            fontSize = 12.sp,
-            color = Color.Gray,
-            modifier = Modifier.padding(top = 4.dp),
-        )
     }
 }

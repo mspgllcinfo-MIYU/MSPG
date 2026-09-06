@@ -26,7 +26,6 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -238,11 +237,9 @@ private fun ScheduleRow(schedule: ScheduleEntry) {
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(text = schedule.title, fontSize = 15.sp)
-            Text(
-                text = (schedule.time?.let { "$it ・ " } ?: "") + if (schedule.shared) "2人共有" else "自分だけ",
-                fontSize = 12.sp,
-                color = Color.Gray,
-            )
+            if (schedule.time != null) {
+                Text(text = schedule.time, fontSize = 12.sp, color = Color.Gray)
+            }
         }
     }
 }
@@ -279,12 +276,6 @@ private fun MemoRow(memo: PetitMemo) {
                 }
             }
         }
-        Text(
-            text = if (memo.shared) "2人共有" else "自分だけ",
-            fontSize = 12.sp,
-            color = Color.Gray,
-            modifier = Modifier.padding(top = 4.dp),
-        )
     }
 }
 
@@ -292,7 +283,6 @@ private fun MemoRow(memo: PetitMemo) {
 private fun AddScheduleDialog(date: LocalDate, onDismiss: () -> Unit) {
     var title by remember { mutableStateOf("") }
     var time by remember { mutableStateOf("") }
-    var shared by remember { mutableStateOf(true) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -313,14 +303,13 @@ private fun AddScheduleDialog(date: LocalDate, onDismiss: () -> Unit) {
                         .fillMaxWidth()
                         .padding(top = 8.dp),
                 )
-                SharedToggleRow(shared = shared, onSharedChange = { shared = it })
             }
         },
         confirmButton = {
             TextButton(
                 onClick = {
                     if (title.isNotBlank()) {
-                        CalendarRepository.addSchedule(date, time, title, shared)
+                        CalendarRepository.addSchedule(date, time, title)
                         onDismiss()
                     }
                 },
@@ -334,7 +323,6 @@ private fun AddScheduleDialog(date: LocalDate, onDismiss: () -> Unit) {
 fun AddMemoDialog(date: LocalDate, onDismiss: () -> Unit) {
     var text by remember { mutableStateOf("") }
     var photoUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
-    var shared by remember { mutableStateOf(true) }
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.PickMultipleVisualMedia(),
@@ -360,14 +348,13 @@ fun AddMemoDialog(date: LocalDate, onDismiss: () -> Unit) {
                 ) {
                     Text(if (photoUris.isEmpty()) "写真を選ぶ（複数可）" else "写真：${photoUris.size}枚選択中")
                 }
-                SharedToggleRow(shared = shared, onSharedChange = { shared = it })
             }
         },
         confirmButton = {
             TextButton(
                 onClick = {
                     if (text.isNotBlank() || photoUris.isNotEmpty()) {
-                        MemoRepository.addMemo(date, text, photoUris, shared)
+                        MemoRepository.addMemo(date, text, photoUris)
                         onDismiss()
                     }
                 },
@@ -375,15 +362,4 @@ fun AddMemoDialog(date: LocalDate, onDismiss: () -> Unit) {
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("キャンセル") } },
     )
-}
-
-@Composable
-private fun SharedToggleRow(shared: Boolean, onSharedChange: (Boolean) -> Unit) {
-    Row(
-        modifier = Modifier.padding(top = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        FilterChip(selected = !shared, onClick = { onSharedChange(false) }, label = { Text("自分だけ") })
-        FilterChip(selected = shared, onClick = { onSharedChange(true) }, label = { Text("2人共有") })
-    }
 }
