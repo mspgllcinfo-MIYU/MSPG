@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "780520264549",
+    "project_id": "miyuki-neko-ai",
+    "storage_bucket": "miyuki-neko-ai.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:780520264549:android:55bf3e1076a67af82e478c",
+        "android_client_info": {
+          "package_name": "com.mspg.poicat"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAhgnhsEjrLF33bsVVyGPOwHpB0YmjaTIM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
