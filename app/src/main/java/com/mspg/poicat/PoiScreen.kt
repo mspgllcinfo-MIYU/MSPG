@@ -114,10 +114,10 @@ private fun queryDisplayName(context: Context, uri: Uri): String {
 }
 
 /** プレビュー表示用に、長辺が概ね[targetSize]pxになるよう縮小して読み込む。 */
-private fun decodeSampledBitmap(context: Context, uri: Uri, targetSize: Int): Bitmap? {
+private fun decodeSampledBitmap(context: Context, uri: Uri, targetSize: Int): Bitmap? = runCatching {
     val resolver = context.contentResolver
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) } ?: return null
+    resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) } ?: return@runCatching null
 
     var sampleSize = 1
     val halfWidth = bounds.outWidth / 2
@@ -127,8 +127,8 @@ private fun decodeSampledBitmap(context: Context, uri: Uri, targetSize: Int): Bi
     }
 
     val decodeOptions = BitmapFactory.Options().apply { inSampleSize = sampleSize }
-    return resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, decodeOptions) }
-}
+    resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, decodeOptions) }
+}.getOrNull()
 
 @Composable
 fun rememberPhotoPreview(uri: Uri): ImageBitmap? {
@@ -159,11 +159,22 @@ fun PoiScreen(
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia(),
-    ) { uri -> if (uri != null) draft = PoiDraft.Photo(uri) }
+    ) { uri ->
+        if (uri != null) {
+            draft = PoiDraft.Photo(PhotoStorage.copyToAppStorage(context, uri) ?: uri)
+        }
+    }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
-    ) { uri -> if (uri != null) draft = PoiDraft.FileDoc(uri, queryDisplayName(context, uri)) }
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            draft = PoiDraft.FileDoc(uri, queryDisplayName(context, uri))
+        }
+    }
 
     var isSending by remember { mutableStateOf(false) }
 

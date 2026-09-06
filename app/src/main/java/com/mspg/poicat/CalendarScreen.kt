@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -321,12 +322,13 @@ private fun AddScheduleDialog(date: LocalDate, onDismiss: () -> Unit) {
 
 @Composable
 fun AddMemoDialog(date: LocalDate, onDismiss: () -> Unit) {
+    val context = LocalContext.current
     var text by remember { mutableStateOf("") }
     var photoUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.PickMultipleVisualMedia(),
-    ) { uris -> photoUris = uris }
+    ) { uris -> photoUris = uris.map { PhotoStorage.copyToAppStorage(context, it) ?: it } }
 
     AlertDialog(
         onDismissRequest = onDismiss,

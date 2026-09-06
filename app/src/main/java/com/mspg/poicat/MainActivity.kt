@@ -67,6 +67,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        PoiRepository.init(applicationContext)
+        CalendarRepository.init(applicationContext)
+        MemoRepository.init(applicationContext)
         incomingSendIntent.value = intent.takeIf { it.action == Intent.ACTION_SEND }
         setContent {
             PoiCatTheme {
