@@ -110,6 +110,8 @@ private fun AppRoot(incomingSendIntent: Intent?, onIncomingSendIntentConsumed: (
         if (incomingSendIntent != null) onIncomingSendIntentConsumed()
     }
 
+    var isBoxOpen by remember { mutableStateOf(false) }
+
     fun showNotReady(feature: String) {
         scope.launch { snackbarHostState.showSnackbar("$feature は準備中です") }
     }
@@ -128,7 +130,10 @@ private fun AppRoot(incomingSendIntent: Intent?, onIncomingSendIntentConsumed: (
                 AppTab.entries.forEach { tab ->
                     NavigationBarItem(
                         selected = selectedTab == tab,
-                        onClick = { selectedTab = tab },
+                        onClick = {
+                            selectedTab = tab
+                            isBoxOpen = false
+                        },
                         icon = { Icon(icons.getValue(tab), contentDescription = tab.label) },
                         label = { Text(tab.label) },
                     )
@@ -142,27 +147,34 @@ private fun AppRoot(incomingSendIntent: Intent?, onIncomingSendIntentConsumed: (
                 .padding(padding),
             color = MaterialTheme.colorScheme.background,
         ) {
-            when (selectedTab) {
-                AppTab.HOME -> HomeScreen(
+            when {
+                selectedTab == AppTab.HOME && isBoxOpen -> BoxScreen(
+                    items = PoiRepository.items,
+                    onBack = { isBoxOpen = false },
+                    onNotReady = { showNotReady(it) },
+                )
+                selectedTab == AppTab.HOME -> HomeScreen(
+                    unreadCount = PoiRepository.items.count { !it.isRead },
+                    onOpenBox = { isBoxOpen = true },
                     onTapCat = { showNotReady("猫AI") },
                     onAddMemo = { showNotReady("プチメモ") },
                 )
-                AppTab.POI -> PoiScreen(
+                selectedTab == AppTab.POI -> PoiScreen(
                     prefill = sharedPoiDraft,
                     onPrefillConsumed = { sharedPoiDraft = null },
                     snackbarHostState = snackbarHostState,
                     scope = scope,
                 )
-                AppTab.CAL -> PlaceholderScreen("カレンダー", "Phase 4 で実装予定")
-                AppTab.MEMO -> PlaceholderScreen("プチメモ", "Phase 4 で実装予定")
-                AppTab.AI -> PlaceholderScreen("猫AI", "Phase 5 で実装予定")
+                selectedTab == AppTab.CAL -> PlaceholderScreen("カレンダー", "Phase 4 で実装予定")
+                selectedTab == AppTab.MEMO -> PlaceholderScreen("プチメモ", "Phase 4 で実装予定")
+                else -> PlaceholderScreen("猫AI", "Phase 5 で実装予定")
             }
         }
     }
 }
 
 @Composable
-private fun HomeScreen(onTapCat: () -> Unit, onAddMemo: () -> Unit) {
+private fun HomeScreen(unreadCount: Int, onOpenBox: () -> Unit, onTapCat: () -> Unit, onAddMemo: () -> Unit) {
     val today = remember {
         SimpleDateFormat("M月d日（E）", Locale.JAPANESE).format(Date())
     }
@@ -202,11 +214,12 @@ private fun HomeScreen(onTapCat: () -> Unit, onAddMemo: () -> Unit) {
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(16.dp))
                 .background(Color(0xFFEDE6E0))
+                .clickable { onOpenBox() }
                 .padding(16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text(text = "旦那ちゃんから届いたもの", fontSize = 14.sp)
-            Text(text = "0件", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text(text = "${unreadCount}件", fontSize = 14.sp, fontWeight = FontWeight.Bold)
         }
 
         // 下段：今日のプチメモ＋

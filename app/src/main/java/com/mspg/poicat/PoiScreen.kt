@@ -131,7 +131,7 @@ private fun decodeSampledBitmap(context: Context, uri: Uri, targetSize: Int): Bi
 }
 
 @Composable
-private fun rememberPhotoPreview(uri: Uri): ImageBitmap? {
+fun rememberPhotoPreview(uri: Uri): ImageBitmap? {
     val context = LocalContext.current
     var bitmap by remember(uri) { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(uri) {
@@ -167,7 +167,7 @@ fun PoiScreen(
 
     var isSending by remember { mutableStateOf(false) }
 
-    fun sendToHusband() {
+    fun sendToHusband(itemDraft: PoiDraft) {
         isSending = true
         scope.launch {
             val result = snackbarHostState.showSnackbar(
@@ -177,9 +177,10 @@ fun PoiScreen(
             )
             isSending = false
             if (result == SnackbarResult.ActionPerformed) {
-                // 取り消し：下書きは残し、そのまま編集・再送できるようにする。
+                // 取り消し：下書きは残し、そのまま編集・再送できるようにする（BOXへは記録しない）。
                 snackbarHostState.showSnackbar("送信を取り消したニャ", duration = SnackbarDuration.Short)
             } else {
+                PoiRepository.addSent(itemDraft)
                 draft = null
             }
         }
@@ -211,7 +212,7 @@ fun PoiScreen(
                 draft = currentDraft,
                 onDraftChange = { draft = it },
                 onCancel = { draft = null },
-                onSend = { sendToHusband() },
+                onSend = { sendToHusband(currentDraft) },
                 isSending = isSending,
             )
         }
