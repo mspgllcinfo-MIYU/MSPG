@@ -8,3 +8,10 @@
 .externalNativeBuild/
 .cxx/
 app/build/
+
+# Firebase Cloud Functions
+functions/node_modules/
+.firebase/
+firebase-debug.log
+firebase-debug.*.log
+

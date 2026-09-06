@@ -13,6 +13,11 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "0.1"
+        buildConfigField(
+            "String",
+            "CAT_AI_ENDPOINT",
+            "\"${project.findProperty("CAT_AI_ENDPOINT") ?: ""}\"",
+        )
     }
 
     buildTypes {
@@ -23,6 +28,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     composeOptions {

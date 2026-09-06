@@ -70,6 +70,7 @@ class MainActivity : ComponentActivity() {
         PoiRepository.init(applicationContext)
         CalendarRepository.init(applicationContext)
         MemoRepository.init(applicationContext)
+        ChatRepository.init(applicationContext)
         incomingSendIntent.value = intent.takeIf { it.action == Intent.ACTION_SEND }
         setContent {
             PoiCatTheme {
@@ -162,7 +163,7 @@ private fun AppRoot(incomingSendIntent: Intent?, onIncomingSendIntentConsumed: (
                     unreadCount = PoiRepository.items.count { !it.isRead },
                     todaySchedule = CalendarRepository.schedulesOn(LocalDate.now()).firstOrNull(),
                     onOpenBox = { isBoxOpen = true },
-                    onTapCat = { showNotReady("猫AI") },
+                    onTapCat = { selectedTab = AppTab.AI },
                     onAddMemo = { showQuickMemo = true },
                 )
                 selectedTab == AppTab.POI -> PoiScreen(
@@ -173,7 +174,7 @@ private fun AppRoot(incomingSendIntent: Intent?, onIncomingSendIntentConsumed: (
                 )
                 selectedTab == AppTab.CAL -> CalendarScreen()
                 selectedTab == AppTab.MEMO -> MemoScreen()
-                else -> PlaceholderScreen("猫AI", "Phase 5 で実装予定")
+                else -> AiChatScreen()
             }
         }
     }
@@ -263,19 +264,5 @@ private fun HomeScreen(
                 modifier = Modifier.padding(start = 8.dp),
             )
         }
-    }
-}
-
-@Composable
-private fun PlaceholderScreen(title: String, note: String) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Text(text = title, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Text(text = note, fontSize = 14.sp, color = Color.Gray, modifier = Modifier.padding(top = 8.dp))
     }
 }
