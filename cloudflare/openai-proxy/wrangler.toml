@@ -11,11 +11,10 @@ ALLOWED_MODELS = "gpt-4o-mini"
 MAX_TOKENS_LIMIT = "1024"
 RATE_LIMIT_PER_MINUTE = "20"
 
-# Created via `wrangler kv namespace create RATE_LIMIT_KV`.
-# Replace "id" below with the id printed by that command.
+# Created via the Cloudflare Dashboard (Storage & Databases > KV).
 [[kv_namespaces]]
 binding = "RATE_LIMIT_KV"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "a51b4c8f6f2641c3a4c22345d0f94196"
 
 [observability]
 enabled = true
