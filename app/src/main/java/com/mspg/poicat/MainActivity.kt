@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
+import java.time.LocalDate
 import java.util.Date
 import java.util.Locale
 
@@ -111,6 +112,7 @@ private fun AppRoot(incomingSendIntent: Intent?, onIncomingSendIntentConsumed: (
     }
 
     var isBoxOpen by remember { mutableStateOf(false) }
+    var showQuickMemo by remember { mutableStateOf(false) }
 
     fun showNotReady(feature: String) {
         scope.launch { snackbarHostState.showSnackbar("$feature は準備中です") }
@@ -155,9 +157,10 @@ private fun AppRoot(incomingSendIntent: Intent?, onIncomingSendIntentConsumed: (
                 )
                 selectedTab == AppTab.HOME -> HomeScreen(
                     unreadCount = PoiRepository.items.count { !it.isRead },
+                    todaySchedule = CalendarRepository.schedulesOn(LocalDate.now()).firstOrNull(),
                     onOpenBox = { isBoxOpen = true },
                     onTapCat = { showNotReady("猫AI") },
-                    onAddMemo = { showNotReady("プチメモ") },
+                    onAddMemo = { showQuickMemo = true },
                 )
                 selectedTab == AppTab.POI -> PoiScreen(
                     prefill = sharedPoiDraft,
@@ -165,16 +168,26 @@ private fun AppRoot(incomingSendIntent: Intent?, onIncomingSendIntentConsumed: (
                     snackbarHostState = snackbarHostState,
                     scope = scope,
                 )
-                selectedTab == AppTab.CAL -> PlaceholderScreen("カレンダー", "Phase 4 で実装予定")
-                selectedTab == AppTab.MEMO -> PlaceholderScreen("プチメモ", "Phase 4 で実装予定")
+                selectedTab == AppTab.CAL -> CalendarScreen()
+                selectedTab == AppTab.MEMO -> MemoScreen()
                 else -> PlaceholderScreen("猫AI", "Phase 5 で実装予定")
             }
         }
     }
+
+    if (showQuickMemo) {
+        AddMemoDialog(date = LocalDate.now(), onDismiss = { showQuickMemo = false })
+    }
 }
 
 @Composable
-private fun HomeScreen(unreadCount: Int, onOpenBox: () -> Unit, onTapCat: () -> Unit, onAddMemo: () -> Unit) {
+private fun HomeScreen(
+    unreadCount: Int,
+    todaySchedule: ScheduleEntry?,
+    onOpenBox: () -> Unit,
+    onTapCat: () -> Unit,
+    onAddMemo: () -> Unit,
+) {
     val today = remember {
         SimpleDateFormat("M月d日（E）", Locale.JAPANESE).format(Date())
     }
@@ -188,7 +201,12 @@ private fun HomeScreen(unreadCount: Int, onOpenBox: () -> Unit, onTapCat: () -> 
         // 上部：今日の日付・曜日、今日の予定
         Column(modifier = Modifier.fillMaxWidth()) {
             Text(text = today, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Text(text = "今日の予定はまだありません", fontSize = 14.sp, color = Color.Gray)
+            val scheduleText = if (todaySchedule != null) {
+                (todaySchedule.time?.let { "$it " } ?: "") + todaySchedule.title
+            } else {
+                "今日の予定はまだありません"
+            }
+            Text(text = scheduleText, fontSize = 14.sp, color = Color.Gray)
         }
 
         // 中央：猫ちゃん
