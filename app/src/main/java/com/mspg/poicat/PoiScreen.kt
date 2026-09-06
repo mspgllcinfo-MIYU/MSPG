@@ -2,6 +2,8 @@ package com.mspg.poicat
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Parcelable
@@ -9,6 +11,7 @@ import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -16,6 +19,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
@@ -25,6 +29,7 @@ import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Notes
 import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -42,12 +47,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** 送信先はVer.1では「旦那ちゃん」1人固定。 */
 sealed interface PoiDraft {
@@ -103,6 +113,33 @@ private fun queryDisplayName(context: Context, uri: Uri): String {
     return name ?: uri.lastPathSegment ?: "ファイル"
 }
 
+/** プレビュー表示用に、長辺が概ね[targetSize]pxになるよう縮小して読み込む。 */
+private fun decodeSampledBitmap(context: Context, uri: Uri, targetSize: Int): Bitmap? {
+    val resolver = context.contentResolver
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) } ?: return null
+
+    var sampleSize = 1
+    val halfWidth = bounds.outWidth / 2
+    val halfHeight = bounds.outHeight / 2
+    while (halfWidth / sampleSize >= targetSize && halfHeight / sampleSize >= targetSize) {
+        sampleSize *= 2
+    }
+
+    val decodeOptions = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+    return resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, decodeOptions) }
+}
+
+@Composable
+private fun rememberPhotoPreview(uri: Uri): ImageBitmap? {
+    val context = LocalContext.current
+    var bitmap by remember(uri) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(uri) {
+        bitmap = withContext(Dispatchers.IO) { decodeSampledBitmap(context, uri, 800) }?.asImageBitmap()
+    }
+    return bitmap
+}
+
 @Composable
 fun PoiScreen(
     prefill: PoiDraft?,
@@ -128,17 +165,23 @@ fun PoiScreen(
         ActivityResultContracts.OpenDocument(),
     ) { uri -> if (uri != null) draft = PoiDraft.FileDoc(uri, queryDisplayName(context, uri)) }
 
+    var isSending by remember { mutableStateOf(false) }
+
     fun sendToHusband() {
+        isSending = true
         scope.launch {
             val result = snackbarHostState.showSnackbar(
                 message = "旦那ちゃんにポイしたニャ",
                 actionLabel = "取り消す",
                 duration = SnackbarDuration.Short,
             )
-            if (result == SnackbarResult.Dismissed) {
+            isSending = false
+            if (result == SnackbarResult.ActionPerformed) {
+                // 取り消し：下書きは残し、そのまま編集・再送できるようにする。
+                snackbarHostState.showSnackbar("送信を取り消したニャ", duration = SnackbarDuration.Short)
+            } else {
                 draft = null
             }
-            // 「取り消す」が押された場合は下書きを残し、そのまま編集・再送できるようにする。
         }
     }
 
@@ -169,6 +212,7 @@ fun PoiScreen(
                 onDraftChange = { draft = it },
                 onCancel = { draft = null },
                 onSend = { sendToHusband() },
+                isSending = isSending,
             )
         }
     }
@@ -213,32 +257,75 @@ private fun PoiComposer(
     onDraftChange: (PoiDraft) -> Unit,
     onCancel: () -> Unit,
     onSend: () -> Unit,
+    isSending: Boolean,
 ) {
     Column {
-        when (draft) {
-            is PoiDraft.Photo -> Text(text = "写真を選択しました", fontSize = 16.sp)
-            is PoiDraft.FileDoc -> Text(text = "選択したファイル：${draft.name}", fontSize = 16.sp)
-            is PoiDraft.MemoText -> OutlinedTextField(
-                value = draft.text,
-                onValueChange = { onDraftChange(draft.copy(text = it)) },
-                label = { Text("メモ") },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            is PoiDraft.Link -> OutlinedTextField(
-                value = draft.url,
-                onValueChange = { onDraftChange(draft.copy(url = it)) },
-                label = { Text("リンク（URL）") },
-                modifier = Modifier.fillMaxWidth(),
-            )
+        Text(text = "内容を確認してニャ", fontSize = 14.sp, color = Color.Gray)
+
+        Column(modifier = Modifier.padding(top = 8.dp)) {
+            when (draft) {
+                is PoiDraft.Photo -> {
+                    val preview = rememberPhotoPreview(draft.uri)
+                    if (preview != null) {
+                        Image(
+                            bitmap = preview,
+                            contentDescription = "選択した写真",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(240.dp)
+                                .clip(RoundedCornerShapeCompat)
+                                .background(Color(0xFFEDE6E0)),
+                        )
+                    } else {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(240.dp)
+                                .clip(RoundedCornerShapeCompat)
+                                .background(Color(0xFFEDE6E0)),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            CircularProgressIndicator()
+                        }
+                    }
+                }
+                is PoiDraft.FileDoc -> Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShapeCompat)
+                        .background(Color(0xFFEDE6E0))
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Default.InsertDriveFile, contentDescription = null)
+                    Text(text = draft.name, modifier = Modifier.padding(start = 12.dp), fontSize = 16.sp)
+                }
+                is PoiDraft.MemoText -> OutlinedTextField(
+                    value = draft.text,
+                    onValueChange = { onDraftChange(draft.copy(text = it)) },
+                    label = { Text("メモ") },
+                    enabled = !isSending,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                is PoiDraft.Link -> OutlinedTextField(
+                    value = draft.url,
+                    onValueChange = { onDraftChange(draft.copy(url = it)) },
+                    label = { Text("リンク（URL）") },
+                    enabled = !isSending,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
 
         Row(modifier = Modifier.padding(top = 20.dp)) {
-            OutlinedButton(onClick = onCancel) {
+            OutlinedButton(onClick = onCancel, enabled = !isSending) {
                 Text("戻る")
             }
             Button(
                 onClick = onSend,
-                enabled = isDraftReadyToSend(draft),
+                enabled = !isSending && isDraftReadyToSend(draft),
                 modifier = Modifier.padding(start = 12.dp),
             ) {
                 Text("旦那ちゃんへ送る")
