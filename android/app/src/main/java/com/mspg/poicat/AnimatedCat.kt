@@ -3,6 +3,7 @@ package com.mspg.poicat
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -134,7 +135,7 @@ fun AnimatedCat(onTap: () -> Unit, modifier: Modifier = Modifier) {
                 rotate(tailAngle.value, pivot = tailBase) {
                     val tail = Path().apply {
                         moveTo(tailBase.x, tailBase.y)
-                        quadraticTo(
+                        quadraticBezierTo(
                             tailBase.x + 46.dp.toPx(), tailBase.y - 10.dp.toPx(),
                             tailBase.x + 34.dp.toPx(), tailBase.y - 52.dp.toPx(),
                         )
