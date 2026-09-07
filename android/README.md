@@ -1,57 +1,66 @@
 # poicat (Android)
 
-`com.mspg.poicat` の新規Androidプロジェクトです。既存の `app-debug.apk`
-を解析し、判読可能だった仕様（画面構成・パッケージ名・チャットのやり取り・
-音声入力など）を元に、クリーンなKotlin/Jetpack Composeで再構築しています。
+`com.mspg.poicat` のAndroidプロジェクトです。
+
+## 猫AI = 完全オフラインの「記憶する猫」
+
+「猫AI」画面は、OpenAI/Cloudflare/Firebaseへの通信を一切行いません。
+すべて端末内（Room Database）で完結する、ルールベースのスケジュール
+アシスタントです。
+
+- 従量課金・追加課金は一切発生しません
+- インターネット接続がなくても動作します
+- 会話履歴（表示用）は引き続き端末内JSONに保存（`ChatRepository`）
+- 予定・タスク・メモの実データはRoom Database（`cat_events`テーブル）に保存
+
+### できること
+
+| 入力例 | 動作 |
+|---|---|
+| `来週の水曜、出張ね` | 予定として記憶し「覚えたにゃ」と返す |
+| `明日、通院` | 同上 |
+| `来週の出張いつ？` | 記憶した予定から検索し「出張は来週の水曜日だにゃ」のように回答 |
+| `明日の予定は？` | 該当日の予定を回答（なければ「明日の予定はまだ入ってないにゃ」） |
+| `次の通院いつ？` | キーワード検索して直近の該当予定を回答 |
+| 日付を含まない自由文 | メモとして記憶し「覚えたにゃ」と返す |
+
+日時の解析は `brain/DateTimeParser.kt` にある簡易ルールベースの
+正規表現マッチングです（今日/明日/明後日、来週・今週の曜日、
+「N日後」「N週間後」「M月D日」「N時」など）。自然文を完全に理解する
+AIではありません。
+
+### 通知（リマインダー）
+
+`notify/ReminderWorker.kt` が **WorkManager** で15分おきに実行され、
+以下のタイミングで端末通知を出します。
+
+- 予定の前日: 「明日〇〇だよー」
+- 予定の1時間前: 「あと1時間で〇〇だよ」
+
+正確な時刻起動が必要な `AlarmManager` の完全代替ではなく、15分間隔の
+バックグラウンドチェックのため、通知タイミングには最大15分程度の
+ずれが生じます（バッテリー消費と実装のシンプルさを優先したトレードオフです）。
+
+Android 13以降では通知の許可（`POST_NOTIFICATIONS`）をアプリ起動時に
+リクエストします。拒否された場合、記憶・検索機能は使えますが通知は
+届きません。
 
 ## 現在の状態
 
 | 画面 | 状態 |
 |---|---|
-| 猫AI（AIチャット） | ✅ 完全動作（Firebase認証 + Cloudflare Worker連携） |
+| 猫AI（記憶・回答・通知） | ✅ 完全動作 |
 | ホーム / ポイ / カレンダー / メモ | 🚧 ナビゲーションのみ（準備中プレースホルダー） |
 
-まず「猫AI」チャットを最優先で完全動作させました。他の4画面は元のAPKに
-機能が存在すること自体は解析済みですが、データモデルやUIの再構築は
-今後段階的に行います。
+## ビルド（GitHub Actions）
 
-## 認証方式
-
-**Firebase Anonymous Authentication**（匿名認証）を採用しています。
-ログイン画面はなく、アプリ起動時に自動的にサインインします。
-取得したFirebase IDトークンを使って、Cloudflare Worker
-（`poicat-openai-proxy`）にリクエストします。
-
-## AIチャットの仕組み
-
-1. アプリ起動時に匿名サインイン（`AuthRepository`）
-2. メッセージ送信時、Firebase IDトークンを取得
-3. `CatAiClient` が以下へPOST:
-   `https://poicat-openai-proxy.mspgllc-info.workers.dev/v1/chat/completions`
-   ヘッダー: `Authorization: Bearer <Firebase ID token>`
-4. レスポンス（OpenAI Chat Completions形式）から返信を取り出し表示
-5. 会話履歴はアプリ内ローカル（`filesDir`）にJSONで保存（元のAPKと同じ方式）
-
-3つの部屋（仕事 / プライベート / 雑談）を切り替えて会話できます
-（元のAPKの `ChatRoom` をそのまま踏襲）。
-
-## ビルドに必要な設定（GitHub Actions）
-
-このプロジェクトは **GitHub Actions でクラウドビルド** します。
-PC不要で、リポジトリへのpushをきっかけに自動的にAPKがビルドされ、
+Firebase/Cloudflareへの依存がなくなったため、**GitHubシークレットの設定は不要**です。
+`android/**` にpushすると自動的にGitHub Actionsが debug APK をビルドし、
 Actionsの実行結果ページからダウンロードできます。
-
-ビルドには `google-services.json`（Firebaseの設定ファイル）が必要ですが、
-秘密情報を含むためリポジトリにはコミットしません。代わりに、GitHubの
-リポジトリシークレット `GOOGLE_SERVICES_JSON` にファイルの中身をそのまま
-貼り付けて設定してください（`.github/workflows/android-build.yml` が
-ビルド時にこの中身を `android/app/google-services.json` として書き出します）。
 
 ## ローカルでの開発（Android Studioがある場合）
 
 ```bash
 cd android
-# Firebaseコンソールからダウンロードした google-services.json を
-# android/app/google-services.json に配置してから:
 ./gradlew assembleDebug
 ```

@@ -37,8 +37,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.mspg.poicat.brain.CatBrain
+import com.mspg.poicat.data.CatEventRepository
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun AiChatScreen() {
@@ -78,6 +82,7 @@ private fun ChatRoomView(room: ChatRoom, modifier: Modifier = Modifier) {
     var input by remember { mutableStateOf("") }
     var isSending by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
+    val catBrain = remember { CatBrain(CatEventRepository(context.applicationContext)) }
 
     val messages = ChatRepository.messages(room)
     val listState = rememberLazyListState()
@@ -107,14 +112,14 @@ private fun ChatRoomView(room: ChatRoom, modifier: Modifier = Modifier) {
         input = ""
         isSending = true
         scope.launch {
-            val result = runCatching { CatAiClient.sendMessage(ChatRepository.messages(room)) }
+            val result = runCatching { withContext(Dispatchers.IO) { catBrain.respond(trimmed) } }
             isSending = false
             result.onSuccess { reply ->
                 ChatRepository.addMessage(room, ChatMessage("assistant", reply, System.currentTimeMillis()))
                 errorText = null
             }
             result.onFailure {
-                errorText = it.message ?: "猫AIに接続できなかったニャ"
+                errorText = "うまく答えられなかったにゃ"
             }
         }
     }
@@ -171,7 +176,7 @@ private fun ChatRoomView(room: ChatRoom, modifier: Modifier = Modifier) {
                 onValueChange = { input = it },
                 modifier = Modifier.weight(1f),
                 enabled = !isSending,
-                placeholder = { Text("メッセージを入力…") },
+                placeholder = { Text("予定やメモを話しかけてにゃ") },
             )
 
             Button(onClick = { send() }, enabled = !isSending && input.isNotBlank()) {
