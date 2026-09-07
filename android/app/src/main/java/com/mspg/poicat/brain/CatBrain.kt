@@ -24,6 +24,12 @@ class CatBrain(private val repository: CatEventRepository) {
             return if (isTaskQuestion(trimmed)) answerTaskQuery(trimmed, now) else answerQuery(trimmed, now)
         }
 
+        val memoContent = extractMemoCommand(trimmed)
+        if (memoContent != null) {
+            repository.remember(memoContent, null)
+            return "メモしたにゃ"
+        }
+
         val registration = DateTimeParser.parseRegistration(trimmed, now)
         if (registration != null) {
             repository.remember(registration.title, registration.dateTime.toEpochMilli())
@@ -31,6 +37,24 @@ class CatBrain(private val repository: CatEventRepository) {
             repository.remember(trimmed, null)
         }
         return "覚えたにゃ"
+    }
+
+    private val memoVerbs = listOf(
+        "メモしておいてください", "メモしておいて", "メモしといて", "メモしてください", "メモして",
+        "覚えておいてください", "覚えておいて", "覚えといて", "覚えてください", "覚えて",
+    )
+
+    /** Recognizes an explicit "○○をメモして"/"○○覚えておいて" style command and returns just ○○, or null. */
+    private fun extractMemoCommand(text: String): String? {
+        for (verb in memoVerbs) {
+            for (suffix in listOf("って$verb", "を$verb", verb)) {
+                if (text.endsWith(suffix)) {
+                    val content = text.removeSuffix(suffix).trim()
+                    if (content.isNotBlank()) return content
+                }
+            }
+        }
+        return null
     }
 
     private suspend fun answerQuery(text: String, now: LocalDateTime): String {
@@ -45,7 +69,14 @@ class CatBrain(private val repository: CatEventRepository) {
             }
             val memo = repository.memosMatching(keyword).firstOrNull()
             if (memo != null) {
-                return "${memo.title}って覚えてるにゃ"
+                // "駐車場の番号なんだっけ？" against a memo titled "駐車場の番号1234" should
+                // answer just "1234だにゃ" rather than echoing the whole memo back.
+                val remainder = memo.title.removePrefix(keyword).trim()
+                return if (memo.title.startsWith(keyword) && remainder.isNotBlank()) {
+                    "${remainder}だにゃ"
+                } else {
+                    "${memo.title}って覚えてるにゃ"
+                }
             }
             return "${keyword}の予定はまだ入ってないにゃ"
         }

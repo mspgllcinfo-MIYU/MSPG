@@ -87,9 +87,15 @@ object DateTimeParser {
 
     // "再来週の" must be stripped before "来週の" — it contains "来週の" as a
     // substring, so checking the shorter phrase first would leave a stray "再".
+    // Same reasoning applies to the memo-question phrases below: "について覚えてる"
+    // must come before the bare "覚えてる" it contains, or the trailing "について"
+    // would be left stuck to the keyword.
     private val queryScaffolding = listOf(
         "再来週の", "来週の", "今週の", "次の", "次は", "次",
         "の予定は", "の予定", "予定は", "予定",
+        "について覚えてる", "について覚えてます", "について",
+        "前にメモした", "前に言った", "前に覚えた",
+        "なんだっけ", "だっけ", "覚えてますか", "覚えてる",
         "ですか", "です", "いつ", "は",
         "？", "?", "、", "。", " ", "　",
         "「", "」", "『", "』",
