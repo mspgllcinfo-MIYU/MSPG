@@ -90,73 +90,68 @@ fun CalendarScreen() {
         eventsInMonth.mapNotNull { it.dateTime?.toLocalDate() }.toSet()
     }
 
-    Column(
+    // A plain Column here would overflow off the bottom of the screen on months
+    // with 6 calendar rows, hiding the "＋ 追加" button and event list entirely
+    // with no way to scroll to them. Making the whole screen one LazyColumn
+    // means it always scrolls to fit, whatever the month grid's height.
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(20.dp),
     ) {
-        Text("カレンダー", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-
-        Spacer(Modifier.height(16.dp))
-
-        MonthHeader(
-            yearMonth = yearMonth,
-            onPrev = { yearMonth = yearMonth.minusMonths(1) },
-            onNext = { yearMonth = yearMonth.plusMonths(1) },
-        )
-
-        Spacer(Modifier.height(8.dp))
-
-        MonthGrid(
-            yearMonth = yearMonth,
-            selectedDate = selectedDate,
-            datesWithEvents = datesWithEvents,
-            onSelectDate = { selectedDate = it },
-        )
-
-        Spacer(Modifier.height(16.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "${selectedDate.monthValue}月${selectedDate.dayOfMonth}日の予定",
-                fontWeight = FontWeight.Bold,
-                fontSize = 16.sp,
-                modifier = Modifier.weight(1f),
+        item {
+            Text("カレンダー", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(16.dp))
+            MonthHeader(
+                yearMonth = yearMonth,
+                onPrev = { yearMonth = yearMonth.minusMonths(1) },
+                onNext = { yearMonth = yearMonth.plusMonths(1) },
             )
-            Button(onClick = { editingEvent = null; showDialog = true }) {
-                Text("＋ 追加")
-            }
-        }
-
-        Spacer(Modifier.height(8.dp))
-
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (eventsOnSelectedDay.isEmpty()) {
-                item {
-                    Text(
-                        text = "予定はまだ入ってないにゃ",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+            Spacer(Modifier.height(8.dp))
+            MonthGrid(
+                yearMonth = yearMonth,
+                selectedDate = selectedDate,
+                datesWithEvents = datesWithEvents,
+                onSelectDate = { selectedDate = it },
+            )
+            Spacer(Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "${selectedDate.monthValue}月${selectedDate.dayOfMonth}日の予定",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    modifier = Modifier.weight(1f),
+                )
+                Button(onClick = { editingEvent = null; showDialog = true }) {
+                    Text("＋ 追加")
                 }
             }
-            items(eventsOnSelectedDay, key = { it.id }) { event ->
-                EventRow(
-                    event = event,
-                    onClick = { editingEvent = event; showDialog = true },
-                    onDelete = {
-                        scope.launch {
-                            repository.delete(event)
-                            refreshTick++
-                        }
-                    },
+            Spacer(Modifier.height(8.dp))
+        }
+
+        if (eventsOnSelectedDay.isEmpty()) {
+            item {
+                Text(
+                    text = "予定はまだ入ってないにゃ",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+        }
+        items(eventsOnSelectedDay, key = { it.id }) { event ->
+            EventRow(
+                event = event,
+                onClick = { editingEvent = event; showDialog = true },
+                onDelete = {
+                    scope.launch {
+                        repository.delete(event)
+                        refreshTick++
+                    }
+                },
+            )
+            Spacer(Modifier.height(8.dp))
         }
     }
 
