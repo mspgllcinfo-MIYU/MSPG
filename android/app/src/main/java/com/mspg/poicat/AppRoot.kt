@@ -52,7 +52,7 @@ fun AppRoot() {
     Column(modifier = Modifier.fillMaxSize()) {
         Box(modifier = Modifier.weight(1f)) {
             when (selectedTab) {
-                AppTab.HOME -> HomeScreen()
+                AppTab.HOME -> HomeScreen(onNavigate = { selectedTab = it })
                 AppTab.POI -> PoiScreen()
                 AppTab.CAL -> CalendarScreen()
                 AppTab.MEMO -> MemoScreen()
