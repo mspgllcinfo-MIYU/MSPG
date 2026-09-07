@@ -32,7 +32,13 @@ object DateTimeParser {
     fun isQuery(text: String): Boolean =
         text.contains("？") || text.contains("?") || text.contains("いつ")
 
-    fun parseRegistration(text: String, now: LocalDateTime = LocalDateTime.now()): ParsedRegistration? {
+    /**
+     * Finds the first recognized date phrase in [text] and returns the resolved
+     * date plus whatever's left after removing it, or null if nothing matched.
+     * Shared by [parseRegistration] (date required) and [parseDueDate] (date
+     * optional — a task without a due date is still a valid task).
+     */
+    private fun extractDate(text: String, now: LocalDateTime): Pair<LocalDate, String>? {
         var remaining = text
         var date: LocalDate? = null
 
@@ -72,7 +78,12 @@ object DateTimeParser {
             nearestWeekday(now.toLocalDate(), weekdayChar.getValue(m.groupValues[1][0]))
         }
 
-        val resolvedDate = date ?: return null
+        return date?.let { it to remaining }
+    }
+
+    fun parseRegistration(text: String, now: LocalDateTime = LocalDateTime.now()): ParsedRegistration? {
+        val (resolvedDate, afterDate) = extractDate(text, now) ?: return null
+        var remaining = afterDate
 
         var hour = 9
         var minute = 0
@@ -83,6 +94,17 @@ object DateTimeParser {
         }
 
         return ParsedRegistration(LocalDateTime.of(resolvedDate, LocalTime.of(hour, minute)), cleanTitle(remaining))
+    }
+
+    /**
+     * Like [parseRegistration] but the date is optional, for task due dates —
+     * unlike a schedule event, a task without any date is still meaningful.
+     * Returns the found date (or null) alongside whatever text is left after
+     * removing it (unchanged if no date was found).
+     */
+    fun parseDueDate(text: String, now: LocalDateTime = LocalDateTime.now()): Pair<LocalDate?, String> {
+        val extraction = extractDate(text, now) ?: return null to text
+        return extraction.first to extraction.second
     }
 
     // "再来週の" must be stripped before "来週の" — it contains "来週の" as a
@@ -162,10 +184,12 @@ object DateTimeParser {
         return d
     }
 
-    private fun cleanTitle(raw: String): String {
+    /** Strips leading/trailing particles and filler left over after removing a matched
+     * date/verb phrase (e.g. "、薬を買う" → "薬を買う"). Reused for task titles too. */
+    fun cleanTitle(raw: String, fallback: String = "予定"): String {
         var t = raw.trim()
         t = t.replace(Regex("^[のにはがを、,，]+"), "").trim()
         t = t.replace(Regex("(ね|よ|だよ|です|だ|。|、|！|!|\\.|,)+$"), "").trim()
-        return t.ifBlank { "予定" }
+        return t.ifBlank { fallback }
     }
 }

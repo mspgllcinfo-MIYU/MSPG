@@ -47,6 +47,10 @@ class CatEventRepository(context: Context) {
 
     suspend fun incompleteTasksDue(start: Long, end: Long) = dao.incompleteTasksDue(start, end)
 
+    suspend fun incompleteTasksDueBy(end: Long) = dao.incompleteTasksDueBy(end)
+
+    suspend fun incompleteTasksMatching(keyword: String) = dao.incompleteTasksMatching(keyword)
+
     suspend fun setTaskCompleted(task: CatEvent, completed: Boolean) {
         dao.update(task.copy(completed = completed))
     }

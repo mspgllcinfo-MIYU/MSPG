@@ -71,6 +71,20 @@ interface CatEventDao {
     )
     suspend fun incompleteTasksDue(start: Long, end: Long): List<CatEvent>
 
+    /** Not-yet-done, dated tasks due at or before a point in time — used to answer "明日までのタスクは？". */
+    @Query(
+        "SELECT * FROM cat_events WHERE isTask = 1 AND completed = 0 " +
+            "AND dateTime IS NOT NULL AND dateTime <= :end ORDER BY dateTime ASC",
+    )
+    suspend fun incompleteTasksDueBy(end: Long): List<CatEvent>
+
+    /** Not-yet-done tasks whose title contains the given keyword — used to mark one done by name. */
+    @Query(
+        "SELECT * FROM cat_events WHERE isTask = 1 AND completed = 0 " +
+            "AND title LIKE '%' || :keyword || '%' ORDER BY (dateTime IS NULL) ASC, dateTime ASC, createdAt DESC",
+    )
+    suspend fun incompleteTasksMatching(keyword: String): List<CatEvent>
+
     /** Dated, unfired schedule events whose reminder window has arrived — used by the periodic worker. */
     @Query(
         "SELECT * FROM cat_events WHERE isTask = 0 AND dateTime IS NOT NULL AND reminded1Day = 0 " +

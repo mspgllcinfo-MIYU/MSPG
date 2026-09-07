@@ -24,6 +24,27 @@ class CatBrain(private val repository: CatEventRepository) {
             return if (isTaskQuestion(trimmed)) answerTaskQuery(trimmed, now) else answerQuery(trimmed, now)
         }
 
+        // Checked before schedule registration: "今日ゴミ出しやる" contains "今日", a
+        // valid schedule date, but the "やる" ending means it's a to-do, not an event.
+        val completionKeyword = extractTaskCompletionKeyword(trimmed)
+        if (completionKeyword != null) {
+            val task = repository.incompleteTasksMatching(completionKeyword).firstOrNull()
+            return if (task != null) {
+                repository.setTaskCompleted(task, true)
+                "${task.title}終わったにゃ"
+            } else {
+                "そのタスクは見つからなかったにゃ"
+            }
+        }
+
+        val taskContent = extractTaskCommand(trimmed)
+        if (taskContent != null) {
+            val (dueDate, titleRaw) = DateTimeParser.parseDueDate(taskContent, now)
+            val title = DateTimeParser.cleanTitle(titleRaw, fallback = "タスク")
+            repository.addTask(title, dueDate?.toEpochMilli())
+            return "ポイに入れたにゃ"
+        }
+
         val memoContent = extractMemoCommand(trimmed)
         if (memoContent != null) {
             repository.remember(memoContent, null)
@@ -37,6 +58,55 @@ class CatBrain(private val repository: CatEventRepository) {
             repository.remember(trimmed, null)
         }
         return "覚えたにゃ"
+    }
+
+    private val taskTriggerSuffixes = listOf(
+        "の忘れないで", "を忘れないで", "忘れないで",
+        "の忘れずに", "を忘れずに", "忘れずに",
+        "を忘れるな", "忘れるな",
+        "やる",
+    )
+
+    /**
+     * Recognizes a task/reminder declaration ("牛乳買うの忘れないで", "今日ゴミ出しやる",
+     * "9月10日までに書類を出す") and returns the content to register, or null. Checked
+     * before schedule registration so a date word inside a task sentence (like "今日"
+     * above) doesn't get it mistaken for a calendar event.
+     */
+    private fun extractTaskCommand(text: String): String? {
+        for (suffix in taskTriggerSuffixes) {
+            if (text.endsWith(suffix) && text.length > suffix.length) {
+                val content = text.removeSuffix(suffix).replace("までに", "").trim()
+                if (content.isNotBlank()) return content
+            }
+        }
+        if (text.contains("までに")) {
+            val content = text.replace("までに", "").trim()
+            if (content.isNotBlank()) return content
+        }
+        return null
+    }
+
+    private val taskCompletionSuffixes = listOf(
+        "のタスク終わった", "のタスクが終わった", "タスクは終わった", "タスク終わった",
+        "は完了したよ", "は完了", "完了したよ", "完了",
+        "終わったよ", "終わった",
+        "できたよ", "できた",
+        "買ったよ", "買った",
+        "やったよ", "やった",
+        "済んだよ", "済んだ",
+    )
+
+    /** Recognizes "牛乳買ったよ"/"薬終わった" style completion and returns the search
+     * keyword ("牛乳"/"薬") to look up the matching task by, or null. */
+    private fun extractTaskCompletionKeyword(text: String): String? {
+        for (suffix in taskCompletionSuffixes) {
+            if (text.endsWith(suffix) && text.length > suffix.length) {
+                val keyword = text.removeSuffix(suffix).trim()
+                if (keyword.isNotBlank()) return keyword
+            }
+        }
+        return null
     }
 
     private val memoVerbs = listOf(
@@ -103,22 +173,37 @@ class CatBrain(private val repository: CatEventRepository) {
     }
 
     private fun isTaskQuestion(text: String): Boolean =
-        text.contains("やること") || text.contains("タスク") || text.contains("やるべきこと")
+        text.contains("やること") || text.contains("タスク") || text.contains("やるべきこと") ||
+            text.contains("ポイ") || text.contains("終わってない") || text.contains("残ってる")
 
     private suspend fun answerTaskQuery(text: String, now: LocalDateTime): String {
         val today = now.toLocalDate()
-        val scopedToToday = text.contains("今日")
+        val scopeDate = when {
+            text.contains("今日") -> today
+            text.contains("明日") -> today.plusDays(1)
+            else -> null
+        }
+        // "明日までのタスク" (due by tomorrow) is a range, unlike "今日やること" (due today).
+        val isUntilScope = scopeDate != null && text.contains("まで")
 
-        val tasks = if (scopedToToday) {
-            repository.incompleteTasksDue(today.toEpochMilli(), today.plusDays(1).toEpochMilli() - 1)
-        } else {
-            repository.incompleteTasks()
+        val tasks = when {
+            isUntilScope -> repository.incompleteTasksDueBy(scopeDate!!.plusDays(1).toEpochMilli() - 1)
+            scopeDate != null -> repository.incompleteTasksDue(scopeDate.toEpochMilli(), scopeDate.plusDays(1).toEpochMilli() - 1)
+            else -> repository.incompleteTasks()
         }
 
         if (tasks.isEmpty()) {
-            return if (scopedToToday) "今日やることはないにゃ" else "残ってるタスクはないにゃ"
+            return when {
+                scopeDate == today && !isUntilScope -> "今日やることはないにゃ"
+                scopeDate != null -> "${DateTimeParser.formatWhen(scopeDate, today)}までのタスクはないにゃ"
+                else -> "残ってるタスクはないにゃ"
+            }
         }
         val titles = tasks.joinToString("、") { it.title }
-        return if (scopedToToday) "今日は${titles}だにゃ" else "残ってるのは${titles}だにゃ"
+        return when {
+            scopeDate == today && !isUntilScope -> "今日は${titles}だにゃ"
+            scopeDate != null -> "${DateTimeParser.formatWhen(scopeDate, today)}までは${titles}だにゃ"
+            else -> "残ってるのは${titles}だにゃ"
+        }
     }
 }
