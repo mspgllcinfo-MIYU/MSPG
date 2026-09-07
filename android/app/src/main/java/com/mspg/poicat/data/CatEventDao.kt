@@ -17,45 +17,69 @@ interface CatEventDao {
     @Delete
     suspend fun delete(event: CatEvent)
 
-    /** An already-remembered event with the exact same title and time, if any — used to avoid duplicates. */
-    @Query("SELECT * FROM cat_events WHERE dateTime = :dateTime AND title = :title LIMIT 1")
+    /** An already-remembered schedule/memo with the exact same title and time, if any — used to avoid duplicates. */
+    @Query("SELECT * FROM cat_events WHERE isTask = 0 AND dateTime = :dateTime AND title = :title LIMIT 1")
     suspend fun findDuplicate(title: String, dateTime: Long): CatEvent?
 
-    /** All dated events, soonest first. */
-    @Query("SELECT * FROM cat_events WHERE dateTime IS NOT NULL AND dateTime >= :from ORDER BY dateTime ASC")
+    /** All dated schedule events (tasks excluded), soonest first. */
+    @Query("SELECT * FROM cat_events WHERE isTask = 0 AND dateTime IS NOT NULL AND dateTime >= :from ORDER BY dateTime ASC")
     suspend fun upcoming(from: Long): List<CatEvent>
 
-    /** Dated events whose title contains the given keyword, soonest first. */
+    /** Dated schedule events whose title contains the given keyword, soonest first. */
     @Query(
-        "SELECT * FROM cat_events WHERE dateTime IS NOT NULL AND dateTime >= :from " +
+        "SELECT * FROM cat_events WHERE isTask = 0 AND dateTime IS NOT NULL AND dateTime >= :from " +
             "AND title LIKE '%' || :keyword || '%' ORDER BY dateTime ASC",
     )
     suspend fun upcomingMatching(keyword: String, from: Long): List<CatEvent>
 
-    @Query("SELECT * FROM cat_events WHERE dateTime BETWEEN :startOfDay AND :endOfDay ORDER BY dateTime ASC")
+    @Query("SELECT * FROM cat_events WHERE isTask = 0 AND dateTime BETWEEN :startOfDay AND :endOfDay ORDER BY dateTime ASC")
     suspend fun onDay(startOfDay: Long, endOfDay: Long): List<CatEvent>
 
-    /** Dated events in a date range (e.g. a whole month), soonest first — used to mark days on the calendar. */
-    @Query("SELECT * FROM cat_events WHERE dateTime BETWEEN :start AND :end ORDER BY dateTime ASC")
+    /** Dated schedule events in a date range (e.g. a whole month), soonest first — used to mark days on the calendar. */
+    @Query("SELECT * FROM cat_events WHERE isTask = 0 AND dateTime BETWEEN :start AND :end ORDER BY dateTime ASC")
     suspend fun between(start: Long, end: Long): List<CatEvent>
 
-    /** Date-less memos, newest first. */
-    @Query("SELECT * FROM cat_events WHERE dateTime IS NULL ORDER BY createdAt DESC")
+    /** Date-less memos (tasks excluded), newest first. */
+    @Query("SELECT * FROM cat_events WHERE isTask = 0 AND dateTime IS NULL ORDER BY createdAt DESC")
     suspend fun memos(): List<CatEvent>
 
     /** Date-less memos whose content contains the given keyword, newest first. */
-    @Query("SELECT * FROM cat_events WHERE dateTime IS NULL AND title LIKE '%' || :keyword || '%' ORDER BY createdAt DESC")
+    @Query(
+        "SELECT * FROM cat_events WHERE isTask = 0 AND dateTime IS NULL " +
+            "AND title LIKE '%' || :keyword || '%' ORDER BY createdAt DESC",
+    )
     suspend fun memosMatching(keyword: String): List<CatEvent>
 
-    /** Dated, unfired events whose reminder window has arrived — used by the periodic worker. */
+    /** All tasks: incomplete first, soonest due date first, undated ones after dated ones. */
     @Query(
-        "SELECT * FROM cat_events WHERE dateTime IS NOT NULL AND reminded1Day = 0 " +
+        "SELECT * FROM cat_events WHERE isTask = 1 " +
+            "ORDER BY completed ASC, (dateTime IS NULL) ASC, dateTime ASC, createdAt DESC",
+    )
+    suspend fun tasks(): List<CatEvent>
+
+    /** Not-yet-done tasks, soonest due date first. */
+    @Query(
+        "SELECT * FROM cat_events WHERE isTask = 1 AND completed = 0 " +
+            "ORDER BY (dateTime IS NULL) ASC, dateTime ASC, createdAt DESC",
+    )
+    suspend fun incompleteTasks(): List<CatEvent>
+
+    /** Not-yet-done tasks due within a date range (e.g. today) — used to answer "今日やることは？". */
+    @Query(
+        "SELECT * FROM cat_events WHERE isTask = 1 AND completed = 0 " +
+            "AND dateTime BETWEEN :start AND :end ORDER BY dateTime ASC",
+    )
+    suspend fun incompleteTasksDue(start: Long, end: Long): List<CatEvent>
+
+    /** Dated, unfired schedule events whose reminder window has arrived — used by the periodic worker. */
+    @Query(
+        "SELECT * FROM cat_events WHERE isTask = 0 AND dateTime IS NOT NULL AND reminded1Day = 0 " +
             "AND dateTime BETWEEN :windowStart AND :windowEnd",
     )
     suspend fun dueFor1DayReminder(windowStart: Long, windowEnd: Long): List<CatEvent>
 
     @Query(
-        "SELECT * FROM cat_events WHERE dateTime IS NOT NULL AND reminded1Hour = 0 " +
+        "SELECT * FROM cat_events WHERE isTask = 0 AND dateTime IS NOT NULL AND reminded1Hour = 0 " +
             "AND dateTime BETWEEN :windowStart AND :windowEnd",
     )
     suspend fun dueFor1HourReminder(windowStart: Long, windowEnd: Long): List<CatEvent>

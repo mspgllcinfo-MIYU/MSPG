@@ -18,7 +18,7 @@ class CatBrain(private val repository: CatEventRepository) {
         val now = LocalDateTime.now()
 
         if (DateTimeParser.isQuery(trimmed)) {
-            return answerQuery(trimmed, now)
+            return if (isTaskQuestion(trimmed)) answerTaskQuery(trimmed, now) else answerQuery(trimmed, now)
         }
 
         val registration = DateTimeParser.parseRegistration(trimmed, now)
@@ -66,5 +66,25 @@ class CatBrain(private val repository: CatEventRepository) {
         } else {
             "予定はまだ入ってないにゃ"
         }
+    }
+
+    private fun isTaskQuestion(text: String): Boolean =
+        text.contains("やること") || text.contains("タスク") || text.contains("やるべきこと")
+
+    private suspend fun answerTaskQuery(text: String, now: LocalDateTime): String {
+        val today = now.toLocalDate()
+        val scopedToToday = text.contains("今日")
+
+        val tasks = if (scopedToToday) {
+            repository.incompleteTasksDue(today.toEpochMilli(), today.plusDays(1).toEpochMilli() - 1)
+        } else {
+            repository.incompleteTasks()
+        }
+
+        if (tasks.isEmpty()) {
+            return if (scopedToToday) "今日やることはないにゃ" else "残ってるタスクはないにゃ"
+        }
+        val titles = tasks.joinToString("、") { it.title }
+        return if (scopedToToday) "今日は${titles}だにゃ" else "残ってるのは${titles}だにゃ"
     }
 }

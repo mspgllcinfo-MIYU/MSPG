@@ -35,6 +35,22 @@ class CatEventRepository(context: Context) {
 
     suspend fun memosMatching(keyword: String) = dao.memosMatching(keyword)
 
+    suspend fun addTask(title: String, dueDateTime: Long?): CatEvent {
+        val event = CatEvent(title = title, dateTime = dueDateTime, isTask = true)
+        val id = dao.insert(event)
+        return event.copy(id = id)
+    }
+
+    suspend fun tasks() = dao.tasks()
+
+    suspend fun incompleteTasks() = dao.incompleteTasks()
+
+    suspend fun incompleteTasksDue(start: Long, end: Long) = dao.incompleteTasksDue(start, end)
+
+    suspend fun setTaskCompleted(task: CatEvent, completed: Boolean) {
+        dao.update(task.copy(completed = completed))
+    }
+
     suspend fun dueFor1DayReminder(windowStart: Long, windowEnd: Long) =
         dao.dueFor1DayReminder(windowStart, windowEnd)
 

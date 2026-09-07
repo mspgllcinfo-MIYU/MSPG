@@ -5,7 +5,7 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [CatEvent::class], version = 1, exportSchema = false)
+@Database(entities = [CatEvent::class], version = 2, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun catEventDao(): CatEventDao
 
@@ -19,7 +19,11 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "poicat.db",
-                ).build().also { instance = it }
+                )
+                    // Pre-release app with no exported schema history yet — an on-device
+                    // schema change simply starts fresh rather than needing a migration.
+                    .fallbackToDestructiveMigration()
+                    .build().also { instance = it }
             }
     }
 }

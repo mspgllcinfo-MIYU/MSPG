@@ -53,7 +53,7 @@ fun AppRoot() {
         Box(modifier = Modifier.weight(1f)) {
             when (selectedTab) {
                 AppTab.HOME -> PlaceholderScreen(AppTab.HOME.label)
-                AppTab.POI -> PlaceholderScreen(AppTab.POI.label)
+                AppTab.POI -> PoiScreen()
                 AppTab.CAL -> CalendarScreen()
                 AppTab.MEMO -> MemoScreen()
                 AppTab.AI -> AiChatScreen()
