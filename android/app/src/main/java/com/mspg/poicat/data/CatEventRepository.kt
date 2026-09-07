@@ -45,7 +45,7 @@ class CatEventRepository(context: Context) {
 
     suspend fun incompleteTasks() = dao.incompleteTasks()
 
-    suspend fun incompleteTasksDue(start: Long, end: Long) = dao.incompleteTasksDue(start, end)
+    suspend fun incompleteTasksDueOrUndated(start: Long, end: Long) = dao.incompleteTasksDueOrUndated(start, end)
 
     suspend fun incompleteTasksDueBy(end: Long) = dao.incompleteTasksDueBy(end)
 

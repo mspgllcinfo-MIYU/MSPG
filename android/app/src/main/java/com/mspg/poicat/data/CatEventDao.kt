@@ -64,12 +64,18 @@ interface CatEventDao {
     )
     suspend fun incompleteTasks(): List<CatEvent>
 
-    /** Not-yet-done tasks due within a date range (e.g. today) — used to answer "今日やることは？". */
+    /**
+     * Not-yet-done tasks due within a date range, plus any with no due date at all — an
+     * undated task ("牛乳買うの忘れないで" with no date) is open-ended, so it counts as
+     * something to do today just as much as one due today specifically. Used to answer
+     * "今日やることは？".
+     */
     @Query(
         "SELECT * FROM cat_events WHERE isTask = 1 AND completed = 0 " +
-            "AND dateTime BETWEEN :start AND :end ORDER BY dateTime ASC",
+            "AND (dateTime IS NULL OR dateTime BETWEEN :start AND :end) " +
+            "ORDER BY (dateTime IS NULL) ASC, dateTime ASC, createdAt DESC",
     )
-    suspend fun incompleteTasksDue(start: Long, end: Long): List<CatEvent>
+    suspend fun incompleteTasksDueOrUndated(start: Long, end: Long): List<CatEvent>
 
     /** Not-yet-done, dated tasks due at or before a point in time — used to answer "明日までのタスクは？". */
     @Query(

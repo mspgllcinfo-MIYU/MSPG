@@ -188,7 +188,7 @@ class CatBrain(private val repository: CatEventRepository) {
 
         val tasks = when {
             isUntilScope -> repository.incompleteTasksDueBy(scopeDate!!.plusDays(1).toEpochMilli() - 1)
-            scopeDate != null -> repository.incompleteTasksDue(scopeDate.toEpochMilli(), scopeDate.plusDays(1).toEpochMilli() - 1)
+            scopeDate != null -> repository.incompleteTasksDueOrUndated(scopeDate.toEpochMilli(), scopeDate.plusDays(1).toEpochMilli() - 1)
             else -> repository.incompleteTasks()
         }
 
