@@ -46,10 +46,13 @@ import kotlinx.coroutines.launch
  */
 @Composable
 fun AnimatedCat(onTap: () -> Unit, modifier: Modifier = Modifier) {
-    val bodyColor = Color(0xFFF6DAB6)
-    val bodyShadow = Color(0xFFE9C08C)
+    val bodyColor = Color(0xFF2B2A2E)
+    val bodyShadow = Color(0xFF201F23)
     val accent = MaterialTheme.colorScheme.primary
-    val eyeColor = Color(0xFF4A3B32)
+    val eyeWhite = Color(0xFFF6F1E4)
+    val pupilColor = Color(0xFF17161A)
+    val mouthColor = Color(0xFF5B5760)
+    val whiskerColor = Color(0xFFDCD6C8)
 
     val infiniteTransition = rememberInfiniteTransition(label = "cat-idle")
     val sway = infiniteTransition.animateFloat(
@@ -125,128 +128,124 @@ fun AnimatedCat(onTap: () -> Unit, modifier: Modifier = Modifier) {
             scale(1f + tapPulse.value * 0.18f, pivot = Offset(size.width / 2f, size.height * 0.72f)) {
                 val centerX = size.width / 2f + sway.value.dp.toPx()
 
-                val bodyWidth = 108.dp.toPx() * (1f - 0.05f * standAmount.value)
-                val bodyHeight = 70.dp.toPx() * (1f + 0.12f * standAmount.value)
-                val bodyTop = size.height - bodyHeight - 30.dp.toPx()
-                val bodyCenter = Offset(centerX, bodyTop + bodyHeight / 2f)
+                // A big round head over a small round body with short stubby legs —
+                // toy-figure proportions read as much cuter than a wide body/small head.
+                val headRadius = 46.dp.toPx()
+                val bodyWidth = 82.dp.toPx() * (1f - 0.04f * standAmount.value)
+                val bodyHeight = 72.dp.toPx() * (1f + 0.08f * standAmount.value)
+                val legHeight = 14.dp.toPx() + 8.dp.toPx() * standAmount.value
+                val groundGap = 4.dp.toPx()
 
-                // Tail — drawn first so it sits behind the body, wagging around its base.
-                val tailBase = Offset(bodyCenter.x + bodyWidth * 0.36f, bodyCenter.y + bodyHeight * 0.05f)
+                val bodyBottom = size.height - groundGap - legHeight
+                val bodyTop = bodyBottom - bodyHeight
+                val bodyCenter = Offset(centerX, bodyTop + bodyHeight / 2f)
+                val headCenter = Offset(centerX, bodyTop - headRadius * 0.22f)
+
+                // Tail — small and curled in rather than sticking straight out, drawn
+                // first so it sits behind the body while it wags around its base.
+                val tailBase = Offset(bodyCenter.x + bodyWidth * 0.4f, bodyCenter.y + bodyHeight * 0.22f)
                 rotate(tailAngle.value, pivot = tailBase) {
                     val tail = Path().apply {
                         moveTo(tailBase.x, tailBase.y)
                         quadraticBezierTo(
-                            tailBase.x + 46.dp.toPx(), tailBase.y - 10.dp.toPx(),
-                            tailBase.x + 34.dp.toPx(), tailBase.y - 52.dp.toPx(),
+                            tailBase.x + 24.dp.toPx(), tailBase.y - 8.dp.toPx(),
+                            tailBase.x + 15.dp.toPx(), tailBase.y - 30.dp.toPx(),
                         )
                     }
-                    drawPath(tail, color = bodyColor, style = Stroke(width = 15.dp.toPx(), cap = StrokeCap.Round))
+                    drawPath(tail, color = bodyColor, style = Stroke(width = 11.dp.toPx(), cap = StrokeCap.Round))
                 }
 
-                // Paws
-                drawOval(
-                    color = bodyShadow,
-                    topLeft = Offset(bodyCenter.x - bodyWidth * 0.32f, bodyTop + bodyHeight - 10.dp.toPx()),
-                    size = Size(22.dp.toPx(), 16.dp.toPx()),
-                )
-                drawOval(
-                    color = bodyShadow,
-                    topLeft = Offset(bodyCenter.x + bodyWidth * 0.10f, bodyTop + bodyHeight - 10.dp.toPx()),
-                    size = Size(22.dp.toPx(), 16.dp.toPx()),
-                )
+                // Legs (drawn before the body so its rounded bottom overlaps their tops)
+                val legWidth = 22.dp.toPx()
+                val legGap = 8.dp.toPx()
+                listOf(-1f, 1f).forEach { side ->
+                    drawRoundRect(
+                        color = bodyShadow,
+                        topLeft = Offset(centerX + side * (legGap / 2f + if (side < 0) legWidth else 0f), bodyBottom - 6.dp.toPx()),
+                        size = Size(legWidth, legHeight + 6.dp.toPx()),
+                        cornerRadius = CornerRadius(legWidth / 2f, legWidth / 2f),
+                    )
+                }
 
                 // Body
-                drawRoundRect(
+                drawOval(
                     color = bodyColor,
                     topLeft = Offset(bodyCenter.x - bodyWidth / 2f, bodyTop),
                     size = Size(bodyWidth, bodyHeight),
-                    cornerRadius = CornerRadius(bodyHeight / 2f, bodyHeight / 2f),
                 )
 
-                val headRadius = 34.dp.toPx()
-                val headCenter = Offset(centerX, bodyTop - headRadius * 0.5f)
-
                 rotate(headTilt.value, pivot = headCenter) {
-                    // Ears
-                    val earSize = 20.dp.toPx()
+                    // Ears: plain rounded ovals, mostly hidden behind the head circle
+                    // drawn afterwards — leaves just soft round tips peeking out.
+                    val earWidth = headRadius * 0.62f
+                    val earHeight = headRadius * 0.95f
+                    val earOffsetX = headRadius * 0.5f
+                    val earCenterY = headCenter.y - headRadius * 0.8f
                     listOf(-1f, 1f).forEach { side ->
-                        val ear = Path().apply {
-                            moveTo(headCenter.x + side * headRadius * 0.55f, headCenter.y - headRadius * 0.75f)
-                            lineTo(headCenter.x + side * (headRadius * 0.55f + earSize * 0.6f), headCenter.y - headRadius * 0.75f - earSize)
-                            lineTo(headCenter.x + side * (headRadius * 0.55f + earSize * 1.15f), headCenter.y - headRadius * 0.55f)
-                            close()
+                        val earCenter = Offset(headCenter.x + side * earOffsetX, earCenterY)
+                        rotate(side * 14f, pivot = earCenter) {
+                            drawOval(
+                                color = bodyColor,
+                                topLeft = Offset(earCenter.x - earWidth / 2f, earCenter.y - earHeight / 2f),
+                                size = Size(earWidth, earHeight),
+                            )
+                            val innerSize = Size(earWidth * 0.5f, earHeight * 0.55f)
+                            drawOval(
+                                color = accent.copy(alpha = 0.65f),
+                                topLeft = Offset(earCenter.x - innerSize.width / 2f, earCenter.y - innerSize.height / 2f + earHeight * 0.12f),
+                                size = innerSize,
+                            )
                         }
-                        drawPath(ear, color = bodyColor)
-                        val innerEar = Path().apply {
-                            moveTo(headCenter.x + side * headRadius * 0.62f, headCenter.y - headRadius * 0.78f)
-                            lineTo(headCenter.x + side * (headRadius * 0.62f + earSize * 0.32f), headCenter.y - headRadius * 0.78f - earSize * 0.55f)
-                            lineTo(headCenter.x + side * (headRadius * 0.62f + earSize * 0.68f), headCenter.y - headRadius * 0.62f)
-                            close()
-                        }
-                        drawPath(innerEar, color = accent.copy(alpha = 0.55f))
                     }
 
                     // Head
-                    drawOval(color = bodyColor, topLeft = Offset(headCenter.x - headRadius, headCenter.y - headRadius), size = Size(headRadius * 2, headRadius * 2))
+                    drawCircle(color = bodyColor, radius = headRadius, center = headCenter)
 
-                    // Eyes (scaled for a blink)
-                    val eyeY = headCenter.y - headRadius * 0.05f
-                    val eyeDx = headRadius * 0.42f
-                    val eyeSize = Size(9.dp.toPx(), 12.dp.toPx())
+                    // Eyes: white sclera + dark pupil (needed for contrast against a
+                    // black head) with a small highlight — scaled for a blink.
+                    val eyeY = headCenter.y + headRadius * 0.04f
+                    val eyeDx = headRadius * 0.34f
+                    val eyeRadius = 10.dp.toPx()
                     listOf(-1f, 1f).forEach { side ->
                         val eyeCenter = Offset(headCenter.x + side * eyeDx, eyeY)
                         scale(1f, eyeScaleY.value, pivot = eyeCenter) {
-                            drawOval(
-                                color = eyeColor,
-                                topLeft = Offset(eyeCenter.x - eyeSize.width / 2f, eyeCenter.y - eyeSize.height / 2f),
-                                size = eyeSize,
+                            drawCircle(color = eyeWhite, radius = eyeRadius, center = eyeCenter)
+                            drawCircle(color = pupilColor, radius = eyeRadius * 0.58f, center = eyeCenter)
+                            drawCircle(
+                                color = Color.White,
+                                radius = eyeRadius * 0.2f,
+                                center = eyeCenter + Offset(-eyeRadius * 0.3f, -eyeRadius * 0.3f),
                             )
                         }
                     }
 
                     // Nose
-                    val noseY = headCenter.y + headRadius * 0.28f
-                    val nose = Path().apply {
-                        moveTo(headCenter.x - 4.dp.toPx(), noseY)
-                        lineTo(headCenter.x + 4.dp.toPx(), noseY)
-                        lineTo(headCenter.x, noseY + 5.dp.toPx())
-                        close()
-                    }
-                    drawPath(nose, color = accent)
+                    val noseY = headCenter.y + headRadius * 0.34f
+                    drawCircle(color = accent, radius = 3.dp.toPx(), center = Offset(headCenter.x, noseY))
 
-                    // Mouth
-                    val mouthWidth = 10.dp.toPx()
-                    val mouthTop = noseY + 5.dp.toPx()
+                    // Mouth: one small, gentle curve — understated rather than a wide grin.
+                    val mouthWidth = 12.dp.toPx()
                     drawArc(
-                        color = eyeColor,
-                        startAngle = 20f,
+                        color = mouthColor,
+                        startAngle = 30f,
                         sweepAngle = 120f,
                         useCenter = false,
-                        topLeft = Offset(headCenter.x - mouthWidth, mouthTop - 4.dp.toPx()),
-                        size = Size(mouthWidth, 10.dp.toPx()),
-                        style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round),
-                    )
-                    drawArc(
-                        color = eyeColor,
-                        startAngle = 40f,
-                        sweepAngle = -120f,
-                        useCenter = false,
-                        topLeft = Offset(headCenter.x, mouthTop - 4.dp.toPx()),
-                        size = Size(mouthWidth, 10.dp.toPx()),
-                        style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round),
+                        topLeft = Offset(headCenter.x - mouthWidth / 2f, noseY - 2.dp.toPx()),
+                        size = Size(mouthWidth, 8.dp.toPx()),
+                        style = Stroke(width = 1.8.dp.toPx(), cap = StrokeCap.Round),
                     )
 
-                    // Whiskers
-                    val whiskerY = headCenter.y + headRadius * 0.15f
+                    // Whiskers: short and subtle, light against the dark fur
+                    val whiskerY = headCenter.y + headRadius * 0.22f
                     listOf(-1f, 1f).forEach { side ->
-                        for (i in 0..2) {
-                            val startX = headCenter.x + side * headRadius * 0.7f
-                            val y = whiskerY + (i - 1) * 6.dp.toPx()
+                        for (i in 0..1) {
+                            val startX = headCenter.x + side * headRadius * 0.75f
+                            val y = whiskerY + (i - 0.5f) * 7.dp.toPx()
                             drawLine(
-                                color = eyeColor.copy(alpha = 0.5f),
+                                color = whiskerColor.copy(alpha = 0.7f),
                                 start = Offset(startX, y),
-                                end = Offset(startX + side * 18.dp.toPx(), y - side * 2.dp.toPx() * (i - 1)),
-                                strokeWidth = 1.4.dp.toPx(),
+                                end = Offset(startX + side * 12.dp.toPx(), y - side * 1.dp.toPx()),
+                                strokeWidth = 1.2.dp.toPx(),
                                 cap = StrokeCap.Round,
                             )
                         }
