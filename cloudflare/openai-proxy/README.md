@@ -90,3 +90,10 @@ OpenAI の API キーはアプリ側に一切含める必要はありません�
   Durable Objects（Workers Paid プラン）への移行を検討してください。
 - `stream: true` を渡した場合はレスポンスをそのまま Server-Sent Events として
   クライアントに中継します。
+
+## デプロイ方式
+
+このディレクトリは Cloudflare Workers Builds（Git 連携）でデプロイされます。
+Cloudflare ダッシュボード側の「プロダクション ブランチ」は、この Worker コードが
+存在するブランチ（`claude/cloudflare-api-token-fp36lb`、将来的に `main` にマージ後は
+`main`）に合わせて設定してください。
