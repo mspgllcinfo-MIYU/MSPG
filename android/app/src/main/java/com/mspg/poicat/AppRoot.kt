@@ -55,7 +55,7 @@ fun AppRoot() {
                 AppTab.HOME -> PlaceholderScreen(AppTab.HOME.label)
                 AppTab.POI -> PlaceholderScreen(AppTab.POI.label)
                 AppTab.CAL -> CalendarScreen()
-                AppTab.MEMO -> PlaceholderScreen(AppTab.MEMO.label)
+                AppTab.MEMO -> MemoScreen()
                 AppTab.AI -> AiChatScreen()
             }
         }

@@ -39,6 +39,14 @@ interface CatEventDao {
     @Query("SELECT * FROM cat_events WHERE dateTime BETWEEN :start AND :end ORDER BY dateTime ASC")
     suspend fun between(start: Long, end: Long): List<CatEvent>
 
+    /** Date-less memos, newest first. */
+    @Query("SELECT * FROM cat_events WHERE dateTime IS NULL ORDER BY createdAt DESC")
+    suspend fun memos(): List<CatEvent>
+
+    /** Date-less memos whose content contains the given keyword, newest first. */
+    @Query("SELECT * FROM cat_events WHERE dateTime IS NULL AND title LIKE '%' || :keyword || '%' ORDER BY createdAt DESC")
+    suspend fun memosMatching(keyword: String): List<CatEvent>
+
     /** Dated, unfired events whose reminder window has arrived — used by the periodic worker. */
     @Query(
         "SELECT * FROM cat_events WHERE dateTime IS NOT NULL AND reminded1Day = 0 " +

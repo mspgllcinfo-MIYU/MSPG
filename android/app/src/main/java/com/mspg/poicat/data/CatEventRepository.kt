@@ -31,6 +31,10 @@ class CatEventRepository(context: Context) {
 
     suspend fun between(start: Long, end: Long) = dao.between(start, end)
 
+    suspend fun memos() = dao.memos()
+
+    suspend fun memosMatching(keyword: String) = dao.memosMatching(keyword)
+
     suspend fun dueFor1DayReminder(windowStart: Long, windowEnd: Long) =
         dao.dueFor1DayReminder(windowStart, windowEnd)
 

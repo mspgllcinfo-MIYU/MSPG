@@ -37,11 +37,14 @@ class CatBrain(private val repository: CatEventRepository) {
         val keyword = query.keyword
         if (keyword != null) {
             val event = repository.upcomingMatching(keyword, now.toEpochMilli()).firstOrNull()
-            return if (event != null) {
-                "${keyword}は${DateTimeParser.formatWhen(event.dateTime!!.toLocalDate(), today)}だにゃ"
-            } else {
-                "${keyword}の予定はまだ入ってないにゃ"
+            if (event != null) {
+                return "${keyword}は${DateTimeParser.formatWhen(event.dateTime!!.toLocalDate(), today)}だにゃ"
             }
+            val memo = repository.memosMatching(keyword).firstOrNull()
+            if (memo != null) {
+                return "${memo.title}って覚えてるにゃ"
+            }
+            return "${keyword}の予定はまだ入ってないにゃ"
         }
 
         val dayFilter = query.dayFilter
