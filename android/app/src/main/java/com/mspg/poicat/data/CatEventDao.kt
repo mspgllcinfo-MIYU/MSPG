@@ -1,6 +1,7 @@
 package com.mspg.poicat.data
 
 import androidx.room.Dao
+import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Update
@@ -13,7 +14,14 @@ interface CatEventDao {
     @Update
     suspend fun update(event: CatEvent)
 
-    /** All future dated events, soonest first. */
+    @Delete
+    suspend fun delete(event: CatEvent)
+
+    /** An already-remembered event with the exact same title and time, if any — used to avoid duplicates. */
+    @Query("SELECT * FROM cat_events WHERE dateTime = :dateTime AND title = :title LIMIT 1")
+    suspend fun findDuplicate(title: String, dateTime: Long): CatEvent?
+
+    /** All dated events, soonest first. */
     @Query("SELECT * FROM cat_events WHERE dateTime IS NOT NULL AND dateTime >= :from ORDER BY dateTime ASC")
     suspend fun upcoming(from: Long): List<CatEvent>
 
@@ -26,6 +34,10 @@ interface CatEventDao {
 
     @Query("SELECT * FROM cat_events WHERE dateTime BETWEEN :startOfDay AND :endOfDay ORDER BY dateTime ASC")
     suspend fun onDay(startOfDay: Long, endOfDay: Long): List<CatEvent>
+
+    /** Dated events in a date range (e.g. a whole month), soonest first — used to mark days on the calendar. */
+    @Query("SELECT * FROM cat_events WHERE dateTime BETWEEN :start AND :end ORDER BY dateTime ASC")
+    suspend fun between(start: Long, end: Long): List<CatEvent>
 
     /** Dated, unfired events whose reminder window has arrived — used by the periodic worker. */
     @Query(
