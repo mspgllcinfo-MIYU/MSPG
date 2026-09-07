@@ -12,7 +12,10 @@ import java.time.LocalDateTime
 class CatBrain(private val repository: CatEventRepository) {
 
     suspend fun respond(input: String): String {
-        val trimmed = input.trim()
+        // Users often paste example phrases straight out of quoted instructions
+        // (e.g. "「明日、病院」"); strip the quote marks so they don't end up
+        // stuck in a saved title.
+        val trimmed = input.trim().replace(Regex("[「」『』]"), "").trim()
         if (trimmed.isEmpty()) return "なに？にゃ"
 
         val now = LocalDateTime.now()
