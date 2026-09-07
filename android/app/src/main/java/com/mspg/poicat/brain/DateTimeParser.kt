@@ -92,6 +92,7 @@ object DateTimeParser {
         "の予定は", "の予定", "予定は", "予定",
         "ですか", "です", "いつ", "は",
         "？", "?", "、", "。", " ", "　",
+        "「", "」", "『", "』",
     )
 
     fun parseQuery(text: String, now: LocalDateTime = LocalDateTime.now()): ParsedQuery {
