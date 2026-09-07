@@ -16,6 +16,21 @@ android {
         versionName = "0.2"
     }
 
+    signingConfigs {
+        // Checked-in debug keystore, shared by every CI build (and any local
+        // build) instead of each machine/runner generating its own. Without
+        // this, GitHub Actions creates a fresh ~/.android/debug.keystore on
+        // every run, so each new APK is signed differently and Android treats
+        // installing it as a different app — wiping all on-device data instead
+        // of updating in place.
+        getByName("debug") {
+            storeFile = rootProject.file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false

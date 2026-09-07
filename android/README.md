@@ -108,6 +108,12 @@ Firebase/Cloudflareへの依存がなくなったため、**GitHubシークレ�
 `android/**` にpushすると自動的にGitHub Actionsが debug APK をビルドし、
 Actionsの実行結果ページからダウンロードできます。
 
+`android/debug.keystore` はどのビルドでも同じ署名になるようリポジトリに
+コミットしています（デバッグ用の鍵で、パスワードも既定値の`android`固定
+のため機密情報ではありません）。これがないと、GitHub Actionsの実行のたびに
+異なる署名鍵でAPKがビルドされてしまい、新しいAPKをインストールするたびに
+Androidが「別のアプリ」とみなして端末内データを消してしまいます。
+
 ## ローカルでの開発（Android Studioがある場合）
 
 ```bash
