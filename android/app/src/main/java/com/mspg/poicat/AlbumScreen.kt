@@ -7,6 +7,7 @@ import android.graphics.BitmapFactory
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -30,7 +32,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -66,6 +70,20 @@ import java.time.LocalDate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+// Step4-4: Album-only design tokens, matching Home (Step1) / bottom nav
+// (Step2) / AI chat (Step3) / Poi/Calendar/Memo (Step4-1〜3) by value
+// ("大人かわいい×ちょっと高級×無愛想な黒猫"). Scoped to this file
+// deliberately — Theme.kt stays untouched until this look is promoted
+// (Step0). PhotoThumbnail/PhotoDetailDialog/AlbumPhotoPickerDialog are also
+// defined in this file and shared by AiChat/Poi/Calendar/Memo, so their
+// visual-only changes here are the last piece completing the palette
+// across every screen that shows a photo.
+private val AlbumInk = Color(0xFF201E1D) // 墨色
+private val AlbumCream = Color(0xFFF7F3EF) // 生成り — matches Theme.kt's page background
+private val AlbumCard = Color(0xFFEFE7DE) // a shade deeper than the page
+private val AlbumGold = Color(0xFFC9A66B) // restrained accent, never a fill color
+private val AlbumPink = Color(0xFFD98A9C) // the app's existing pink, kept rare
 
 /**
  * Album tab (opened from Home, not one of the 5 bottom tabs): add a photo
@@ -126,23 +144,35 @@ fun AlbumScreen(onBack: () -> Unit) {
 
     Column(modifier = Modifier.fillMaxSize().padding(20.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("← 戻る") }
+            TextButton(onClick = onBack) {
+                Text("← 戻る", color = AlbumInk)
+            }
             Spacer(Modifier.width(4.dp))
-            Text("アルバム", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Text("アルバム", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = AlbumInk)
         }
 
         Spacer(Modifier.height(12.dp))
 
+        // Step4-4: two equal utility actions, neither a single standout CTA —
+        // "写真を選ぶ" gets a soft pink pill, "撮影" a quieter card-toned one.
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = {
-                pickMedia.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-            }) { Text("写真を選ぶ") }
+            Button(
+                onClick = {
+                    pickMedia.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = AlbumPink.copy(alpha = 0.25f), contentColor = AlbumInk),
+                shape = RoundedCornerShape(percent = 50),
+            ) { Text("写真を選ぶ") }
 
-            Button(onClick = {
-                val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
-                    PackageManager.PERMISSION_GRANTED
-                if (granted) launchCamera() else cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-            }) { Text("撮影") }
+            Button(
+                onClick = {
+                    val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+                        PackageManager.PERMISSION_GRANTED
+                    if (granted) launchCamera() else cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = AlbumCard, contentColor = AlbumInk),
+                shape = RoundedCornerShape(percent = 50),
+            ) { Text("撮影") }
         }
 
         Spacer(Modifier.height(12.dp))
@@ -151,22 +181,50 @@ fun AlbumScreen(onBack: () -> Unit) {
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            FilterChip(selected = selectedAlbum == null, onClick = { selectedAlbum = null }, label = { Text("すべて") })
+            val chipColors = FilterChipDefaults.filterChipColors(
+                containerColor = Color.Transparent,
+                labelColor = AlbumInk.copy(alpha = 0.5f),
+                selectedContainerColor = AlbumPink.copy(alpha = 0.22f),
+                selectedLabelColor = AlbumInk,
+            )
+            val chipBorder = BorderStroke(0.dp, Color.Transparent)
+            FilterChip(
+                selected = selectedAlbum == null,
+                onClick = { selectedAlbum = null },
+                label = { Text("すべて") },
+                shape = RoundedCornerShape(percent = 50),
+                colors = chipColors,
+                border = chipBorder,
+            )
             albums.forEach { album ->
-                FilterChip(selected = selectedAlbum == album, onClick = { selectedAlbum = album }, label = { Text(album) })
+                FilterChip(
+                    selected = selectedAlbum == album,
+                    onClick = { selectedAlbum = album },
+                    label = { Text(album) },
+                    shape = RoundedCornerShape(percent = 50),
+                    colors = chipColors,
+                    border = chipBorder,
+                )
             }
         }
 
         Spacer(Modifier.height(12.dp))
 
         if (photos.isEmpty()) {
-            Text("写真はまだないにゃ", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("写真はまだないにゃ", color = AlbumInk.copy(alpha = 0.5f))
         } else {
+            // Step4-4: capped at 640dp and centered so the grid doesn't stretch
+            // edge-to-edge on a Fold's unfolded, much wider screen; a normal
+            // phone stays fillMaxWidth as before.
             LazyVerticalGrid(
                 columns = GridCells.Fixed(3),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .widthIn(max = 640.dp)
+                    .align(Alignment.CenterHorizontally),
             ) {
                 items(photos, key = { it.id }) { photo ->
                     PhotoThumbnail(photo = photo, onClick = { detailPhoto = photo })
@@ -206,7 +264,7 @@ fun PhotoThumbnail(photo: Photo, onClick: () -> Unit, modifier: Modifier = Modif
         modifier = modifier
             .aspectRatio(1f)
             .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .background(AlbumCard)
             .clickable(onClick = onClick),
     ) {
         bitmap?.let {
@@ -252,7 +310,7 @@ fun PhotoDetailDialog(
         Column(
             modifier = Modifier
                 .clip(RoundedCornerShape(16.dp))
-                .background(MaterialTheme.colorScheme.surface)
+                .background(AlbumCard)
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
         ) {
@@ -261,7 +319,7 @@ fun PhotoDetailDialog(
                     .fillMaxWidth()
                     .height(260.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                    .background(AlbumCream),
                 contentAlignment = Alignment.Center,
             ) {
                 bitmap?.let {
@@ -271,14 +329,14 @@ fun PhotoDetailDialog(
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Fit,
                     )
-                } ?: Text("読み込み中…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } ?: Text("読み込み中…", color = AlbumInk.copy(alpha = 0.5f))
             }
 
             Spacer(Modifier.height(10.dp))
             Text(
                 text = "登録日: ${addedDate.monthValue}月${addedDate.dayOfMonth}日",
                 fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = AlbumGold,
             )
             Spacer(Modifier.height(8.dp))
 
@@ -326,7 +384,10 @@ fun PhotoDetailDialog(
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = onDismiss) { Text("閉じる") }
                 Spacer(Modifier.width(4.dp))
-                Button(onClick = { onSave(caption.trim().ifBlank { null }, album.trim().ifBlank { null }, linkedDate) }) {
+                Button(
+                    onClick = { onSave(caption.trim().ifBlank { null }, album.trim().ifBlank { null }, linkedDate) },
+                    colors = ButtonDefaults.buttonColors(containerColor = AlbumPink, contentColor = Color.White),
+                ) {
                     Text("保存")
                 }
             }
@@ -358,13 +419,13 @@ fun AlbumPhotoPickerDialog(onDismiss: () -> Unit, onPick: (Photo) -> Unit) {
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(16.dp))
-                .background(MaterialTheme.colorScheme.surface)
+                .background(AlbumCard)
                 .padding(16.dp),
         ) {
-            Text("写真を選ぶ", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            Text("写真を選ぶ", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = AlbumInk)
             Spacer(Modifier.height(12.dp))
             if (photos.isEmpty()) {
-                Text("アルバムに写真がまだないにゃ", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("アルバムに写真がまだないにゃ", color = AlbumInk.copy(alpha = 0.5f))
             } else {
                 Column(
                     modifier = Modifier
