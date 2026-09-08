@@ -13,17 +13,20 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextButtonDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -34,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -45,6 +49,16 @@ import com.mspg.poicat.data.CatEventRepository
 import com.mspg.poicat.data.Photo
 import com.mspg.poicat.data.PhotoRepository
 import kotlinx.coroutines.launch
+
+// Step4-3: Memo-only design tokens, matching Home (Step1) / bottom nav
+// (Step2) / AI chat (Step3) / Poi (Step4-1) / Calendar (Step4-2) by value
+// ("大人かわいい×ちょっと高級×無愛想な黒猫"). Scoped to this file
+// deliberately — Theme.kt stays untouched until this look is promoted (Step0).
+private val MemoInk = Color(0xFF201E1D) // 墨色
+private val MemoCream = Color(0xFFF7F3EF) // 生成り — matches Theme.kt's page background
+private val MemoCard = Color(0xFFEFE7DE) // a shade deeper than the page, for memo rows
+private val MemoGold = Color(0xFFC9A66B) // restrained accent, never a fill color
+private val MemoPink = Color(0xFFD98A9C) // the app's existing pink, kept rare
 
 /**
  * Memo tab: lists the date-less items in the shared `cat_events` table (a
@@ -92,23 +106,35 @@ fun MemoScreen() {
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("メモ", fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            Button(onClick = { editingMemo = null; editText = ""; showDialog = true }) {
+            Text("メモ", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = MemoInk, modifier = Modifier.weight(1f))
+            // Step4-3: same pink-pill family as Poi/Calendar's "＋ 追加".
+            Button(
+                onClick = { editingMemo = null; editText = ""; showDialog = true },
+                colors = ButtonDefaults.buttonColors(containerColor = MemoPink.copy(alpha = 0.25f), contentColor = MemoInk),
+                shape = RoundedCornerShape(percent = 50),
+            ) {
                 Text("＋ 追加")
             }
         }
 
         Spacer(Modifier.height(16.dp))
 
+        // Step4-3: capped at 640dp and centered so the list doesn't stretch
+        // edge-to-edge on a Fold's unfolded, much wider screen; a normal
+        // phone stays fillMaxWidth as before.
         LazyColumn(
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .widthIn(max = 640.dp)
+                .align(Alignment.CenterHorizontally),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (memos.isEmpty()) {
                 item {
                     Text(
                         text = "メモはまだ入ってないにゃ",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MemoInk.copy(alpha = 0.5f),
                     )
                 }
             }
@@ -219,19 +245,21 @@ private fun MemoRow(memo: CatEvent, onClick: () -> Unit, onDelete: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clip(RoundedCornerShape(16.dp))
+            .background(MemoCard)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(memo.title)
+            // Step4-3: normal weight, not bold — a memo is quieter than a
+            // Poi task or Calendar event, and stays that way here.
+            Text(memo.title, color = MemoInk)
             val created = memo.createdAt.toLocalDateTime()
             Text(
                 text = "${created.monthValue}月${created.dayOfMonth}日に記録",
                 fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MemoGold,
             )
         }
         IconButton(onClick = onDelete) {
@@ -255,6 +283,9 @@ private fun MemoEditDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
+        containerColor = MemoCard,
+        titleContentColor = MemoInk,
+        textContentColor = MemoInk,
         title = { Text(if (isEditing) "メモを編集" else "メモを追加") },
         text = {
             Column {
@@ -271,8 +302,11 @@ private fun MemoEditDialog(
                 if (isEditing) {
                     Spacer(Modifier.height(12.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("写真", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                        TextButton(onClick = onPickPhoto) { Text("＋ 写真を選ぶ") }
+                        Text("写真", fontWeight = FontWeight.Bold, color = MemoInk, modifier = Modifier.weight(1f))
+                        TextButton(
+                            onClick = onPickPhoto,
+                            colors = TextButtonDefaults.textButtonColors(contentColor = MemoPink),
+                        ) { Text("＋ 写真を選ぶ") }
                     }
                     if (linkedPhotos.isNotEmpty()) {
                         Row(
@@ -299,6 +333,7 @@ private fun MemoEditDialog(
             Button(
                 onClick = { if (text.isNotBlank()) onSave() },
                 enabled = text.isNotBlank(),
+                colors = ButtonDefaults.buttonColors(containerColor = MemoPink, contentColor = Color.White),
             ) { Text("保存") }
         },
         dismissButton = {
