@@ -17,7 +17,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * MIGRATION_1_2's pattern, same as PhotoDatabase.MIGRATION_1_2) instead of
  * falling back to a destructive recreate, which would silently wipe them.
  */
-@Database(entities = [CatEvent::class], version = 2, exportSchema = false)
+@Database(entities = [CatEvent::class], version = 2, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun catEventDao(): CatEventDao
 

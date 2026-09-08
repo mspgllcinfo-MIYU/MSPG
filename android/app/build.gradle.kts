@@ -55,6 +55,14 @@ android {
     }
 }
 
+ksp {
+    // Room writes each @Database's schema history here as JSON (one file per
+    // version) whenever exportSchema = true — a compile-time-only record for
+    // tracking/testing migrations. Never read by the app at runtime, so this
+    // has no effect on on-device data.
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.06.00"))
     implementation("androidx.compose.ui:ui")

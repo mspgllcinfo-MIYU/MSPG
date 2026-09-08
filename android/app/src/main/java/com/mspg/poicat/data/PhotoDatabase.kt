@@ -13,7 +13,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * means adding or changing the photo schema can never require a migration
  * of — or risk any damage to — the data already stored in `cat_events`.
  */
-@Database(entities = [Photo::class, PhotoMemoLink::class], version = 3, exportSchema = false)
+@Database(entities = [Photo::class, PhotoMemoLink::class], version = 3, exportSchema = true)
 abstract class PhotoDatabase : RoomDatabase() {
     abstract fun photoDao(): PhotoDao
     abstract fun photoMemoLinkDao(): PhotoMemoLinkDao
