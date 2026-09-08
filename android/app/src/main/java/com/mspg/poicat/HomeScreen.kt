@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -93,51 +94,62 @@ fun HomeScreen(onNavigate: (AppTab) -> Unit, onOpenAlbum: () -> Unit) {
 
         Spacer(Modifier.height(28.dp))
 
-        HomeSection(title = "今日の予定", onClick = { onNavigate(AppTab.CAL) }) {
-            if (todayEvents.isEmpty()) {
-                Text("今日の予定はまだ入ってないにゃ", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } else {
-                todayEvents.forEach { event ->
-                    val time = event.dateTime!!.toLocalDateTime()
-                    Text("%02d:%02d  %s".format(time.hour, time.minute, event.title))
+        // Caps the info-card group at 640dp and centers it so it doesn't stretch
+        // edge-to-edge on a Fold's unfolded, much wider screen; a normal phone
+        // stays fillMaxWidth as before. CatHero above and the "MIYU × AI"
+        // signature below are outside this Column and keep spanning full width.
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 640.dp)
+                .align(Alignment.CenterHorizontally),
+        ) {
+            HomeSection(title = "今日の予定", onClick = { onNavigate(AppTab.CAL) }) {
+                if (todayEvents.isEmpty()) {
+                    Text("今日の予定はまだ入ってないにゃ", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    todayEvents.forEach { event ->
+                        val time = event.dateTime!!.toLocalDateTime()
+                        Text("%02d:%02d  %s".format(time.hour, time.minute, event.title))
+                    }
                 }
             }
-        }
 
-        Spacer(Modifier.height(12.dp))
-
-        HomeSection(title = "次の予定", onClick = { onNavigate(AppTab.CAL) }) {
-            val next = nextEvent
-            if (next == null) {
-                Text("予定はまだ入ってないにゃ", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } else {
-                Text("${DateTimeParser.formatWhen(next.dateTime!!.toLocalDate(), LocalDate.now())}  ${next.title}")
-            }
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        HomeSection(title = "未完了のポイ", onClick = { onNavigate(AppTab.POI) }) {
-            if (openTasks.isEmpty()) {
-                Text("タスクはまだ入ってないにゃ", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } else {
-                openTasks.forEach { task ->
-                    Text("・${task.title}")
-                }
-            }
-        }
-
-        recentMemo?.let { memo ->
             Spacer(Modifier.height(12.dp))
-            HomeSection(title = "最近のメモ", onClick = { onNavigate(AppTab.MEMO) }) {
-                Text(memo.title)
+
+            HomeSection(title = "次の予定", onClick = { onNavigate(AppTab.CAL) }) {
+                val next = nextEvent
+                if (next == null) {
+                    Text("予定はまだ入ってないにゃ", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    Text("${DateTimeParser.formatWhen(next.dateTime!!.toLocalDate(), LocalDate.now())}  ${next.title}")
+                }
             }
-        }
 
-        Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(12.dp))
 
-        HomeSection(title = "アルバム", onClick = onOpenAlbum) {
-            Text("写真を見る・追加する", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            HomeSection(title = "未完了のポイ", onClick = { onNavigate(AppTab.POI) }) {
+                if (openTasks.isEmpty()) {
+                    Text("タスクはまだ入ってないにゃ", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    openTasks.forEach { task ->
+                        Text("・${task.title}")
+                    }
+                }
+            }
+
+            recentMemo?.let { memo ->
+                Spacer(Modifier.height(12.dp))
+                HomeSection(title = "最近のメモ", onClick = { onNavigate(AppTab.MEMO) }) {
+                    Text(memo.title)
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            HomeSection(title = "アルバム", onClick = onOpenAlbum) {
+                Text("写真を見る・追加する", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
 
         Spacer(Modifier.height(20.dp))
