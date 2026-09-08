@@ -3,6 +3,7 @@ package com.mspg.poicat
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -23,6 +25,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -57,6 +60,16 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.YearMonth
 import kotlinx.coroutines.launch
+
+// Step4-2: Calendar-only design tokens, matching Home (Step1) / bottom nav
+// (Step2) / AI chat (Step3) / Poi (Step4-1) by value ("大人かわいい×ちょっと
+// 高級×無愛想な黒猫"). Scoped to this file deliberately — Theme.kt stays
+// untouched until this look is promoted (Step0).
+private val CalendarInk = Color(0xFF201E1D) // 墨色
+private val CalendarCream = Color(0xFFF7F3EF) // 生成り — matches Theme.kt's page background
+private val CalendarCard = Color(0xFFEFE7DE) // a shade deeper than the page, for event rows
+private val CalendarGold = Color(0xFFC9A66B) // restrained accent, never a fill color
+private val CalendarPink = Color(0xFFD98A9C) // the app's existing pink, kept rare
 
 /**
  * Calendar tab: a plain on-device month view over the same `cat_events` table
@@ -102,85 +115,101 @@ fun CalendarScreen() {
     // with 6 calendar rows, hiding the "＋ 追加" button and event list entirely
     // with no way to scroll to them. Making the whole screen one LazyColumn
     // means it always scrolls to fit, whatever the month grid's height.
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(20.dp),
-    ) {
-        item {
-            Text("カレンダー", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(16.dp))
-            MonthHeader(
-                yearMonth = yearMonth,
-                onPrev = { yearMonth = yearMonth.minusMonths(1) },
-                onNext = { yearMonth = yearMonth.plusMonths(1) },
-            )
-            Spacer(Modifier.height(8.dp))
-            MonthGrid(
-                yearMonth = yearMonth,
-                selectedDate = selectedDate,
-                datesWithEvents = datesWithEvents,
-                onSelectDate = { selectedDate = it },
-            )
-            Spacer(Modifier.height(16.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "${selectedDate.monthValue}月${selectedDate.dayOfMonth}日の予定",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
-                    modifier = Modifier.weight(1f),
+    //
+    // Step4-2: wrapped in a Box so the whole calendar (grid, event list, photos)
+    // can be capped at 640dp and centered on a Fold's unfolded, much wider
+    // screen; a normal phone stays fillMaxWidth as before. The item/items
+    // structure and all state below are unchanged, just re-nested one level.
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 640.dp)
+                .padding(20.dp),
+        ) {
+            item {
+                Text("カレンダー", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = CalendarInk)
+                Spacer(Modifier.height(16.dp))
+                MonthHeader(
+                    yearMonth = yearMonth,
+                    onPrev = { yearMonth = yearMonth.minusMonths(1) },
+                    onNext = { yearMonth = yearMonth.plusMonths(1) },
                 )
-                Button(onClick = { editingEvent = null; showDialog = true }) {
-                    Text("＋ 追加")
+                Spacer(Modifier.height(8.dp))
+                MonthGrid(
+                    yearMonth = yearMonth,
+                    selectedDate = selectedDate,
+                    datesWithEvents = datesWithEvents,
+                    onSelectDate = { selectedDate = it },
+                )
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "${selectedDate.monthValue}月${selectedDate.dayOfMonth}日の予定",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        color = CalendarInk,
+                        modifier = Modifier.weight(1f),
+                    )
+                    // Step4-2: same soft pink pill as PoiScreen's "＋ 追加" — quieter
+                    // than a solid fill, function/onClick unchanged.
+                    Button(
+                        onClick = { editingEvent = null; showDialog = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = CalendarPink.copy(alpha = 0.25f), contentColor = CalendarInk),
+                        shape = RoundedCornerShape(percent = 50),
+                    ) {
+                        Text("＋ 追加")
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+
+            if (eventsOnSelectedDay.isEmpty()) {
+                item {
+                    Text(
+                        text = "予定はまだ入ってないにゃ",
+                        color = CalendarInk.copy(alpha = 0.5f),
+                    )
                 }
             }
-            Spacer(Modifier.height(8.dp))
-        }
-
-        if (eventsOnSelectedDay.isEmpty()) {
-            item {
-                Text(
-                    text = "予定はまだ入ってないにゃ",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+            items(eventsOnSelectedDay, key = { it.id }) { event ->
+                EventRow(
+                    event = event,
+                    onClick = { editingEvent = event; showDialog = true },
+                    onDelete = {
+                        scope.launch {
+                            repository.delete(event)
+                            refreshTick++
+                        }
+                    },
                 )
+                Spacer(Modifier.height(8.dp))
             }
-        }
-        items(eventsOnSelectedDay, key = { it.id }) { event ->
-            EventRow(
-                event = event,
-                onClick = { editingEvent = event; showDialog = true },
-                onDelete = {
-                    scope.launch {
-                        repository.delete(event)
-                        refreshTick++
-                    }
-                },
-            )
-            Spacer(Modifier.height(8.dp))
-        }
 
-        if (photosOnSelectedDay.isNotEmpty()) {
-            item {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = "📷 写真${photosOnSelectedDay.size}枚",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
-                )
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    photosOnSelectedDay.forEach { photo ->
-                        PhotoThumbnail(
-                            photo = photo,
-                            onClick = { detailPhoto = photo },
-                            modifier = Modifier.size(80.dp),
-                        )
+            if (photosOnSelectedDay.isNotEmpty()) {
+                item {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "📷 写真${photosOnSelectedDay.size}枚",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        color = CalendarInk,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        photosOnSelectedDay.forEach { photo ->
+                            PhotoThumbnail(
+                                photo = photo,
+                                onClick = { detailPhoto = photo },
+                                modifier = Modifier.size(80.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -252,9 +281,9 @@ private fun MonthHeader(yearMonth: YearMonth, onPrev: () -> Unit, onNext: () -> 
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        IconButton(onClick = onPrev) { Text("‹", fontSize = 22.sp) }
-        Text("${yearMonth.year}年${yearMonth.monthValue}月", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        IconButton(onClick = onNext) { Text("›", fontSize = 22.sp) }
+        IconButton(onClick = onPrev) { Text("‹", fontSize = 22.sp, color = CalendarInk.copy(alpha = 0.6f)) }
+        Text("${yearMonth.year}年${yearMonth.monthValue}月", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = CalendarInk)
+        IconButton(onClick = onNext) { Text("›", fontSize = 22.sp, color = CalendarInk.copy(alpha = 0.6f)) }
     }
 }
 
@@ -281,7 +310,7 @@ private fun MonthGrid(
                     modifier = Modifier.weight(1f),
                     textAlign = TextAlign.Center,
                     fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = CalendarInk.copy(alpha = 0.5f),
                 )
             }
         }
@@ -319,23 +348,28 @@ private fun DayCell(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Step4-2: fill (selected) and ring (today) are independent layers, so a
+    // day that is both keeps both markers instead of one overwriting the
+    // other — normal/today/selected/hasEvent all stay legible in combination.
+    val ringModifier = if (isToday) {
+        Modifier.border(1.dp, CalendarGold.copy(alpha = 0.6f), CircleShape)
+    } else {
+        Modifier
+    }
     Column(
         modifier = modifier
             .aspectRatio(1f)
             .padding(2.dp)
             .clip(CircleShape)
-            .background(if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent)
+            .background(if (isSelected) CalendarPink.copy(alpha = 0.3f) else Color.Transparent)
+            .then(ringModifier)
             .clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
         Text(
             text = date.dayOfMonth.toString(),
-            color = when {
-                isSelected -> MaterialTheme.colorScheme.onPrimary
-                isToday -> MaterialTheme.colorScheme.primary
-                else -> MaterialTheme.colorScheme.onSurface
-            },
+            color = CalendarInk,
             fontWeight = if (isToday || isSelected) FontWeight.Bold else FontWeight.Normal,
         )
         Box(
@@ -344,7 +378,7 @@ private fun DayCell(
                 .clip(CircleShape)
                 .background(
                     if (hasEvent) {
-                        if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary
+                        if (isSelected) CalendarInk.copy(alpha = 0.5f) else CalendarGold
                     } else {
                         Color.Transparent
                     },
@@ -358,20 +392,20 @@ private fun EventRow(event: CatEvent, onClick: () -> Unit, onDelete: () -> Unit)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clip(RoundedCornerShape(16.dp))
+            .background(CalendarCard)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(event.title, fontWeight = FontWeight.Bold)
+            Text(event.title, fontWeight = FontWeight.Bold, color = CalendarInk)
             event.dateTime?.let {
                 val time = it.toLocalDateTime()
                 Text(
                     text = "%02d:%02d".format(time.hour, time.minute),
                     fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = CalendarGold,
                 )
             }
         }
@@ -398,6 +432,9 @@ private fun EventEditDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        containerColor = CalendarCard,
+        titleContentColor = CalendarInk,
+        textContentColor = CalendarInk,
         title = { Text(if (isEditing) "予定を編集" else "予定を追加") },
         text = {
             Column {
@@ -443,6 +480,7 @@ private fun EventEditDialog(
             Button(
                 onClick = { if (title.isNotBlank()) onSave(title.trim(), date, time) },
                 enabled = title.isNotBlank(),
+                colors = ButtonDefaults.buttonColors(containerColor = CalendarPink, contentColor = Color.White),
             ) { Text("保存") }
         },
         dismissButton = {
