@@ -31,6 +31,7 @@ import androidx.core.content.ContextCompat
 @Composable
 fun AppRoot() {
     var selectedTab by remember { mutableStateOf(AppTab.AI) }
+    var showAlbum by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
@@ -51,15 +52,19 @@ fun AppRoot() {
 
     Column(modifier = Modifier.fillMaxSize()) {
         Box(modifier = Modifier.weight(1f)) {
-            when (selectedTab) {
-                AppTab.HOME -> HomeScreen(onNavigate = { selectedTab = it })
-                AppTab.POI -> PoiScreen()
-                AppTab.CAL -> CalendarScreen()
-                AppTab.MEMO -> MemoScreen()
-                AppTab.AI -> AiChatScreen()
+            if (showAlbum) {
+                AlbumScreen(onBack = { showAlbum = false })
+            } else {
+                when (selectedTab) {
+                    AppTab.HOME -> HomeScreen(onNavigate = { selectedTab = it }, onOpenAlbum = { showAlbum = true })
+                    AppTab.POI -> PoiScreen()
+                    AppTab.CAL -> CalendarScreen()
+                    AppTab.MEMO -> MemoScreen()
+                    AppTab.AI -> AiChatScreen()
+                }
             }
         }
-        BottomTabBar(selectedTab = selectedTab, onSelect = { selectedTab = it })
+        BottomTabBar(selectedTab = selectedTab, onSelect = { showAlbum = false; selectedTab = it })
     }
 }
 

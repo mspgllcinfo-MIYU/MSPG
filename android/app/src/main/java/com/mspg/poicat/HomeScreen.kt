@@ -44,7 +44,7 @@ import java.time.LocalDateTime
  * or a section jumps to the matching tab.
  */
 @Composable
-fun HomeScreen(onNavigate: (AppTab) -> Unit) {
+fun HomeScreen(onNavigate: (AppTab) -> Unit, onOpenAlbum: () -> Unit) {
     val context = LocalContext.current
     val repository = remember { CatEventRepository(context.applicationContext) }
 
@@ -125,6 +125,12 @@ fun HomeScreen(onNavigate: (AppTab) -> Unit) {
             HomeSection(title = "最近のメモ", onClick = { onNavigate(AppTab.MEMO) }) {
                 Text(memo.title)
             }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        HomeSection(title = "アルバム", onClick = onOpenAlbum) {
+            Text("写真を見る・追加する", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
