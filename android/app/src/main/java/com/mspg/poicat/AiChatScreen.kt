@@ -6,7 +6,9 @@ import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,7 +25,9 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -37,6 +41,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -52,6 +58,16 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+// Step3: AI chat-only design tokens, matching Home (Step1) / bottom nav (Step2)
+// by value ("大人かわいい×ちょっと高級×無愛想な黒猫"). Scoped to this file
+// deliberately — Theme.kt stays untouched until this look is promoted (Step0).
+private val AiInk = Color(0xFF201E1D) // 墨色
+private val AiCream = Color(0xFFF7F3EF) // 生成り — matches Theme.kt's page background
+private val AiCard = Color(0xFFEFE7DE) // a shade deeper than the page, for the input tray
+private val AiBubble = Color(0xFFEFE6D8) // warm cream — the cat's chat bubble
+private val AiGold = Color(0xFFC9A66B) // restrained accent, never a fill color
+private val AiPink = Color(0xFFD98A9C) // the app's existing pink, kept rare
+
 @Composable
 fun AiChatScreen() {
     var selectedRoom by remember { mutableStateOf(ChatRoom.CASUAL) }
@@ -61,7 +77,13 @@ fun AiChatScreen() {
             .fillMaxSize()
             .padding(20.dp),
     ) {
-        Text("猫AI", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Text("猫AI", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = AiInk)
+        Text(
+            text = "何でも投げてにゃ",
+            fontSize = 13.sp,
+            color = AiInk.copy(alpha = 0.5f),
+            modifier = Modifier.padding(top = 2.dp),
+        )
 
         Row(
             modifier = Modifier
@@ -70,10 +92,19 @@ fun AiChatScreen() {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             ChatRoom.entries.forEach { room ->
+                val selected = room == selectedRoom
                 FilterChip(
-                    selected = room == selectedRoom,
+                    selected = selected,
                     onClick = { selectedRoom = room },
                     label = { Text(room.label) },
+                    shape = RoundedCornerShape(percent = 50),
+                    colors = FilterChipDefaults.filterChipColors(
+                        containerColor = Color.Transparent,
+                        labelColor = AiInk.copy(alpha = 0.5f),
+                        selectedContainerColor = AiPink.copy(alpha = 0.22f),
+                        selectedLabelColor = AiInk,
+                    ),
+                    border = BorderStroke(0.dp, Color.Transparent),
                 )
             }
         }
@@ -202,68 +233,98 @@ private fun ChatRoomView(room: ChatRoom, modifier: Modifier = Modifier) {
             )
         }
 
-        pendingPhoto?.let { photo ->
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(modifier = Modifier.size(56.dp)) {
-                    PhotoThumbnail(photo = photo, onClick = {}, modifier = Modifier.size(56.dp))
-                    IconButton(
-                        onClick = { pendingPhoto = null },
-                        modifier = Modifier.align(Alignment.TopEnd).size(20.dp),
-                    ) {
-                        Text("✕", fontSize = 10.sp, color = MaterialTheme.colorScheme.error)
-                    }
-                }
-                Text(
-                    text = "写真を添付中",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 8.dp),
-                )
-            }
-        }
-
-        Row(
+        // Step3: the whole input area reads as one tray the user throws things
+        // into ("猫への投げ込み口"), not a chat compose bar — same generous-cream
+        // + gold-hairline language as Home's card sections and the bottom nav.
+        // Capped at 640dp and centered so it doesn't stretch edge-to-edge on a
+        // Fold's unfolded, much wider screen; the message list above is unaffected.
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                .widthIn(max = 640.dp)
+                .align(Alignment.CenterHorizontally)
+                .padding(top = 8.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(AiCard)
+                .border(1.dp, AiGold.copy(alpha = 0.3f), RoundedCornerShape(24.dp))
+                .padding(12.dp),
         ) {
-            Button(onClick = {
-                photoPickerLauncher.launch(
-                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                )
-            }) {
-                Text("📷")
-            }
-
-            Button(onClick = {
-                val granted = ContextCompat.checkSelfPermission(
-                    context,
-                    android.Manifest.permission.RECORD_AUDIO,
-                ) == PackageManager.PERMISSION_GRANTED
-                if (!granted) {
-                    micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-                } else {
-                    speechLauncher.launch(buildSpeechIntent())
+            pendingPhoto?.let { photo ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(modifier = Modifier.size(56.dp)) {
+                        PhotoThumbnail(photo = photo, onClick = {}, modifier = Modifier.size(56.dp))
+                        IconButton(
+                            onClick = { pendingPhoto = null },
+                            modifier = Modifier.align(Alignment.TopEnd).size(20.dp),
+                        ) {
+                            Text("✕", fontSize = 10.sp, color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                    Text(
+                        text = "これも一緒に投げるにゃ",
+                        fontSize = 12.sp,
+                        color = AiInk.copy(alpha = 0.6f),
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
                 }
-            }) {
-                Text("🎤")
             }
 
-            OutlinedTextField(
-                value = input,
-                onValueChange = { input = it },
-                modifier = Modifier.weight(1f),
-                enabled = !isSending,
-                placeholder = { Text("予定やメモを話しかけてにゃ") },
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // 📷 / 🎤 stay quiet — cream on cream — so "投げる" reads as the
+                // one primary action in the tray.
+                Button(
+                    onClick = {
+                        photoPickerLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                        )
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = AiCream, contentColor = AiInk),
+                    shape = RoundedCornerShape(percent = 50),
+                ) {
+                    Text("📷")
+                }
 
-            Button(onClick = { send() }, enabled = !isSending && (input.isNotBlank() || pendingPhoto != null)) {
-                Text("送信")
+                Button(
+                    onClick = {
+                        val granted = ContextCompat.checkSelfPermission(
+                            context,
+                            android.Manifest.permission.RECORD_AUDIO,
+                        ) == PackageManager.PERMISSION_GRANTED
+                        if (!granted) {
+                            micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                        } else {
+                            speechLauncher.launch(buildSpeechIntent())
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = AiCream, contentColor = AiInk),
+                    shape = RoundedCornerShape(percent = 50),
+                ) {
+                    Text("🎤")
+                }
+
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    modifier = Modifier.weight(1f),
+                    enabled = !isSending,
+                    placeholder = { Text("ここに投げるにゃ") },
+                )
+
+                Button(
+                    onClick = { send() },
+                    enabled = !isSending && (input.isNotBlank() || pendingPhoto != null),
+                    colors = ButtonDefaults.buttonColors(containerColor = AiPink, contentColor = Color.White),
+                    shape = RoundedCornerShape(percent = 50),
+                ) {
+                    Text("投げる")
+                }
             }
         }
     }
@@ -308,14 +369,17 @@ private fun ChatBubble(message: ChatMessage, photoRepository: PhotoRepository, o
                     modifier = Modifier
                         .widthIn(max = 280.dp)
                         .background(
-                            color = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                            // Step3: a restrained pink for the user, warm cream for the
+                            // cat — both paired with dark ink text for legibility over
+                            // Material3's default primary/onPrimary (white-on-pink) pair.
+                            color = if (isUser) AiPink.copy(alpha = 0.35f) else AiBubble,
                             shape = RoundedCornerShape(16.dp),
                         )
                         .padding(horizontal = 14.dp, vertical = 10.dp),
                 ) {
                     Text(
                         text = message.text,
-                        color = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = AiInk,
                     )
                 }
             }
@@ -344,10 +408,10 @@ private fun TypingIndicator() {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
         Box(
             modifier = Modifier
-                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp))
+                .background(AiBubble, RoundedCornerShape(16.dp))
                 .padding(horizontal = 14.dp, vertical = 10.dp),
         ) {
-            Text("…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("…", color = AiInk.copy(alpha = 0.6f))
         }
     }
 }
