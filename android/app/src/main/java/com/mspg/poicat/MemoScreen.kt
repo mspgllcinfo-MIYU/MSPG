@@ -26,7 +26,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextButtonDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -305,7 +304,7 @@ private fun MemoEditDialog(
                         Text("写真", fontWeight = FontWeight.Bold, color = MemoInk, modifier = Modifier.weight(1f))
                         TextButton(
                             onClick = onPickPhoto,
-                            colors = TextButtonDefaults.textButtonColors(contentColor = MemoPink),
+                            colors = ButtonDefaults.textButtonColors(contentColor = MemoPink),
                         ) { Text("＋ 写真を選ぶ") }
                     }
                     if (linkedPhotos.isNotEmpty()) {
