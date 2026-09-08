@@ -47,6 +47,13 @@ class CatBrain(private val repository: CatEventRepository) {
 
         val memoContent = extractMemoCommand(trimmed)
         if (memoContent != null) {
+            // "明日病院だから覚えといて" uses a memo-style "覚えといて" trigger, but the
+            // content itself names a date — that makes it a schedule, not a memo.
+            val scheduleFromMemo = DateTimeParser.parseRegistration(memoContent, now)
+            if (scheduleFromMemo != null) {
+                repository.remember(scheduleFromMemo.title, scheduleFromMemo.dateTime.toEpochMilli())
+                return "覚えたにゃ"
+            }
             repository.remember(memoContent, null)
             return "メモしたにゃ"
         }
@@ -55,7 +62,7 @@ class CatBrain(private val repository: CatEventRepository) {
         if (registration != null) {
             repository.remember(registration.title, registration.dateTime.toEpochMilli())
         } else {
-            repository.remember(trimmed, null)
+            repository.remember(DateTimeParser.cleanTitle(trimmed, fallback = trimmed), null)
         }
         return "覚えたにゃ"
     }
@@ -64,25 +71,44 @@ class CatBrain(private val repository: CatEventRepository) {
         "の忘れないで", "を忘れないで", "忘れないで",
         "の忘れずに", "を忘れずに", "忘れずに",
         "を忘れるな", "忘れるな",
-        "やる",
+        "忘れないように",
+        "買わなきゃ", "買わないと",
+        "やる", "買う",
     )
+
+    // Bare dictionary-form verbs that, on their own with no other trigger, still read
+    // as "something to do" ("牛乳買う") rather than a note or a calendar event.
+    private val taskVerbEndings = listOf("買う")
 
     /**
      * Recognizes a task/reminder declaration ("牛乳買うの忘れないで", "今日ゴミ出しやる",
-     * "9月10日までに書類を出す") and returns the content to register, or null. Checked
-     * before schedule registration so a date word inside a task sentence (like "今日"
-     * above) doesn't get it mistaken for a calendar event.
+     * "9月10日までに書類を出す", "牛乳買う", "牛乳買わなきゃ", "牛乳忘れないように") and
+     * returns the content to register, or null. Checked before schedule registration so
+     * a date word inside a task sentence (like "今日" above) doesn't get it mistaken for
+     * a calendar event.
      */
     private fun extractTaskCommand(text: String): String? {
         for (suffix in taskTriggerSuffixes) {
             if (text.endsWith(suffix) && text.length > suffix.length) {
                 val content = text.removeSuffix(suffix).replace("までに", "").trim()
+                    .removeSuffix("を").removeSuffix("の").trim()
                 if (content.isNotBlank()) return content
             }
         }
         if (text.contains("までに")) {
             val content = text.replace("までに", "").trim()
             if (content.isNotBlank()) return content
+        }
+        // "牛乳買うの覚えといて" phrases a task using a memo-style "覚えといて" trigger —
+        // still a task, since the content right before it ends in a task verb ("買う").
+        for (verb in memoVerbs) {
+            for (memoSuffix in listOf("って$verb", "を$verb", verb)) {
+                if (text.endsWith(memoSuffix)) {
+                    val inner = text.removeSuffix(memoSuffix).trim().removeSuffix("の").removeSuffix("を").trim()
+                    val matchedVerb = taskVerbEndings.firstOrNull { inner.endsWith(it) } ?: continue
+                    return inner.removeSuffix(matchedVerb).trim().ifBlank { inner }
+                }
+            }
         }
         return null
     }
@@ -112,6 +138,9 @@ class CatBrain(private val repository: CatEventRepository) {
     private val memoVerbs = listOf(
         "メモしておいてください", "メモしておいて", "メモしといて", "メモしてください", "メモして",
         "覚えておいてください", "覚えておいて", "覚えといて", "覚えてください", "覚えて",
+        // Bare "メモ" last (lowest priority) so it only fires once none of the longer,
+        // more specific verb forms above have already matched — covers "1234ってメモ".
+        "メモ",
     )
 
     /** Recognizes an explicit "○○をメモして"/"○○覚えておいて" style command and returns just ○○, or null. */
@@ -141,7 +170,7 @@ class CatBrain(private val repository: CatEventRepository) {
             if (memo != null) {
                 // "駐車場の番号なんだっけ？" against a memo titled "駐車場の番号1234" should
                 // answer just "1234だにゃ" rather than echoing the whole memo back.
-                val remainder = memo.title.removePrefix(keyword).trim()
+                val remainder = memo.title.removePrefix(keyword).trim().removePrefix("の").removePrefix("は").trim()
                 return if (memo.title.startsWith(keyword) && remainder.isNotBlank()) {
                     "${remainder}だにゃ"
                 } else {

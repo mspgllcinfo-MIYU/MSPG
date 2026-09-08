@@ -29,8 +29,26 @@ object DateTimeParser {
         '日' to DayOfWeek.SUNDAY,
     )
 
-    fun isQuery(text: String): Boolean =
-        text.contains("？") || text.contains("?") || text.contains("いつ")
+    // Trailing "教えて"/"見せて" ("tell me"/"show me") and these substrings mark a
+    // question even without a "？"/"?"/"いつ" — covers phrasings like "やること教えて"
+    // or "まだ終わってないこと" that a real question mark would normally signal.
+    private val querySuffixHints = listOf("教えて", "見せて")
+    // Deliberately narrow: "タスク"/"ポイ"/"やること" are NOT included here even though
+    // isTaskQuestion() also checks them — those words also appear in completion phrases
+    // like "牛乳のタスク終わった" (taskCompletionSuffixes below), and this check runs
+    // before completion detection, so a broader list would misroute a completion report
+    // into a query answer instead. "終わってない"/"残ってる" don't have that overlap.
+    private val querySubstringHints = listOf(
+        "前に覚えた", "前にメモした", "前に言った",
+        "終わってない", "残ってる",
+    )
+
+    fun isQuery(text: String): Boolean {
+        if (text.contains("？") || text.contains("?") || text.contains("いつ")) return true
+        if (querySuffixHints.any { text.endsWith(it) }) return true
+        if (querySubstringHints.any { text.contains(it) }) return true
+        return false
+    }
 
     /**
      * Finds the first recognized date phrase in [text] and returns the resolved
@@ -118,9 +136,19 @@ object DateTimeParser {
         "について覚えてる", "について覚えてます", "について",
         "前にメモした", "前に言った", "前に覚えた",
         "なんだっけ", "だっけ", "覚えてますか", "覚えてる",
+        "何番", "のメモ見せて", "メモ見せて", "見せて", "のメモ", "メモ",
         "ですか", "です", "いつ", "は",
         "？", "?", "、", "。", " ", "　",
         "「", "」", "『", "』",
+    )
+
+    // After scaffolding is stripped, some rephrasings ("明日なんかある？", "次の予定
+    // なに？") leave only a content-free filler word behind rather than an empty
+    // string. Checked as an exact match (never a substring removal) so it can't
+    // eat part of a real keyword like "駐車場何番".
+    private val genericQueryFillers = setOf(
+        "なに", "何", "なんか", "なんかある", "ある",
+        "何かある", "何かする", "なにする", "何する",
     )
 
     fun parseQuery(text: String, now: LocalDateTime = LocalDateTime.now()): ParsedQuery {
@@ -146,7 +174,9 @@ object DateTimeParser {
             remaining = remaining.replace(token, "")
         }
 
-        return ParsedQuery(keyword = remaining.trim().ifBlank { null }, dayFilter = dayFilter)
+        val trimmed = remaining.trim()
+        val keyword = if (trimmed in genericQueryFillers) null else trimmed.ifBlank { null }
+        return ParsedQuery(keyword = keyword, dayFilter = dayFilter)
     }
 
     /** A short, natural way to refer to a date relative to today ("明日", "水曜日", "来週の金曜日", "3月5日"). */
@@ -188,8 +218,10 @@ object DateTimeParser {
      * date/verb phrase (e.g. "、薬を買う" → "薬を買う"). Reused for task titles too. */
     fun cleanTitle(raw: String, fallback: String = "予定"): String {
         var t = raw.trim()
-        t = t.replace(Regex("^[のにはがを、,，]+"), "").trim()
-        t = t.replace(Regex("(ね|よ|だよ|です|だ|。|、|！|!|\\.|,)+$"), "").trim()
+        // Also strips a leading "予定" as a word, not just particles — "の予定、病院"
+        // (from "明日の予定、病院") should reduce to "病院", not "予定、病院".
+        t = t.replace(Regex("^(の|に|は|が|を|、|,|，|予定)+"), "").trim()
+        t = t.replace(Regex("(だから|から|ね|よ|だよ|です|だ|。|、|！|!|\\.|,)+$"), "").trim()
         return t.ifBlank { fallback }
     }
 }
