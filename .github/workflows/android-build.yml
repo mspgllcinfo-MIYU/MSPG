@@ -12,6 +12,8 @@ on:
 jobs:
   build-debug-apk:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     defaults:
       run:
         working-directory: android
@@ -44,3 +46,15 @@ jobs:
           name: room-schemas
           path: android/app/schemas
           if-no-files-found: error
+
+      - name: Commit generated Room schema exports
+        run: |
+          if [ -n "$(git status --porcelain app/schemas)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add app/schemas
+            git commit -m "Add generated Room schema exports for this version [skip ci]"
+            git push
+          else
+            echo "No schema changes to commit."
+          fi
