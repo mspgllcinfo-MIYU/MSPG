@@ -47,8 +47,8 @@ import java.time.LocalDateTime
 // Scoped to this file deliberately — Theme.kt stays untouched until this look
 // is confirmed on-device and promoted to the shared theme (Step0).
 private val HomeInk = Color(0xFF201E1D) // 墨色 — the hero panel and dark text
-private val HomeCream = Color(0xFFF7F3EF) // matches the existing app background
 private val HomeCard = Color(0xFFEFE7DE) // a shade deeper than the page background, for card layering
+private val HomeBubble = Color(0xFFEFE6D8) // warm cream, not white — the speech bubble inside the dark hero
 private val HomeGold = Color(0xFFC9A66B) // a restrained accent, never a fill color
 private val HomePink = Color(0xFFD98A9C) // the app's existing pink — kept rare on purpose
 
@@ -78,9 +78,10 @@ fun HomeScreen(onNavigate: (AppTab) -> Unit, onOpenAlbum: () -> Unit) {
         recentMemo = repository.memos().firstOrNull()
     }
 
-    val speech = remember(todayEvents, nextEvent, openTasks, recentMemo) {
-        catSpeech(todayEvents, nextEvent, openTasks, recentMemo, LocalDateTime.now())
-    }
+    // The hero cat is not a schedule reader — today's/next events, tasks, and the
+    // latest memo are all still visible right below in the info cards, so the hero
+    // always shows the same blunt "waiting for you to throw something" line.
+    val speech = "何にゃ"
 
     Column(
         modifier = Modifier
@@ -90,7 +91,7 @@ fun HomeScreen(onNavigate: (AppTab) -> Unit, onOpenAlbum: () -> Unit) {
     ) {
         CatHero(speech = speech, onTapCat = { onNavigate(AppTab.AI) })
 
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(28.dp))
 
         HomeSection(title = "今日の予定", onClick = { onNavigate(AppTab.CAL) }) {
             if (todayEvents.isEmpty()) {
@@ -153,29 +154,6 @@ fun HomeScreen(onNavigate: (AppTab) -> Unit, onOpenAlbum: () -> Unit) {
     }
 }
 
-/** Picks one short にゃ-line to summarize what's most worth mentioning right now. */
-private fun catSpeech(
-    todayEvents: List<CatEvent>,
-    nextEvent: CatEvent?,
-    openTasks: List<CatEvent>,
-    recentMemo: CatEvent?,
-    now: LocalDateTime,
-): String {
-    val today = now.toLocalDate()
-    return when {
-        todayEvents.isNotEmpty() -> "今日は${todayEvents.first().title}だにゃ"
-        openTasks.isNotEmpty() -> "ポイが${openTasks.size}個残ってるにゃ"
-        nextEvent != null ->
-            "${DateTimeParser.formatWhen(nextEvent.dateTime!!.toLocalDate(), today)}は${nextEvent.title}だにゃ"
-        recentMemo != null -> "${recentMemo.title}のことメモしてるにゃ"
-        now.hour in 5..10 -> "おはようにゃ"
-        // Truly nothing to report: this is the cat's default "waiting for you to
-        // throw something at it" state, not a status report — kept short and blunt
-        // rather than a cheerful "予定はありません" line.
-        else -> "何にゃ"
-    }
-}
-
 /**
  * The hero area: a dark ("墨色") panel the cat waits in, sized so it stays a
  * strong presence on a phone and grows noticeably larger on an unfolded Fold
@@ -190,12 +168,12 @@ private fun CatHero(speech: String, onTapCat: () -> Unit) {
             .fillMaxWidth()
             .clip(RoundedCornerShape(28.dp))
             .background(HomeInk)
-            .padding(vertical = 28.dp),
+            .padding(vertical = 10.dp),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             HeroSpeechBubble(speech)
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
             BoxWithConstraints(
                 modifier = Modifier.fillMaxWidth(),
                 contentAlignment = Alignment.Center,
@@ -237,9 +215,9 @@ private fun HeroSpeechBubble(text: String) {
         text = text,
         modifier = Modifier
             .clip(RoundedCornerShape(20.dp))
-            .background(HomeCream)
-            .border(1.dp, HomeGold.copy(alpha = 0.55f), RoundedCornerShape(20.dp))
-            .padding(horizontal = 18.dp, vertical = 10.dp),
+            .background(HomeBubble)
+            .border(0.75.dp, HomeGold.copy(alpha = 0.35f), RoundedCornerShape(20.dp))
+            .padding(horizontal = 16.dp, vertical = 7.dp),
         color = HomeInk,
         fontSize = 15.sp,
         fontWeight = FontWeight.Bold,
