@@ -62,6 +62,10 @@ fun MemoScreen() {
     var memos by remember { mutableStateOf<List<CatEvent>>(emptyList()) }
     var editingMemo by remember { mutableStateOf<CatEvent?>(null) }
     var showDialog by remember { mutableStateOf(false) }
+    // Hoisted out of MemoEditDialog (rather than a plain `remember` inside it) so an
+    // in-progress, unsaved edit survives the dialog being closed and reopened while
+    // picking/viewing a photo — it's only reset when a *different* memo starts editing.
+    var editText by remember { mutableStateOf("") }
     var linkedPhotos by remember { mutableStateOf<List<Photo>>(emptyList()) }
     var showPhotoPicker by remember { mutableStateOf(false) }
     var detailPhoto by remember { mutableStateOf<Photo?>(null) }
@@ -75,6 +79,10 @@ fun MemoScreen() {
         linkedPhotos = editingMemo?.let { photoRepository.photosForMemo(it.id) } ?: emptyList()
     }
 
+    LaunchedEffect(editingMemo) {
+        editText = editingMemo?.title ?: ""
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -85,7 +93,7 @@ fun MemoScreen() {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text("メモ", fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            Button(onClick = { editingMemo = null; showDialog = true }) {
+            Button(onClick = { editingMemo = null; editText = ""; showDialog = true }) {
                 Text("＋ 追加")
             }
         }
@@ -126,17 +134,20 @@ fun MemoScreen() {
     if (showDialog) {
         val current = editingMemo
         MemoEditDialog(
-            initialText = current?.title ?: "",
+            text = editText,
+            onTextChange = { editText = it },
             isEditing = current != null,
             linkedPhotos = linkedPhotos,
-            onPickPhoto = { showPhotoPicker = true },
+            // Closes this AlertDialog before opening the picker/detail Dialog rather than
+            // stacking a second dialog window on top of it — simpler and more predictable.
+            onPickPhoto = { showDialog = false; showPhotoPicker = true },
             onUnlinkPhoto = { photo ->
                 scope.launch {
                     current?.let { photoRepository.unlinkFromMemo(photo, it.id) }
                     linkedPhotos = current?.let { photoRepository.photosForMemo(it.id) } ?: emptyList()
                 }
             },
-            onPhotoClick = { detailPhoto = it },
+            onPhotoClick = { showDialog = false; detailPhoto = it },
             onDismiss = { showDialog = false; editingMemo = null },
             onDelete = current?.let { memo ->
                 {
@@ -149,12 +160,13 @@ fun MemoScreen() {
                     }
                 }
             },
-            onSave = { text ->
+            onSave = {
                 scope.launch {
+                    val trimmed = editText.trim()
                     if (current != null) {
-                        repository.edit(current, text, null)
+                        repository.edit(current, trimmed, null)
                     } else {
-                        repository.remember(text, null)
+                        repository.remember(trimmed, null)
                     }
                     showDialog = false
                     editingMemo = null
@@ -166,12 +178,13 @@ fun MemoScreen() {
 
     if (showPhotoPicker) {
         AlbumPhotoPickerDialog(
-            onDismiss = { showPhotoPicker = false },
+            onDismiss = { showPhotoPicker = false; showDialog = true },
             onPick = { photo ->
                 scope.launch {
                     editingMemo?.let { photoRepository.linkToMemo(photo, it.id) }
                     linkedPhotos = editingMemo?.let { photoRepository.photosForMemo(it.id) } ?: emptyList()
                     showPhotoPicker = false
+                    showDialog = true
                 }
             },
         )
@@ -180,12 +193,13 @@ fun MemoScreen() {
     detailPhoto?.let { photo ->
         PhotoDetailDialog(
             photo = photo,
-            onDismiss = { detailPhoto = null },
+            onDismiss = { detailPhoto = null; showDialog = true },
             onSave = { caption, album, linkedDate ->
                 scope.launch {
                     photoRepository.updateDetails(photo, caption, album, linkedDate?.toEpochMilli())
                     linkedPhotos = editingMemo?.let { photoRepository.photosForMemo(it.id) } ?: emptyList()
                     detailPhoto = null
+                    showDialog = true
                 }
             },
             onDelete = {
@@ -193,6 +207,7 @@ fun MemoScreen() {
                     photoRepository.delete(photo)
                     linkedPhotos = editingMemo?.let { photoRepository.photosForMemo(it.id) } ?: emptyList()
                     detailPhoto = null
+                    showDialog = true
                 }
             },
         )
@@ -227,7 +242,8 @@ private fun MemoRow(memo: CatEvent, onClick: () -> Unit, onDelete: () -> Unit) {
 
 @Composable
 private fun MemoEditDialog(
-    initialText: String,
+    text: String,
+    onTextChange: (String) -> Unit,
     isEditing: Boolean,
     linkedPhotos: List<Photo>,
     onPickPhoto: () -> Unit,
@@ -235,10 +251,8 @@ private fun MemoEditDialog(
     onPhotoClick: (Photo) -> Unit,
     onDismiss: () -> Unit,
     onDelete: (() -> Unit)?,
-    onSave: (String) -> Unit,
+    onSave: () -> Unit,
 ) {
-    var text by remember { mutableStateOf(initialText) }
-
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (isEditing) "メモを編集" else "メモを追加") },
@@ -246,7 +260,7 @@ private fun MemoEditDialog(
             Column {
                 OutlinedTextField(
                     value = text,
-                    onValueChange = { text = it },
+                    onValueChange = onTextChange,
                     label = { Text("内容") },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 3,
@@ -283,7 +297,7 @@ private fun MemoEditDialog(
         },
         confirmButton = {
             Button(
-                onClick = { if (text.isNotBlank()) onSave(text.trim()) },
+                onClick = { if (text.isNotBlank()) onSave() },
                 enabled = text.isNotBlank(),
             ) { Text("保存") }
         },

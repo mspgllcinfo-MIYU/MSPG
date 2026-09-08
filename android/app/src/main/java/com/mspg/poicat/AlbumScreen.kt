@@ -338,6 +338,13 @@ fun PhotoDetailDialog(
  * A grid of every photo already in the album, for picking one to link
  * elsewhere (currently: from a memo). Read-only browsing — tapping a photo
  * invokes [onPick] and does not itself open the full detail view.
+ *
+ * Deliberately not a LazyVerticalGrid: this dialog's content sits inside a
+ * wrap-content Dialog window rather than a screen with an already-bounded
+ * height (like AlbumScreen's own grid), and a lazy layout measured with an
+ * unbounded height throws. A plain scrollable Column of chunked rows has no
+ * such requirement, and the photo counts here are small enough that it
+ * costs nothing in practice.
  */
 @Composable
 fun AlbumPhotoPickerDialog(onDismiss: () -> Unit, onPick: (Photo) -> Unit) {
@@ -359,14 +366,26 @@ fun AlbumPhotoPickerDialog(onDismiss: () -> Unit, onPick: (Photo) -> Unit) {
             if (photos.isEmpty()) {
                 Text("アルバムに写真がまだないにゃ", color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(3),
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 360.dp)
+                        .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.heightIn(max = 400.dp),
                 ) {
-                    items(photos, key = { it.id }) { photo ->
-                        PhotoThumbnail(photo = photo, onClick = { onPick(photo) })
+                    photos.chunked(3).forEach { rowPhotos ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            rowPhotos.forEach { photo ->
+                                PhotoThumbnail(
+                                    photo = photo,
+                                    onClick = { onPick(photo) },
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            repeat(3 - rowPhotos.size) { Spacer(Modifier.weight(1f)) }
+                        }
                     }
                 }
             }

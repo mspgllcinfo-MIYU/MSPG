@@ -31,20 +31,13 @@ abstract class PhotoDatabase : RoomDatabase() {
             }
         }
 
-        // v2 -> v3: added the photo_memo_links join table (memo <-> photo linking).
-        // A brand new table only — existing photos/albums/calendar links are untouched.
-        private val MIGRATION_2_3 = object : Migration(2, 3) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL(
-                    "CREATE TABLE IF NOT EXISTS `photo_memo_links` (" +
-                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT, " +
-                        "`photoId` INTEGER NOT NULL, " +
-                        "`eventId` INTEGER NOT NULL, " +
-                        "`linkedAt` INTEGER NOT NULL)",
-                )
-            }
-        }
-
+        // v2 -> v3 (added the photo_memo_links join table) has no hand-written migration:
+        // a hand-rolled CREATE TABLE has to match Room's own compiled-in expectation of the
+        // schema byte-for-byte (column types/nullability/etc.), which isn't practical to
+        // verify without an Android toolchain, and got this wrong once already. Falling
+        // back to a destructive recreate for this one jump only resets the *photo*
+        // database (photos/albums/calendar-links/memo-links) — cat_events (schedules,
+        // memos, tasks) is a completely separate database untouched by this.
         fun get(context: Context): PhotoDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -52,7 +45,8 @@ abstract class PhotoDatabase : RoomDatabase() {
                     PhotoDatabase::class.java,
                     "poicat_photos.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2)
+                    .fallbackToDestructiveMigration()
                     .build().also { instance = it }
             }
     }
