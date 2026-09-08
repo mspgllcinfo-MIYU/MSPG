@@ -1,7 +1,14 @@
 package com.mspg.poicat.brain
 
 import com.mspg.poicat.data.CatEventRepository
+import com.mspg.poicat.data.Photo
+import com.mspg.poicat.data.PhotoRepository
+import java.time.LocalDate
 import java.time.LocalDateTime
+
+/** A cat AI reply: the にゃ-voiced text, plus any photos found for a photo-search question
+ * (empty for every other kind of reply). */
+data class CatReply(val text: String, val photoIds: List<Long> = emptyList())
 
 /**
  * The "memory cat" brain: everything is on-device pattern matching against
@@ -9,19 +16,30 @@ import java.time.LocalDateTime
  * input it either remembers a new schedule/memo, answers a question from
  * what it already remembers, or just files the line away as a memo.
  */
-class CatBrain(private val repository: CatEventRepository) {
+class CatBrain(
+    private val repository: CatEventRepository,
+    private val photoRepository: PhotoRepository,
+) {
 
-    suspend fun respond(input: String): String {
+    suspend fun respond(input: String): CatReply {
         // Users often paste example phrases straight out of quoted instructions
         // (e.g. "「明日、病院」"); strip the quote marks so they don't end up
         // stuck in a saved title.
         val trimmed = input.trim().replace(Regex("[「」『』]"), "").trim()
-        if (trimmed.isEmpty()) return "なに？にゃ"
+        if (trimmed.isEmpty()) return CatReply("なに？にゃ")
 
         val now = LocalDateTime.now()
 
+        // Checked first: "駐車場の写真見せて" also ends in "見せて" (a general query
+        // trigger), so photo requests have to be intercepted before the generic
+        // schedule/memo query path would otherwise answer from cat_events instead.
+        if (isPhotoQuery(trimmed)) {
+            return answerPhotoQuery(trimmed, now)
+        }
+
         if (DateTimeParser.isQuery(trimmed)) {
-            return if (isTaskQuestion(trimmed)) answerTaskQuery(trimmed, now) else answerQuery(trimmed, now)
+            val text = if (isTaskQuestion(trimmed)) answerTaskQuery(trimmed, now) else answerQuery(trimmed, now)
+            return CatReply(text)
         }
 
         // Checked before schedule registration: "今日ゴミ出しやる" contains "今日", a
@@ -31,9 +49,9 @@ class CatBrain(private val repository: CatEventRepository) {
             val task = repository.incompleteTasksMatching(completionKeyword).firstOrNull()
             return if (task != null) {
                 repository.setTaskCompleted(task, true)
-                "${task.title}終わったにゃ"
+                CatReply("${task.title}終わったにゃ")
             } else {
-                "そのタスクは見つからなかったにゃ"
+                CatReply("そのタスクは見つからなかったにゃ")
             }
         }
 
@@ -42,7 +60,7 @@ class CatBrain(private val repository: CatEventRepository) {
             val (dueDate, titleRaw) = DateTimeParser.parseDueDate(taskContent, now)
             val title = DateTimeParser.cleanTitle(titleRaw, fallback = "タスク")
             repository.addTask(title, dueDate?.toEpochMilli())
-            return "ポイに入れたにゃ"
+            return CatReply("ポイに入れたにゃ")
         }
 
         val memoContent = extractMemoCommand(trimmed)
@@ -52,10 +70,10 @@ class CatBrain(private val repository: CatEventRepository) {
             val scheduleFromMemo = DateTimeParser.parseRegistration(memoContent, now)
             if (scheduleFromMemo != null) {
                 repository.remember(scheduleFromMemo.title, scheduleFromMemo.dateTime.toEpochMilli())
-                return "覚えたにゃ"
+                return CatReply("覚えたにゃ")
             }
             repository.remember(memoContent, null)
-            return "メモしたにゃ"
+            return CatReply("メモしたにゃ")
         }
 
         val registration = DateTimeParser.parseRegistration(trimmed, now)
@@ -64,7 +82,7 @@ class CatBrain(private val repository: CatEventRepository) {
         } else {
             repository.remember(DateTimeParser.cleanTitle(trimmed, fallback = trimmed), null)
         }
-        return "覚えたにゃ"
+        return CatReply("覚えたにゃ")
     }
 
     private val taskTriggerSuffixes = listOf(
@@ -233,6 +251,81 @@ class CatBrain(private val repository: CatEventRepository) {
             scopeDate == today && !isUntilScope -> "今日は${titles}だにゃ"
             scopeDate != null -> "${DateTimeParser.formatWhen(scopeDate, today)}までは${titles}だにゃ"
             else -> "残ってるのは${titles}だにゃ"
+        }
+    }
+
+    /** "今日の写真見せて"/"病院の写真見せて" style — requires the literal word "写真",
+     * which never appears in a schedule/memo/task sentence, so this can't misfire on them. */
+    private fun isPhotoQuery(text: String): Boolean =
+        text.contains("写真") && (text.endsWith("見せて") || DateTimeParser.isQuery(text))
+
+    private val photoQueryScaffolding = listOf(
+        "見せて",
+        "の写真", "写真",
+        "この前の", "前の", "先日の",
+        "は", "の", "を",
+        "？", "?", "、", "。",
+    )
+
+    /** Strips the "見せて"/"写真" scaffolding to leave just the search term
+     * ("この前の旅行の写真見せて" -> "旅行"), or null if nothing is left. */
+    private fun extractPhotoKeyword(text: String): String? {
+        var remaining = text
+        for (token in photoQueryScaffolding) {
+            remaining = remaining.replace(token, "")
+        }
+        return remaining.trim().ifBlank { null }
+    }
+
+    /** Resolves a date reference in a photo question ("今日"/"昨日"/"9月8日"/...), or null
+     * if the question is keyword-based instead ("病院の写真見せて"). */
+    private fun photoQueryDate(text: String, now: LocalDateTime): LocalDate? {
+        val today = now.toLocalDate()
+        return when {
+            text.contains("一昨日") -> today.minusDays(2)
+            text.contains("昨日") -> today.minusDays(1)
+            text.contains("明後日") -> today.plusDays(2)
+            text.contains("明日") -> today.plusDays(1)
+            text.contains("今日") -> today
+            else -> Regex("(\\d{1,2})月(\\d{1,2})日").find(text)?.let { m ->
+                LocalDate.of(now.year, m.groupValues[1].toInt(), m.groupValues[2].toInt())
+            }
+        }
+    }
+
+    private suspend fun searchPhotosByDate(start: Long, end: Long): List<Photo> {
+        val byAdded = photoRepository.byAddedAtRange(start, end)
+        val byLinkedDate = photoRepository.byLinkedDate(start, end)
+        return (byAdded + byLinkedDate).distinctBy { it.id }
+    }
+
+    /** Matches photos by their own caption/album, and photos linked to a memo or schedule
+     * whose title matches — covers "病院の写真見せて" finding a photo linked to a "病院"
+     * memo just as much as one whose own caption/album says "病院". */
+    private suspend fun searchPhotosByKeyword(keyword: String): List<Photo> {
+        val direct = photoRepository.searchByCaptionOrAlbum(keyword)
+        val matchingEvents = repository.allMatching(keyword)
+        val viaEvents = matchingEvents.flatMap { photoRepository.photosForMemo(it.id) }
+        return (direct + viaEvents).distinctBy { it.id }
+    }
+
+    private suspend fun answerPhotoQuery(text: String, now: LocalDateTime): CatReply {
+        val today = now.toLocalDate()
+        val date = photoQueryDate(text, now)
+        val (photos, label) = if (date != null) {
+            val start = date.toEpochMilli()
+            val end = date.plusDays(1).toEpochMilli() - 1
+            searchPhotosByDate(start, end) to DateTimeParser.formatWhen(date, today)
+        } else {
+            val keyword = extractPhotoKeyword(text)
+            if (keyword == null) emptyList<Photo>() to null else searchPhotosByKeyword(keyword) to keyword
+        }
+
+        return if (photos.isEmpty()) {
+            CatReply("その写真はまだないにゃ")
+        } else {
+            val prefix = label?.let { "${it}の" }.orEmpty()
+            CatReply("${prefix}写真はこれだにゃ", photos.map { it.id })
         }
     }
 }

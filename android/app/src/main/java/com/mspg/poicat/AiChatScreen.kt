@@ -6,6 +6,7 @@ import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,10 +14,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
@@ -38,7 +41,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.mspg.poicat.brain.CatBrain
+import com.mspg.poicat.brain.toEpochMilli
 import com.mspg.poicat.data.CatEventRepository
+import com.mspg.poicat.data.Photo
+import com.mspg.poicat.data.PhotoRepository
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -82,7 +88,9 @@ private fun ChatRoomView(room: ChatRoom, modifier: Modifier = Modifier) {
     var input by remember { mutableStateOf("") }
     var isSending by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
-    val catBrain = remember { CatBrain(CatEventRepository(context.applicationContext)) }
+    val photoRepository = remember { PhotoRepository(context.applicationContext) }
+    val catBrain = remember { CatBrain(CatEventRepository(context.applicationContext), photoRepository) }
+    var detailPhoto by remember { mutableStateOf<Photo?>(null) }
 
     val messages = ChatRepository.messages(room)
     val listState = rememberLazyListState()
@@ -115,7 +123,10 @@ private fun ChatRoomView(room: ChatRoom, modifier: Modifier = Modifier) {
             val result = runCatching { withContext(Dispatchers.IO) { catBrain.respond(trimmed) } }
             isSending = false
             result.onSuccess { reply ->
-                ChatRepository.addMessage(room, ChatMessage("assistant", reply, System.currentTimeMillis()))
+                ChatRepository.addMessage(
+                    room,
+                    ChatMessage("assistant", reply.text, System.currentTimeMillis(), reply.photoIds),
+                )
                 errorText = null
             }
             result.onFailure {
@@ -136,7 +147,9 @@ private fun ChatRoomView(room: ChatRoom, modifier: Modifier = Modifier) {
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items(messages) { message -> ChatBubble(message) }
+            items(messages) { message ->
+                ChatBubble(message, photoRepository = photoRepository, onPhotoClick = { detailPhoto = it })
+            }
             if (isSending) {
                 item { TypingIndicator() }
             }
@@ -184,28 +197,70 @@ private fun ChatRoomView(room: ChatRoom, modifier: Modifier = Modifier) {
             }
         }
     }
+
+    detailPhoto?.let { photo ->
+        PhotoDetailDialog(
+            photo = photo,
+            onDismiss = { detailPhoto = null },
+            onSave = { caption, album, linkedDate ->
+                scope.launch {
+                    photoRepository.updateDetails(photo, caption, album, linkedDate?.toEpochMilli())
+                    detailPhoto = null
+                }
+            },
+            onDelete = {
+                scope.launch {
+                    photoRepository.delete(photo)
+                    detailPhoto = null
+                }
+            },
+        )
+    }
 }
 
 @Composable
-private fun ChatBubble(message: ChatMessage) {
+private fun ChatBubble(message: ChatMessage, photoRepository: PhotoRepository, onPhotoClick: (Photo) -> Unit) {
     val isUser = message.role == "user"
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
-    ) {
-        Box(
-            modifier = Modifier
-                .widthIn(max = 280.dp)
-                .background(
-                    color = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                    shape = RoundedCornerShape(16.dp),
-                )
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+    var photos by remember(message.photoIds) { mutableStateOf<List<Photo>>(emptyList()) }
+    LaunchedEffect(message.photoIds) {
+        if (message.photoIds.isNotEmpty()) photos = photoRepository.byIds(message.photoIds)
+    }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
         ) {
-            Text(
-                text = message.text,
-                color = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Box(
+                modifier = Modifier
+                    .widthIn(max = 280.dp)
+                    .background(
+                        color = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(16.dp),
+                    )
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+            ) {
+                Text(
+                    text = message.text,
+                    color = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        if (photos.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
+            ) {
+                photos.forEach { photo ->
+                    Box(modifier = Modifier.padding(end = 6.dp)) {
+                        PhotoThumbnail(photo = photo, onClick = { onPhotoClick(photo) }, modifier = Modifier.size(90.dp))
+                    }
+                }
+            }
         }
     }
 }

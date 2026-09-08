@@ -35,6 +35,8 @@ class CatEventRepository(context: Context) {
 
     suspend fun memosMatching(keyword: String) = dao.memosMatching(keyword)
 
+    suspend fun allMatching(keyword: String) = dao.allMatching(keyword)
+
     suspend fun addTask(title: String, dueDateTime: Long?): CatEvent {
         val event = CatEvent(title = title, dateTime = dueDateTime, isTask = true)
         val id = dao.insert(event)

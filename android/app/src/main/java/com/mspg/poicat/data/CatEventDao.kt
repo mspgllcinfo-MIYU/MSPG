@@ -91,6 +91,11 @@ interface CatEventDao {
     )
     suspend fun incompleteTasksMatching(keyword: String): List<CatEvent>
 
+    /** Every row (schedule, memo, or task alike) whose title contains the keyword — used by
+     * cat AI photo search to find a memo/schedule a photo might be linked to. */
+    @Query("SELECT * FROM cat_events WHERE title LIKE '%' || :keyword || '%'")
+    suspend fun allMatching(keyword: String): List<CatEvent>
+
     /** Dated, unfired schedule events whose reminder window has arrived — used by the periodic worker. */
     @Query(
         "SELECT * FROM cat_events WHERE isTask = 0 AND dateTime IS NOT NULL AND reminded1Day = 0 " +

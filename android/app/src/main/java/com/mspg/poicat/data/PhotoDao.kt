@@ -35,4 +35,15 @@ interface PhotoDao {
     /** Distinct album names in use, for the filter chips / picker. */
     @Query("SELECT DISTINCT albumName FROM photos WHERE albumName IS NOT NULL AND albumName != '' ORDER BY albumName ASC")
     suspend fun albumNames(): List<String>
+
+    /** Photos added or (if set) linked to a calendar day within the range — used by cat AI photo search. */
+    @Query("SELECT * FROM photos WHERE addedAt BETWEEN :start AND :end ORDER BY addedAt DESC")
+    suspend fun byAddedAtRange(start: Long, end: Long): List<Photo>
+
+    /** Photos whose caption or album name contains the keyword — used by cat AI photo search. */
+    @Query(
+        "SELECT * FROM photos WHERE (caption LIKE '%' || :keyword || '%' OR albumName LIKE '%' || :keyword || '%') " +
+            "ORDER BY addedAt DESC",
+    )
+    suspend fun searchByCaptionOrAlbum(keyword: String): List<Photo>
 }

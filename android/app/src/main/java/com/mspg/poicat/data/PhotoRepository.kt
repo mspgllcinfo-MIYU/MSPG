@@ -50,6 +50,12 @@ class PhotoRepository(private val context: Context) {
 
     suspend fun albumNames() = dao.albumNames()
 
+    suspend fun byIds(ids: List<Long>) = if (ids.isEmpty()) emptyList() else dao.byIds(ids)
+
+    suspend fun byAddedAtRange(start: Long, end: Long) = dao.byAddedAtRange(start, end)
+
+    suspend fun searchByCaptionOrAlbum(keyword: String) = dao.searchByCaptionOrAlbum(keyword)
+
     /** Photos linked to the calendar day starting at [startOfDay] (inclusive) through [endOfDay] (inclusive). */
     suspend fun byLinkedDate(startOfDay: Long, endOfDay: Long) = dao.byLinkedDate(startOfDay, endOfDay)
 
