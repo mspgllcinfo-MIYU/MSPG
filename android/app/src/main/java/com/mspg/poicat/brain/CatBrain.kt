@@ -38,6 +38,12 @@ class CatBrain(
         }
 
         if (DateTimeParser.isQuery(trimmed)) {
+            // "今日の天気は？"/"日本の首都は？" would otherwise fall into answerQuery()
+            // and get an answer built from a keyword that can never match anything in
+            // cat_events ("の天気の予定はまだ入ってないにゃ") — checked here, before the
+            // real query handlers, so a genuine zero-result POI question (e.g. "駐車場の
+            // 番号なんだっけ？" with nothing saved yet) still gets its normal reply.
+            if (looksOutOfScope(trimmed)) return CatReply(outOfScopeReply(trimmed))
             val text = if (isTaskQuestion(trimmed)) answerTaskQuery(trimmed, now) else answerQuery(trimmed, now)
             return CatReply(text)
         }
@@ -79,10 +85,55 @@ class CatBrain(
         val registration = DateTimeParser.parseRegistration(trimmed, now)
         if (registration != null) {
             repository.remember(registration.title, registration.dateTime.toEpochMilli())
-        } else {
-            repository.remember(DateTimeParser.cleanTitle(trimmed, fallback = trimmed), null)
+            return CatReply("覚えたにゃ")
         }
+
+        // Last resort before this line was "save it as a memo no matter what" — which
+        // meant something like "英語に翻訳して" got filed away as a memo titled exactly
+        // that. Turn away anything that looks out of scope here instead of guessing at
+        // it or hoarding it; anything else genuinely unrecognized still gets remembered
+        // as before.
+        if (looksOutOfScope(trimmed)) {
+            return CatReply(outOfScopeReply(trimmed))
+        }
+        repository.remember(DateTimeParser.cleanTitle(trimmed, fallback = trimmed), null)
         return CatReply("覚えたにゃ")
+    }
+
+    /**
+     * Phase A: a lightweight, keyword-based guard for topics PoiCat doesn't manage
+     * (weather, news, general trivia, translation, arithmetic, recommendations, ...).
+     * This can't perfectly tell "out of scope" apart from "in scope but not saved yet"
+     * — it's the same kind of best-effort keyword matching DateTimeParser/CatBrain
+     * already use everywhere else, not true language understanding.
+     */
+    private val outOfScopeSignals = listOf(
+        "天気", "気温", "降水", "湿度", "台風", "花粉",
+        "ニュース", "速報", "株価", "為替",
+        "首都", "人口",
+        "翻訳", "英語で",
+        "おすすめ", "ランキング", "レシピ", "作り方",
+    )
+
+    private val arithmeticExpression = Regex("""\d+\s*[×x*÷/+\-]\s*\d+""")
+
+    private fun looksOutOfScope(text: String): Boolean =
+        outOfScopeSignals.any { text.contains(it) } || arithmeticExpression.containsMatchIn(text)
+
+    private val weatherSignals = listOf("天気", "気温", "降水", "湿度", "台風", "花粉")
+
+    private val outOfScopeReplies = listOf(
+        "それは他のAIに聞けにゃ",
+        "知らんにゃ。専門外だにゃ",
+        "そこまで働かせるなにゃ",
+        "できるとは言ってないにゃ",
+        "それ、うちの仕事じゃないにゃ",
+    )
+
+    /** A weather-specific line when the input names weather, otherwise a random general line. */
+    private fun outOfScopeReply(text: String): String {
+        if (weatherSignals.any { text.contains(it) }) return "天気予報に聞けにゃ"
+        return outOfScopeReplies.random()
     }
 
     private val taskTriggerSuffixes = listOf(
