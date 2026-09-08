@@ -18,6 +18,7 @@ import kotlinx.coroutines.withContext
  */
 class PhotoRepository(private val context: Context) {
     private val dao = PhotoDatabase.get(context).photoDao()
+    private val linkDao = PhotoDatabase.get(context).photoMemoLinkDao()
 
     private val photoDir: File by lazy {
         File(context.filesDir, "photos").apply { mkdirs() }
@@ -49,8 +50,6 @@ class PhotoRepository(private val context: Context) {
 
     suspend fun albumNames() = dao.albumNames()
 
-    suspend fun byEvent(eventId: Long) = dao.byEvent(eventId)
-
     /** Photos linked to the calendar day starting at [startOfDay] (inclusive) through [endOfDay] (inclusive). */
     suspend fun byLinkedDate(startOfDay: Long, endOfDay: Long) = dao.byLinkedDate(startOfDay, endOfDay)
 
@@ -58,15 +57,35 @@ class PhotoRepository(private val context: Context) {
         dao.update(photo.copy(caption = caption, albumName = albumName, linkedDate = linkedDate))
     }
 
-    /** Unlinks a photo from an event without touching the photo/album itself — used when the
-     * linked schedule/memo is deleted, so the photo stays in the album. */
-    suspend fun unlinkFromEvent(photo: Photo) {
-        dao.update(photo.copy(eventId = null))
+    /** Photos linked to a memo (any cat_events row), newest-added first — for the memo screen's photo strip. */
+    suspend fun photosForMemo(eventId: Long): List<Photo> {
+        val ids = linkDao.linksForEvent(eventId).map { it.photoId }
+        return if (ids.isEmpty()) emptyList() else dao.byIds(ids)
     }
 
-    /** Deletes the row and its backing file. The file is only ever referenced by this one row,
-     * so there's no other place it needs to be cleaned up from. */
+    /** Links an existing album photo to a memo. A no-op if already linked (never a duplicate row). */
+    suspend fun linkToMemo(photo: Photo, eventId: Long) {
+        if (!linkDao.exists(photo.id, eventId)) {
+            linkDao.insert(PhotoMemoLink(photoId = photo.id, eventId = eventId))
+        }
+    }
+
+    /** Unlinks a photo from one memo — the photo itself and its other links are untouched. */
+    suspend fun unlinkFromMemo(photo: Photo, eventId: Long) {
+        linkDao.deleteLink(photo.id, eventId)
+    }
+
+    /** Drops all memo links for an event — call when that memo itself is deleted, so no
+     * dangling reference to it is left behind (the linked photos are not touched). */
+    suspend fun unlinkAllForMemo(eventId: Long) {
+        linkDao.deleteAllForEvent(eventId)
+    }
+
+    /** Deletes the row and its backing file, plus any memo links pointing at it (so a memo
+     * never ends up referencing a photo that no longer exists). The file is only ever
+     * referenced by this one row, so there's no other place it needs cleaning up from. */
     suspend fun delete(photo: Photo) = withContext(Dispatchers.IO) {
+        linkDao.deleteAllForPhoto(photo.id)
         dao.delete(photo)
         runCatching { File(photo.filePath).delete() }
     }

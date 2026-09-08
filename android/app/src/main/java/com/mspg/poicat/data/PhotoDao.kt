@@ -28,11 +28,11 @@ interface PhotoDao {
     @Query("SELECT * FROM photos WHERE linkedDate BETWEEN :startOfDay AND :endOfDay ORDER BY addedAt DESC")
     suspend fun byLinkedDate(startOfDay: Long, endOfDay: Long): List<Photo>
 
+    /** Batch fetch for resolving a memo's linked photo ids (see [PhotoMemoLinkDao]) to rows. */
+    @Query("SELECT * FROM photos WHERE id IN (:ids) ORDER BY addedAt DESC")
+    suspend fun byIds(ids: List<Long>): List<Photo>
+
     /** Distinct album names in use, for the filter chips / picker. */
     @Query("SELECT DISTINCT albumName FROM photos WHERE albumName IS NOT NULL AND albumName != '' ORDER BY albumName ASC")
     suspend fun albumNames(): List<String>
-
-    /** Photos linked to one cat_events row (a schedule or a memo) — used from a later phase. */
-    @Query("SELECT * FROM photos WHERE eventId = :eventId ORDER BY addedAt DESC")
-    suspend fun byEvent(eventId: Long): List<Photo>
 }

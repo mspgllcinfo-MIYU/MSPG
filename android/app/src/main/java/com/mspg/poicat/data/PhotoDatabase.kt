@@ -13,9 +13,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * means adding or changing the photo schema can never require a migration
  * of — or risk any damage to — the data already stored in `cat_events`.
  */
-@Database(entities = [Photo::class], version = 2, exportSchema = false)
+@Database(entities = [Photo::class, PhotoMemoLink::class], version = 3, exportSchema = false)
 abstract class PhotoDatabase : RoomDatabase() {
     abstract fun photoDao(): PhotoDao
+    abstract fun photoMemoLinkDao(): PhotoMemoLinkDao
 
     companion object {
         @Volatile
@@ -30,6 +31,20 @@ abstract class PhotoDatabase : RoomDatabase() {
             }
         }
 
+        // v2 -> v3: added the photo_memo_links join table (memo <-> photo linking).
+        // A brand new table only — existing photos/albums/calendar links are untouched.
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `photo_memo_links` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT, " +
+                        "`photoId` INTEGER NOT NULL, " +
+                        "`eventId` INTEGER NOT NULL, " +
+                        "`linkedAt` INTEGER NOT NULL)",
+                )
+            }
+        }
+
         fun get(context: Context): PhotoDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -37,7 +52,7 @@ abstract class PhotoDatabase : RoomDatabase() {
                     PhotoDatabase::class.java,
                     "poicat_photos.db",
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build().also { instance = it }
             }
     }

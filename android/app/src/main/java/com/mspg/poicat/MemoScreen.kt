@@ -2,7 +2,9 @@ package com.mspg.poicat
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,8 +12,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -34,9 +38,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.mspg.poicat.brain.toEpochMilli
 import com.mspg.poicat.brain.toLocalDateTime
 import com.mspg.poicat.data.CatEvent
 import com.mspg.poicat.data.CatEventRepository
+import com.mspg.poicat.data.Photo
+import com.mspg.poicat.data.PhotoRepository
 import kotlinx.coroutines.launch
 
 /**
@@ -50,14 +57,22 @@ fun MemoScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val repository = remember { CatEventRepository(context.applicationContext) }
+    val photoRepository = remember { PhotoRepository(context.applicationContext) }
 
     var memos by remember { mutableStateOf<List<CatEvent>>(emptyList()) }
     var editingMemo by remember { mutableStateOf<CatEvent?>(null) }
     var showDialog by remember { mutableStateOf(false) }
+    var linkedPhotos by remember { mutableStateOf<List<Photo>>(emptyList()) }
+    var showPhotoPicker by remember { mutableStateOf(false) }
+    var detailPhoto by remember { mutableStateOf<Photo?>(null) }
     var refreshTick by remember { mutableStateOf(0) }
 
     LaunchedEffect(refreshTick) {
         memos = repository.memos()
+    }
+
+    LaunchedEffect(editingMemo, refreshTick) {
+        linkedPhotos = editingMemo?.let { photoRepository.photosForMemo(it.id) } ?: emptyList()
     }
 
     Column(
@@ -95,6 +110,10 @@ fun MemoScreen() {
                     onClick = { editingMemo = memo; showDialog = true },
                     onDelete = {
                         scope.launch {
+                            // Drop the photo links before the memo itself is gone, so no
+                            // link is left pointing at a now-nonexistent memo id. The
+                            // photos/album are never touched by this.
+                            photoRepository.unlinkAllForMemo(memo.id)
                             repository.delete(memo)
                             refreshTick++
                         }
@@ -109,10 +128,20 @@ fun MemoScreen() {
         MemoEditDialog(
             initialText = current?.title ?: "",
             isEditing = current != null,
+            linkedPhotos = linkedPhotos,
+            onPickPhoto = { showPhotoPicker = true },
+            onUnlinkPhoto = { photo ->
+                scope.launch {
+                    current?.let { photoRepository.unlinkFromMemo(photo, it.id) }
+                    linkedPhotos = current?.let { photoRepository.photosForMemo(it.id) } ?: emptyList()
+                }
+            },
+            onPhotoClick = { detailPhoto = it },
             onDismiss = { showDialog = false; editingMemo = null },
             onDelete = current?.let { memo ->
                 {
                     scope.launch {
+                        photoRepository.unlinkAllForMemo(memo.id)
                         repository.delete(memo)
                         showDialog = false
                         editingMemo = null
@@ -130,6 +159,40 @@ fun MemoScreen() {
                     showDialog = false
                     editingMemo = null
                     refreshTick++
+                }
+            },
+        )
+    }
+
+    if (showPhotoPicker) {
+        AlbumPhotoPickerDialog(
+            onDismiss = { showPhotoPicker = false },
+            onPick = { photo ->
+                scope.launch {
+                    editingMemo?.let { photoRepository.linkToMemo(photo, it.id) }
+                    linkedPhotos = editingMemo?.let { photoRepository.photosForMemo(it.id) } ?: emptyList()
+                    showPhotoPicker = false
+                }
+            },
+        )
+    }
+
+    detailPhoto?.let { photo ->
+        PhotoDetailDialog(
+            photo = photo,
+            onDismiss = { detailPhoto = null },
+            onSave = { caption, album, linkedDate ->
+                scope.launch {
+                    photoRepository.updateDetails(photo, caption, album, linkedDate?.toEpochMilli())
+                    linkedPhotos = editingMemo?.let { photoRepository.photosForMemo(it.id) } ?: emptyList()
+                    detailPhoto = null
+                }
+            },
+            onDelete = {
+                scope.launch {
+                    photoRepository.delete(photo)
+                    linkedPhotos = editingMemo?.let { photoRepository.photosForMemo(it.id) } ?: emptyList()
+                    detailPhoto = null
                 }
             },
         )
@@ -166,6 +229,10 @@ private fun MemoRow(memo: CatEvent, onClick: () -> Unit, onDelete: () -> Unit) {
 private fun MemoEditDialog(
     initialText: String,
     isEditing: Boolean,
+    linkedPhotos: List<Photo>,
+    onPickPhoto: () -> Unit,
+    onUnlinkPhoto: (Photo) -> Unit,
+    onPhotoClick: (Photo) -> Unit,
     onDismiss: () -> Unit,
     onDelete: (() -> Unit)?,
     onSave: (String) -> Unit,
@@ -176,13 +243,43 @@ private fun MemoEditDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (isEditing) "メモを編集" else "メモを追加") },
         text = {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                label = { Text("内容") },
-                modifier = Modifier.fillMaxWidth(),
-                minLines = 3,
-            )
+            Column {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = { Text("内容") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3,
+                )
+
+                // Photos can only be linked once the memo exists (needs an id), so this
+                // section is hidden while adding a brand-new memo.
+                if (isEditing) {
+                    Spacer(Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("写真", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                        TextButton(onClick = onPickPhoto) { Text("＋ 写真を選ぶ") }
+                    }
+                    if (linkedPhotos.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            linkedPhotos.forEach { photo ->
+                                Box(modifier = Modifier.size(64.dp)) {
+                                    PhotoThumbnail(photo = photo, onClick = { onPhotoClick(photo) })
+                                    IconButton(
+                                        onClick = { onUnlinkPhoto(photo) },
+                                        modifier = Modifier.align(Alignment.TopEnd).size(20.dp),
+                                    ) {
+                                        Text("✕", fontSize = 10.sp, color = MaterialTheme.colorScheme.error)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         },
         confirmButton = {
             Button(

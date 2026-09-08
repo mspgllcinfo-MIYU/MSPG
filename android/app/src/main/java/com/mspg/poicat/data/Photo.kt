@@ -24,7 +24,9 @@ data class Photo(
     val albumName: String? = null,
     /** Epoch millis when the photo was added to the app. */
     val addedAt: Long = System.currentTimeMillis(),
-    /** Id of a linked cat_events row (a schedule or a memo) — for a later phase, unused for now. */
+    /** Unused: memo linking ended up needing a many-to-many relationship (one photo can be
+     * linked from several memos), so it's tracked in [PhotoMemoLink] instead. Column is kept
+     * rather than dropped, to avoid an unnecessary destructive-shaped migration for no gain. */
     val eventId: Long? = null,
     /** Epoch millis for the start of the calendar day this photo is linked to, or null. */
     val linkedDate: Long? = null,

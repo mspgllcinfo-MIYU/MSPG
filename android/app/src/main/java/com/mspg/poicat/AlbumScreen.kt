@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -329,6 +330,48 @@ fun PhotoDetailDialog(
                     Text("保存")
                 }
             }
+        }
+    }
+}
+
+/**
+ * A grid of every photo already in the album, for picking one to link
+ * elsewhere (currently: from a memo). Read-only browsing — tapping a photo
+ * invokes [onPick] and does not itself open the full detail view.
+ */
+@Composable
+fun AlbumPhotoPickerDialog(onDismiss: () -> Unit, onPick: (Photo) -> Unit) {
+    val context = LocalContext.current
+    val repository = remember { PhotoRepository(context.applicationContext) }
+    var photos by remember { mutableStateOf<List<Photo>>(emptyList()) }
+    LaunchedEffect(Unit) { photos = repository.all() }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(16.dp),
+        ) {
+            Text("写真を選ぶ", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            Spacer(Modifier.height(12.dp))
+            if (photos.isEmpty()) {
+                Text("アルバムに写真がまだないにゃ", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(3),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.heightIn(max = 400.dp),
+                ) {
+                    items(photos, key = { it.id }) { photo ->
+                        PhotoThumbnail(photo = photo, onClick = { onPick(photo) })
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text("閉じる") }
         }
     }
 }
