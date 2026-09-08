@@ -78,12 +78,6 @@ fun AiChatScreen() {
             .padding(20.dp),
     ) {
         Text("猫AI", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = AiInk)
-        Text(
-            text = "何でも投げてにゃ",
-            fontSize = 13.sp,
-            color = AiInk.copy(alpha = 0.5f),
-            modifier = Modifier.padding(top = 2.dp),
-        )
 
         Row(
             modifier = Modifier
