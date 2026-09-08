@@ -4,7 +4,10 @@ data class ChatMessage(
     val role: String,
     val text: String,
     val timestamp: Long,
-    /** Photo ids the cat AI found for a photo search reply — empty for every other message. */
+    /**
+     * Photo ids attached to this message: either what the cat AI found for a photo
+     * search reply, or (Phase B) a photo the user picked and sent — empty otherwise.
+     */
     val photoIds: List<Long> = emptyList(),
 )
 
