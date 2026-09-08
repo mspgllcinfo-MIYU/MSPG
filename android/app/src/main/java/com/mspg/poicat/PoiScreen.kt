@@ -14,13 +14,16 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -37,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -50,6 +54,16 @@ import com.mspg.poicat.data.Photo
 import com.mspg.poicat.data.PhotoRepository
 import java.time.LocalDate
 import kotlinx.coroutines.launch
+
+// Step4-1: Poi-only design tokens, matching Home (Step1) / bottom nav (Step2)
+// / AI chat (Step3) by value ("大人かわいい×ちょっと高級×無愛想な黒猫").
+// Scoped to this file deliberately — Theme.kt stays untouched until this
+// look is promoted (Step0).
+private val PoiInk = Color(0xFF201E1D) // 墨色
+private val PoiCream = Color(0xFFF7F3EF) // 生成り — matches Theme.kt's page background
+private val PoiCard = Color(0xFFEFE7DE) // a shade deeper than the page, for task rows
+private val PoiGold = Color(0xFFC9A66B) // restrained accent, never a fill color
+private val PoiPink = Color(0xFFD98A9C) // the app's existing pink, kept rare
 
 /**
  * Poi tab: a plain to-do list, stored as `isTask = true` rows in the same
@@ -89,23 +103,36 @@ fun PoiScreen() {
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("ポイ", fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            Button(onClick = { editingTask = null; showDialog = true }) {
+            Text("ポイ", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = PoiInk, modifier = Modifier.weight(1f))
+            // Step4-1: same pink-pill family as AiChatScreen's "投げる", but a
+            // quieter tint — the list is the star here, not this button.
+            Button(
+                onClick = { editingTask = null; showDialog = true },
+                colors = ButtonDefaults.buttonColors(containerColor = PoiPink.copy(alpha = 0.25f), contentColor = PoiInk),
+                shape = RoundedCornerShape(percent = 50),
+            ) {
                 Text("＋ 追加")
             }
         }
 
         Spacer(Modifier.height(16.dp))
 
+        // Step4-1: capped at 640dp and centered so the list doesn't stretch
+        // edge-to-edge on a Fold's unfolded, much wider screen; a normal phone
+        // stays fillMaxWidth as before.
         LazyColumn(
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .widthIn(max = 640.dp)
+                .align(Alignment.CenterHorizontally),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (tasks.isEmpty()) {
                 item {
                     Text(
                         text = "タスクはまだ入ってないにゃ",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = PoiInk.copy(alpha = 0.5f),
                     )
                 }
             }
@@ -204,32 +231,40 @@ private fun TaskRow(
     onClick: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    // Step4-1: a completed row stays the same shape, just quieter — lighter
+    // card, weaker ink — on top of the existing strike-through.
+    val cardColor = if (task.completed) PoiCard.copy(alpha = 0.55f) else PoiCard
+    val titleColor = if (task.completed) PoiInk.copy(alpha = 0.4f) else PoiInk
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clip(RoundedCornerShape(16.dp))
+            .background(cardColor)
             .clickable(onClick = onClick)
-            .padding(horizontal = 6.dp, vertical = 2.dp),
+            .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Checkbox(checked = task.completed, onCheckedChange = { onToggleCompleted() })
+        Checkbox(
+            checked = task.completed,
+            onCheckedChange = { onToggleCompleted() },
+            colors = CheckboxDefaults.colors(
+                checkedColor = PoiGold,
+                uncheckedColor = PoiInk.copy(alpha = 0.4f),
+                checkmarkColor = PoiCream,
+            ),
+        )
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = task.title,
                 textDecoration = if (task.completed) TextDecoration.LineThrough else null,
-                color = if (task.completed) {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                } else {
-                    MaterialTheme.colorScheme.onSurface
-                },
+                color = titleColor,
             )
             task.dateTime?.let {
                 val due = it.toLocalDate()
                 Text(
                     text = "期限: ${due.monthValue}月${due.dayOfMonth}日",
                     fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (task.completed) PoiInk.copy(alpha = 0.35f) else PoiGold,
                 )
             }
         }
@@ -256,6 +291,9 @@ private fun TaskEditDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        containerColor = PoiCard,
+        titleContentColor = PoiInk,
+        textContentColor = PoiInk,
         title = { Text(if (isEditing) "タスクを編集" else "タスクを追加") },
         text = {
             Column {
@@ -292,7 +330,7 @@ private fun TaskEditDialog(
                 // screen, just viewing what's already linked.
                 if (isEditing && linkedPhotos.isNotEmpty()) {
                     Spacer(Modifier.height(12.dp))
-                    Text("写真", fontWeight = FontWeight.Bold)
+                    Text("写真", fontWeight = FontWeight.Bold, color = PoiInk)
                     Row(
                         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -310,6 +348,7 @@ private fun TaskEditDialog(
             Button(
                 onClick = { if (title.isNotBlank()) onSave(title.trim(), dueDate) },
                 enabled = title.isNotBlank(),
+                colors = ButtonDefaults.buttonColors(containerColor = PoiPink, contentColor = Color.White),
             ) { Text("保存") }
         },
         dismissButton = {
