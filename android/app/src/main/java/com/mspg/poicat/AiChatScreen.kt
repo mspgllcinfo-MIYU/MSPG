@@ -147,18 +147,19 @@ private fun ChatRoomView(room: ChatRoom, modifier: Modifier = Modifier) {
         input = ""
         pendingPhoto = null
 
-        if (photo != null) {
-            // Phase B stops here: the photo (and any caption) is saved and shown in
-            // the chat, nothing more. Running the existing text pipeline on a caption
-            // like "今日の写真" would misfire — parsed as a same-day schedule titled
-            // "写真" — since CatBrain has no notion yet of "this text describes the
-            // attached photo" (that sorting logic is Phase C).
+        if (photo != null && trimmed.isBlank()) {
+            // A bare photo with no caption: Phase B already saved it to the album —
+            // nothing for CatBrain to sort.
             return
         }
 
         isSending = true
         scope.launch {
-            val result = runCatching { withContext(Dispatchers.IO) { catBrain.respond(trimmed) } }
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    if (photo != null) catBrain.respondToPhoto(trimmed, photo) else catBrain.respond(trimmed)
+                }
+            }
             isSending = false
             result.onSuccess { reply ->
                 ChatRepository.addMessage(

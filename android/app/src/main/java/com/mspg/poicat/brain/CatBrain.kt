@@ -101,6 +101,99 @@ class CatBrain(
     }
 
     /**
+     * Phase C: sorts a photo (already saved to the album by the caller) using a caption
+     * typed alongside it. Reuses the exact same trigger detection [respond] uses for
+     * text — a caption that would register as a task/memo/schedule on its own does the
+     * same thing here, just with the photo linked to whatever gets created.
+     *
+     * Deliberately never falls back to saving the caption as a plain memo: unlike
+     * [respond]'s text-only fallback (where an unrecognized line is still worth
+     * remembering on its own), a caption that matches nothing here is usually either a
+     * question about the photo's contents ("これ何？") or a report this phase doesn't
+     * handle (a task-completion caption like "牛乳買ったよ") — guessing at either would
+     * create a wrong/duplicate record. The photo stays exactly as already saved; only
+     * the reply says the cat couldn't sort it.
+     */
+    suspend fun respondToPhoto(caption: String, photo: Photo): CatReply {
+        val trimmed = caption.trim().replace(Regex("[「」『』]"), "").trim()
+        if (trimmed.isEmpty()) return CatReply("アルバムに入れたにゃ")
+
+        val now = LocalDateTime.now()
+
+        val taskContent = extractTaskCommand(trimmed)
+        if (taskContent != null) {
+            val (dueDate, titleRaw) = DateTimeParser.parseDueDate(taskContent, now)
+            val title = DateTimeParser.cleanTitle(titleRaw, fallback = "タスク")
+            val task = repository.addTask(title, dueDate?.toEpochMilli())
+            photoRepository.linkToMemo(photo, task.id)
+            return CatReply("ポイに入れて写真も残したにゃ")
+        }
+
+        val memoContent = extractMemoCommand(trimmed)
+        if (memoContent != null) {
+            val scheduleFromMemo = DateTimeParser.parseRegistration(memoContent, now)
+            if (scheduleFromMemo != null) {
+                photoRepository.updateDetails(
+                    photo,
+                    caption = photo.caption,
+                    albumName = photo.albumName,
+                    linkedDate = scheduleFromMemo.dateTime.toLocalDate().toEpochMilli(),
+                )
+                repository.remember(scheduleFromMemo.title, scheduleFromMemo.dateTime.toEpochMilli())
+                return CatReply("覚えて写真も残したにゃ")
+            }
+            val event = repository.remember(memoContent, null)
+            photoRepository.linkToMemo(photo, event.id)
+            return CatReply("メモと一緒に写真も残したにゃ")
+        }
+
+        val registration = DateTimeParser.parseRegistration(trimmed, now)
+        if (registration != null) {
+            photoRepository.updateDetails(
+                photo,
+                caption = photo.caption,
+                albumName = photo.albumName,
+                linkedDate = registration.dateTime.toLocalDate().toEpochMilli(),
+            )
+            repository.remember(registration.title, registration.dateTime.toEpochMilli())
+            return CatReply("覚えて写真も残したにゃ")
+        }
+
+        // Nothing matched a known sorting trigger. Never guess: no new schedule/Poi/memo
+        // is created and the photo is left exactly as already saved (an uncategorized
+        // album photo) — only the reply differs by what kind of caption this looks like.
+        if (looksOutOfScope(trimmed)) {
+            return CatReply(outOfScopeReply(trimmed))
+        }
+        if (looksLikeImageContentQuestion(trimmed)) {
+            return CatReply(imageContentDeclineReply())
+        }
+        return CatReply(unsortablePhotoReply())
+    }
+
+    private val imageReferentialWords = listOf("これ", "この", "それ", "写真")
+
+    /** "これ何？"/"この人誰？"/"これどう思う？" style — a question about the photo's
+     * contents, which this app can't answer (no image-analysis AI is used). */
+    private fun looksLikeImageContentQuestion(text: String): Boolean =
+        DateTimeParser.isQuery(text) && imageReferentialWords.any { text.contains(it) }
+
+    private val imageContentDeclineReplies = listOf(
+        "写真の中身までは見れないにゃ",
+        "それは他のAIに見てもらえにゃ",
+    )
+
+    private fun imageContentDeclineReply(): String = imageContentDeclineReplies.random()
+
+    private val unsortablePhotoReplies = listOf(
+        "これはまだ仕分けできないにゃ",
+        "うまく仕分けできなかったにゃ",
+        "ポイにもメモにもできなかったにゃ",
+    )
+
+    private fun unsortablePhotoReply(): String = unsortablePhotoReplies.random()
+
+    /**
      * Phase A: a lightweight, keyword-based guard for topics PoiCat doesn't manage
      * (weather, news, general trivia, translation, arithmetic, recommendations, ...).
      * This can't perfectly tell "out of scope" apart from "in scope but not saved yet"
