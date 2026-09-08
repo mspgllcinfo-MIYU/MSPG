@@ -21,8 +21,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Pets
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -56,7 +56,7 @@ private fun iconFor(tab: AppTab): ImageVector = when (tab) {
     AppTab.POI -> Icons.Default.CheckCircle
     AppTab.CAL -> Icons.Default.DateRange
     AppTab.MEMO -> Icons.Default.Edit
-    AppTab.AI -> Icons.Default.Pets
+    AppTab.AI -> Icons.Default.Face
 }
 
 @Composable
