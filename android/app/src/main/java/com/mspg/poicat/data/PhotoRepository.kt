@@ -51,8 +51,11 @@ class PhotoRepository(private val context: Context) {
 
     suspend fun byEvent(eventId: Long) = dao.byEvent(eventId)
 
-    suspend fun updateDetails(photo: Photo, caption: String?, albumName: String?) {
-        dao.update(photo.copy(caption = caption, albumName = albumName))
+    /** Photos linked to the calendar day starting at [startOfDay] (inclusive) through [endOfDay] (inclusive). */
+    suspend fun byLinkedDate(startOfDay: Long, endOfDay: Long) = dao.byLinkedDate(startOfDay, endOfDay)
+
+    suspend fun updateDetails(photo: Photo, caption: String?, albumName: String?, linkedDate: Long?) {
+        dao.update(photo.copy(caption = caption, albumName = albumName, linkedDate = linkedDate))
     }
 
     /** Unlinks a photo from an event without touching the photo/album itself — used when the

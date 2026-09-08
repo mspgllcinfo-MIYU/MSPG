@@ -4,6 +4,7 @@ import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -48,6 +50,8 @@ import com.mspg.poicat.brain.toLocalDate
 import com.mspg.poicat.brain.toLocalDateTime
 import com.mspg.poicat.data.CatEvent
 import com.mspg.poicat.data.CatEventRepository
+import com.mspg.poicat.data.Photo
+import com.mspg.poicat.data.PhotoRepository
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -65,11 +69,14 @@ fun CalendarScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val repository = remember { CatEventRepository(context.applicationContext) }
+    val photoRepository = remember { PhotoRepository(context.applicationContext) }
 
     var yearMonth by remember { mutableStateOf(YearMonth.now()) }
     var selectedDate by remember { mutableStateOf(LocalDate.now()) }
     var eventsInMonth by remember { mutableStateOf<List<CatEvent>>(emptyList()) }
     var eventsOnSelectedDay by remember { mutableStateOf<List<CatEvent>>(emptyList()) }
+    var photosOnSelectedDay by remember { mutableStateOf<List<Photo>>(emptyList()) }
+    var detailPhoto by remember { mutableStateOf<Photo?>(null) }
     var editingEvent by remember { mutableStateOf<CatEvent?>(null) }
     var showDialog by remember { mutableStateOf(false) }
     var refreshTick by remember { mutableStateOf(0) }
@@ -84,6 +91,7 @@ fun CalendarScreen() {
         val start = selectedDate.toEpochMilli()
         val end = selectedDate.plusDays(1).toEpochMilli() - 1
         eventsOnSelectedDay = repository.onDay(start, end)
+        photosOnSelectedDay = photoRepository.byLinkedDate(start, end)
     }
 
     val datesWithEvents = remember(eventsInMonth) {
@@ -153,6 +161,51 @@ fun CalendarScreen() {
             )
             Spacer(Modifier.height(8.dp))
         }
+
+        if (photosOnSelectedDay.isNotEmpty()) {
+            item {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "📷 写真${photosOnSelectedDay.size}枚",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    photosOnSelectedDay.forEach { photo ->
+                        PhotoThumbnail(
+                            photo = photo,
+                            onClick = { detailPhoto = photo },
+                            modifier = Modifier.size(80.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    detailPhoto?.let { photo ->
+        PhotoDetailDialog(
+            photo = photo,
+            onDismiss = { detailPhoto = null },
+            onSave = { caption, album, linkedDate ->
+                scope.launch {
+                    photoRepository.updateDetails(photo, caption, album, linkedDate?.toEpochMilli())
+                    detailPhoto = null
+                    refreshTick++
+                }
+            },
+            onDelete = {
+                scope.launch {
+                    photoRepository.delete(photo)
+                    detailPhoto = null
+                    refreshTick++
+                }
+            },
+        )
     }
 
     if (showDialog) {

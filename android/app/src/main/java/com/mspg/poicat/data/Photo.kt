@@ -24,6 +24,8 @@ data class Photo(
     val albumName: String? = null,
     /** Epoch millis when the photo was added to the app. */
     val addedAt: Long = System.currentTimeMillis(),
-    /** Id of a linked cat_events row (a schedule or a memo), or null if unlinked. */
+    /** Id of a linked cat_events row (a schedule or a memo) — for a later phase, unused for now. */
     val eventId: Long? = null,
+    /** Epoch millis for the start of the calendar day this photo is linked to, or null. */
+    val linkedDate: Long? = null,
 )

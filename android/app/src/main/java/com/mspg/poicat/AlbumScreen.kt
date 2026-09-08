@@ -1,6 +1,7 @@
 package com.mspg.poicat
 
 import android.Manifest
+import android.app.DatePickerDialog
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -30,6 +31,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -54,10 +56,12 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import com.mspg.poicat.brain.toEpochMilli
 import com.mspg.poicat.brain.toLocalDate
 import com.mspg.poicat.data.Photo
 import com.mspg.poicat.data.PhotoRepository
 import java.io.File
+import java.time.LocalDate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -174,9 +178,9 @@ fun AlbumScreen(onBack: () -> Unit) {
         PhotoDetailDialog(
             photo = photo,
             onDismiss = { detailPhoto = null },
-            onSave = { caption, album ->
+            onSave = { caption, album, linkedDate ->
                 scope.launch {
-                    repository.updateDetails(photo, caption, album)
+                    repository.updateDetails(photo, caption, album, linkedDate?.toEpochMilli())
                     reload()
                     detailPhoto = null
                 }
@@ -193,12 +197,12 @@ fun AlbumScreen(onBack: () -> Unit) {
 }
 
 @Composable
-private fun PhotoThumbnail(photo: Photo, onClick: () -> Unit) {
+fun PhotoThumbnail(photo: Photo, onClick: () -> Unit, modifier: Modifier = Modifier) {
     var bitmap by remember(photo.id) { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(photo.filePath) { bitmap = decodeSampledBitmap(photo.filePath, 300) }
 
     Box(
-        modifier = Modifier
+        modifier = modifier
             .aspectRatio(1f)
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
@@ -229,14 +233,16 @@ private fun PhotoThumbnail(photo: Photo, onClick: () -> Unit) {
 }
 
 @Composable
-private fun PhotoDetailDialog(
+fun PhotoDetailDialog(
     photo: Photo,
     onDismiss: () -> Unit,
-    onSave: (caption: String?, album: String?) -> Unit,
+    onSave: (caption: String?, album: String?, linkedDate: LocalDate?) -> Unit,
     onDelete: () -> Unit,
 ) {
+    val context = LocalContext.current
     var caption by remember(photo.id) { mutableStateOf(photo.caption ?: "") }
     var album by remember(photo.id) { mutableStateOf(photo.albumName ?: "") }
+    var linkedDate by remember(photo.id) { mutableStateOf(photo.linkedDate?.toLocalDate()) }
     var bitmap by remember(photo.id) { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(photo.filePath) { bitmap = decodeSampledBitmap(photo.filePath, 1200) }
     val addedDate = photo.addedAt.toLocalDate()
@@ -289,6 +295,28 @@ private fun PhotoDetailDialog(
                 modifier = Modifier.fillMaxWidth(),
             )
 
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = {
+                    val base = linkedDate ?: LocalDate.now()
+                    DatePickerDialog(
+                        context,
+                        { _, year, month, dayOfMonth -> linkedDate = LocalDate.of(year, month + 1, dayOfMonth) },
+                        base.year,
+                        base.monthValue - 1,
+                        base.dayOfMonth,
+                    ).show()
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(linkedDate?.let { "カレンダーの日付: ${it.monthValue}月${it.dayOfMonth}日" } ?: "カレンダーの日付を設定（任意）")
+            }
+            if (linkedDate != null) {
+                TextButton(onClick = { linkedDate = null }) {
+                    Text("日付をなしにする")
+                }
+            }
+
             Spacer(Modifier.height(12.dp))
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onDelete) {
@@ -297,7 +325,7 @@ private fun PhotoDetailDialog(
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = onDismiss) { Text("閉じる") }
                 Spacer(Modifier.width(4.dp))
-                Button(onClick = { onSave(caption.trim().ifBlank { null }, album.trim().ifBlank { null }) }) {
+                Button(onClick = { onSave(caption.trim().ifBlank { null }, album.trim().ifBlank { null }, linkedDate) }) {
                     Text("保存")
                 }
             }
@@ -307,7 +335,7 @@ private fun PhotoDetailDialog(
 
 /** Decodes [path] downsampled to roughly [reqSize]px on the long side, to keep
  * thumbnail/detail memory use reasonable regardless of the original photo size. */
-private suspend fun decodeSampledBitmap(path: String, reqSize: Int): ImageBitmap? = withContext(Dispatchers.IO) {
+suspend fun decodeSampledBitmap(path: String, reqSize: Int): ImageBitmap? = withContext(Dispatchers.IO) {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeFile(path, bounds)
     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@withContext null

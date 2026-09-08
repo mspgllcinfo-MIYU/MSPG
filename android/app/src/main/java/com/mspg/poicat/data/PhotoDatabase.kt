@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 /**
  * A separate Room database for photo metadata, deliberately independent from
@@ -11,7 +13,7 @@ import androidx.room.RoomDatabase
  * means adding or changing the photo schema can never require a migration
  * of — or risk any damage to — the data already stored in `cat_events`.
  */
-@Database(entities = [Photo::class], version = 1, exportSchema = false)
+@Database(entities = [Photo::class], version = 2, exportSchema = false)
 abstract class PhotoDatabase : RoomDatabase() {
     abstract fun photoDao(): PhotoDao
 
@@ -19,13 +21,24 @@ abstract class PhotoDatabase : RoomDatabase() {
         @Volatile
         private var instance: PhotoDatabase? = null
 
+        // v1 -> v2: added Photo.linkedDate (calendar-day link). A single additive
+        // ADD COLUMN, so existing photos/albums from v1 are kept as-is with
+        // linkedDate simply starting out unset (NULL).
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE photos ADD COLUMN linkedDate INTEGER")
+            }
+        }
+
         fun get(context: Context): PhotoDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
                     context.applicationContext,
                     PhotoDatabase::class.java,
                     "poicat_photos.db",
-                ).build().also { instance = it }
+                )
+                    .addMigrations(MIGRATION_1_2)
+                    .build().also { instance = it }
             }
     }
 }

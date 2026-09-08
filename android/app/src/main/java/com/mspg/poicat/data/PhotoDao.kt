@@ -24,6 +24,10 @@ interface PhotoDao {
     @Query("SELECT * FROM photos WHERE albumName = :album ORDER BY addedAt DESC")
     suspend fun byAlbum(album: String): List<Photo>
 
+    /** Photos linked to a specific calendar day (see [Photo.linkedDate]). */
+    @Query("SELECT * FROM photos WHERE linkedDate BETWEEN :startOfDay AND :endOfDay ORDER BY addedAt DESC")
+    suspend fun byLinkedDate(startOfDay: Long, endOfDay: Long): List<Photo>
+
     /** Distinct album names in use, for the filter chips / picker. */
     @Query("SELECT DISTINCT albumName FROM photos WHERE albumName IS NOT NULL AND albumName != '' ORDER BY albumName ASC")
     suspend fun albumNames(): List<String>
