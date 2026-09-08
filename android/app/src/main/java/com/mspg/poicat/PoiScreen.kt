@@ -3,7 +3,9 @@ package com.mspg.poicat
 import android.app.DatePickerDialog
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,8 +13,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -42,6 +46,8 @@ import com.mspg.poicat.brain.toEpochMilli
 import com.mspg.poicat.brain.toLocalDate
 import com.mspg.poicat.data.CatEvent
 import com.mspg.poicat.data.CatEventRepository
+import com.mspg.poicat.data.Photo
+import com.mspg.poicat.data.PhotoRepository
 import java.time.LocalDate
 import kotlinx.coroutines.launch
 
@@ -55,14 +61,23 @@ fun PoiScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val repository = remember { CatEventRepository(context.applicationContext) }
+    val photoRepository = remember { PhotoRepository(context.applicationContext) }
 
     var tasks by remember { mutableStateOf<List<CatEvent>>(emptyList()) }
     var editingTask by remember { mutableStateOf<CatEvent?>(null) }
     var showDialog by remember { mutableStateOf(false) }
+    var linkedPhotos by remember { mutableStateOf<List<Photo>>(emptyList()) }
+    var detailPhoto by remember { mutableStateOf<Photo?>(null) }
     var refreshTick by remember { mutableStateOf(0) }
 
     LaunchedEffect(refreshTick) {
         tasks = repository.tasks()
+    }
+
+    // Photos a chat-attached photo got linked to this task with (Phase C) — same
+    // photo<->event link MemoScreen already reads for a memo's photo strip.
+    LaunchedEffect(editingTask, refreshTick) {
+        linkedPhotos = editingTask?.let { photoRepository.photosForMemo(it.id) } ?: emptyList()
     }
 
     Column(
@@ -106,6 +121,10 @@ fun PoiScreen() {
                     onClick = { editingTask = task; showDialog = true },
                     onDelete = {
                         scope.launch {
+                            // Drop the photo links before the task itself is gone, so no
+                            // link is left pointing at a now-nonexistent task id. The
+                            // photos/album are never touched by this.
+                            photoRepository.unlinkAllForMemo(task.id)
                             repository.delete(task)
                             refreshTick++
                         }
@@ -121,10 +140,16 @@ fun PoiScreen() {
             initialTitle = current?.title ?: "",
             initialDueDate = current?.dateTime?.toLocalDate(),
             isEditing = current != null,
+            linkedPhotos = linkedPhotos,
+            // Closes this AlertDialog before opening the detail Dialog rather than
+            // stacking a second dialog window on top of it — same approach MemoScreen
+            // already uses for its own photo strip.
+            onPhotoClick = { showDialog = false; detailPhoto = it },
             onDismiss = { showDialog = false; editingTask = null },
             onDelete = current?.let { task ->
                 {
                     scope.launch {
+                        photoRepository.unlinkAllForMemo(task.id)
                         repository.delete(task)
                         showDialog = false
                         editingTask = null
@@ -143,6 +168,29 @@ fun PoiScreen() {
                     showDialog = false
                     editingTask = null
                     refreshTick++
+                }
+            },
+        )
+    }
+
+    detailPhoto?.let { photo ->
+        PhotoDetailDialog(
+            photo = photo,
+            onDismiss = { detailPhoto = null; showDialog = true },
+            onSave = { caption, album, linkedDate ->
+                scope.launch {
+                    photoRepository.updateDetails(photo, caption, album, linkedDate?.toEpochMilli())
+                    linkedPhotos = editingTask?.let { photoRepository.photosForMemo(it.id) } ?: emptyList()
+                    detailPhoto = null
+                    showDialog = true
+                }
+            },
+            onDelete = {
+                scope.launch {
+                    photoRepository.delete(photo)
+                    linkedPhotos = editingTask?.let { photoRepository.photosForMemo(it.id) } ?: emptyList()
+                    detailPhoto = null
+                    showDialog = true
                 }
             },
         )
@@ -196,6 +244,8 @@ private fun TaskEditDialog(
     initialTitle: String,
     initialDueDate: LocalDate?,
     isEditing: Boolean,
+    linkedPhotos: List<Photo>,
+    onPhotoClick: (Photo) -> Unit,
     onDismiss: () -> Unit,
     onDelete: (() -> Unit)?,
     onSave: (title: String, dueDate: LocalDate?) -> Unit,
@@ -234,6 +284,24 @@ private fun TaskEditDialog(
                 if (dueDate != null) {
                     TextButton(onClick = { dueDate = null }) {
                         Text("期限をなしにする")
+                    }
+                }
+
+                // Read-only: linked here by the cat AI (Phase C) when a photo was sent
+                // together with a Poi-registering caption — no add/unlink UI in this
+                // screen, just viewing what's already linked.
+                if (isEditing && linkedPhotos.isNotEmpty()) {
+                    Spacer(Modifier.height(12.dp))
+                    Text("写真", fontWeight = FontWeight.Bold)
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        linkedPhotos.forEach { photo ->
+                            Box(modifier = Modifier.size(64.dp)) {
+                                PhotoThumbnail(photo = photo, onClick = { onPhotoClick(photo) })
+                            }
+                        }
                     }
                 }
             }
