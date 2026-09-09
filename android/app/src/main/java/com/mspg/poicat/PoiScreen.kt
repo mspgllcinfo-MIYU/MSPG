@@ -96,7 +96,15 @@ private enum class PoiCategoryTab(val label: String) {
  * button (both untouched; Block D reconciles the single-entry-point final layout).
  */
 @Composable
-fun PoiScreen() {
+fun PoiScreen(
+    // Block E: a one-shot signal for Home's アルバム entry point, which now lands
+    // directly on this tab instead of the old standalone showAlbum overlay. Default
+    // false/no-op so a normal BottomNav "ポイ" tap (PoiScreen() with no arguments)
+    // behaves exactly as before — selectedCategoryTab keeps whatever the user last
+    // had selected, via its own rememberSaveable below.
+    requestAlbumTab: Boolean = false,
+    onAlbumTabRequestConsumed: () -> Unit = {},
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val repository = remember { CatEventRepository(context.applicationContext) }
@@ -104,9 +112,18 @@ fun PoiScreen() {
 
     var selectedCategoryTab by rememberSaveable { mutableStateOf(PoiCategoryTab.WORK) }
     // Block C-2: Poi's own アルバム sub-tab keeps its own selected-album state,
-    // separate from AppRoot's albumSelectedAlbum (which still serves Home's
-    // existing full-screen album entry point, untouched).
+    // independent of any external caller.
     var poiSelectedAlbum by rememberSaveable { mutableStateOf<String?>(null) }
+
+    // Block E: consumed exactly once — without onAlbumTabRequestConsumed clearing the
+    // request on AppRoot's side, every later plain "ポイ" BottomNav tap would keep
+    // forcing this tab back to アルバム instead of remembering the user's own choice.
+    LaunchedEffect(requestAlbumTab) {
+        if (requestAlbumTab) {
+            selectedCategoryTab = PoiCategoryTab.ALBUM
+            onAlbumTabRequestConsumed()
+        }
+    }
     var tasks by remember { mutableStateOf<List<CatEvent>>(emptyList()) }
     var editingTask by remember { mutableStateOf<CatEvent?>(null) }
     var showDialog by remember { mutableStateOf(false) }

@@ -83,13 +83,15 @@ private val LocalDateSaver = Saver<LocalDate, Long>(
 @Composable
 fun AppRoot() {
     var selectedTab by remember { mutableStateOf(AppTab.AI) }
-    var showAlbum by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
     var calendarYearMonth by rememberSaveable(stateSaver = YearMonthSaver) { mutableStateOf(YearMonth.now()) }
     var calendarSelectedDate by rememberSaveable(stateSaver = LocalDateSaver) { mutableStateOf(LocalDate.now()) }
     var aiSelectedRoom by rememberSaveable { mutableStateOf(ChatRoom.CASUAL) }
-    var albumSelectedAlbum by rememberSaveable { mutableStateOf<String?>(null) }
+    // Block E: Home's アルバム entry now lands directly on Poi's own アルバム sub-tab
+    // (see PoiScreen's requestAlbumTab) instead of the old standalone showAlbum
+    // overlay — this is that request, cleared the moment PoiScreen consumes it.
+    var poiRequestAlbum by remember { mutableStateOf(false) }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -109,30 +111,28 @@ fun AppRoot() {
 
     Column(modifier = Modifier.fillMaxSize()) {
         Box(modifier = Modifier.weight(1f)) {
-            if (showAlbum) {
-                AlbumScreen(
-                    onBack = { showAlbum = false },
-                    selectedAlbum = albumSelectedAlbum,
-                    onSelectedAlbumChange = { albumSelectedAlbum = it },
+            when (selectedTab) {
+                AppTab.HOME -> HomeScreen(
+                    onNavigate = { selectedTab = it },
+                    onOpenAlbum = { poiRequestAlbum = true; selectedTab = AppTab.POI },
                 )
-            } else {
-                when (selectedTab) {
-                    AppTab.HOME -> HomeScreen(onNavigate = { selectedTab = it }, onOpenAlbum = { showAlbum = true })
-                    AppTab.POI -> PoiScreen()
-                    AppTab.CAL -> CalendarScreen(
-                        yearMonth = calendarYearMonth,
-                        onYearMonthChange = { calendarYearMonth = it },
-                        selectedDate = calendarSelectedDate,
-                        onSelectedDateChange = { calendarSelectedDate = it },
-                    )
-                    AppTab.AI -> AiChatScreen(
-                        selectedRoom = aiSelectedRoom,
-                        onSelectedRoomChange = { aiSelectedRoom = it },
-                    )
-                }
+                AppTab.POI -> PoiScreen(
+                    requestAlbumTab = poiRequestAlbum,
+                    onAlbumTabRequestConsumed = { poiRequestAlbum = false },
+                )
+                AppTab.CAL -> CalendarScreen(
+                    yearMonth = calendarYearMonth,
+                    onYearMonthChange = { calendarYearMonth = it },
+                    selectedDate = calendarSelectedDate,
+                    onSelectedDateChange = { calendarSelectedDate = it },
+                )
+                AppTab.AI -> AiChatScreen(
+                    selectedRoom = aiSelectedRoom,
+                    onSelectedRoomChange = { aiSelectedRoom = it },
+                )
             }
         }
-        BottomTabBar(selectedTab = selectedTab, onSelect = { showAlbum = false; selectedTab = it })
+        BottomTabBar(selectedTab = selectedTab, onSelect = { selectedTab = it })
     }
 }
 
