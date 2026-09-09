@@ -234,7 +234,7 @@ private fun BottomTabBar(selectedTab: AppTab, onSelect: (AppTab) -> Unit) {
                 tint = NavInk.copy(alpha = if (bbSelected) 1f else 0.42f),
                 modifier = Modifier
                     .size(width = 40.dp, height = 54.dp)
-                    .offset(y = (-14).dp),
+                    .offset(y = (-18).dp),
             )
         }
     }

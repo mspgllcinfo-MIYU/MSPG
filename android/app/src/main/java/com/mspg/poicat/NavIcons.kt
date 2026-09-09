@@ -246,17 +246,19 @@ object NavIcons {
         }
 
     /** BB, full-body — not a function icon like Home/Poi/Calendar/Memo, but
-     * BB himself: a round-headed, big-eared black cat standing with a
-     * heavy-lidded, faintly unimpressed look. This app's one character, so
-     * BottomTabBar renders it life-sized rather than as a matched function
-     * icon (see AppRoot.kt's dedicated BB overlay, which skips the pill
-     * background and label the other 4 tabs use). Whiskers and the chest
-     * mark from the reference art are dropped — at nav-icon scale they'd
-     * just blur into noise — so the round silhouette, big ears, and sleepy
-     * eyes alone carry "it's BB". Layered bottom-to-top (body, ears, head,
-     * pupils) so each later layer's opaque fill cleanly covers the seam
-     * where it meets the one before, the same technique used elsewhere in
-     * this file (e.g. Memo's pen, Poi's toe-beans). */
+     * BB himself: a round, plush-toy-like black cat with a big round head
+     * (roughly 6:4 head-to-body), small ears growing naturally out of the
+     * head, a short dumpy body, two simple round leg-bumps, a small round
+     * tail, and big, wide-set, heavy-lidded eyes — sleepy, faintly annoyed,
+     * uninterested, never smiling and never cute-generic-kitten. This app's
+     * one character, so BottomTabBar renders it life-sized rather than as a
+     * matched function icon (see AppRoot.kt's dedicated BB overlay, which
+     * skips the pill background and label the other 4 tabs use). Whiskers
+     * and the chest mark from the reference art are dropped — at nav-icon
+     * scale they'd just blur into noise. Layered bottom-to-top (body, ears,
+     * head, pupils) so each later layer's opaque fill cleanly covers the
+     * seam where it meets the one before, the same technique used elsewhere
+     * in this file (e.g. Memo's pen, Poi's toe-beans). */
     val CatAi: ImageVector
         get() {
             _catAi?.let { return it }
@@ -267,83 +269,115 @@ object NavIcons {
                 viewportWidth = 20f,
                 viewportHeight = 27f,
             ).path(
-                // Body: a rounded torso with two short legs and a small tail curl.
+                // Body: a short, round torso — no tapering into pointy limbs.
+                // Legs and tail are simple round bumps, not pointed shapes.
                 fill = SolidColor(Color.Black),
             ) {
-                moveTo(6f, 16f)
-                lineTo(14f, 16f)
-                lineTo(15.5f, 18f)
-                lineTo(18f, 20.5f)
-                lineTo(16.5f, 23f)
-                lineTo(15f, 21.5f)
-                lineTo(15f, 25f)
-                lineTo(13.5f, 27f)
-                lineTo(11.5f, 25.3f)
-                lineTo(8.5f, 25.3f)
+                // Torso.
+                moveTo(7.5f, 18f)
+                lineTo(12.5f, 18f)
+                quadTo(15.5f, 18f, 15.5f, 20.5f)
+                lineTo(15.5f, 23.5f)
+                quadTo(15.5f, 26f, 12.5f, 26f)
+                lineTo(7.5f, 26f)
+                quadTo(4.5f, 26f, 4.5f, 23.5f)
+                lineTo(4.5f, 20.5f)
+                quadTo(4.5f, 18f, 7.5f, 18f)
+                close()
+                // Left leg: a simple round bump, not a pointed foot.
+                moveTo(6f, 24.3f)
+                lineTo(8.5f, 24.3f)
+                quadTo(9.3f, 24.3f, 9.3f, 25.3f)
+                lineTo(9.3f, 26f)
+                quadTo(9.3f, 27f, 8.3f, 27f)
                 lineTo(6.5f, 27f)
-                lineTo(5f, 25f)
-                lineTo(5f, 18f)
+                quadTo(5.5f, 27f, 5.5f, 26f)
+                lineTo(5.5f, 25.3f)
+                quadTo(5.5f, 24.3f, 6f, 24.3f)
+                close()
+                // Right leg, mirrored.
+                moveTo(14f, 24.3f)
+                lineTo(11.5f, 24.3f)
+                quadTo(10.7f, 24.3f, 10.7f, 25.3f)
+                lineTo(10.7f, 26f)
+                quadTo(10.7f, 27f, 11.7f, 27f)
+                lineTo(13.5f, 27f)
+                quadTo(14.5f, 27f, 14.5f, 26f)
+                lineTo(14.5f, 25.3f)
+                quadTo(14.5f, 24.3f, 14f, 24.3f)
+                close()
+                // Small round tail.
+                moveTo(15f, 19.5f)
+                lineTo(16.8f, 19.5f)
+                quadTo(17.8f, 19.5f, 17.8f, 20.8f)
+                quadTo(17.8f, 22f, 16.8f, 22f)
+                lineTo(15f, 22f)
                 close()
             }.path(
-                // Ears, each with a small inner-ear cutout.
+                // Ears — smaller than before, and rooted close to the head
+                // rather than sticking far out, so they read as growing out
+                // of the head instead of two separate spikes.
                 fill = SolidColor(Color.Black),
                 pathFillType = PathFillType.EvenOdd,
             ) {
-                moveTo(1.5f, 0.5f)
-                lineTo(4.5f, 7.5f)
-                lineTo(8f, 6f)
+                moveTo(3f, 0.5f)
+                lineTo(5.2f, 6.5f)
+                lineTo(8f, 5.5f)
                 close()
-                moveTo(2.7f, 2.7f)
-                lineTo(4.7f, 6.2f)
-                lineTo(6.6f, 5.3f)
+                moveTo(3.8f, 2.3f)
+                lineTo(5.2f, 5.7f)
+                lineTo(6.8f, 5.1f)
                 close()
-                moveTo(18.5f, 0.5f)
-                lineTo(15.5f, 7.5f)
-                lineTo(12f, 6f)
+                moveTo(17f, 0.5f)
+                lineTo(14.8f, 6.5f)
+                lineTo(12f, 5.5f)
                 close()
-                moveTo(17.3f, 2.7f)
-                lineTo(15.3f, 6.2f)
-                lineTo(13.4f, 5.3f)
+                moveTo(16.2f, 2.3f)
+                lineTo(14.8f, 5.7f)
+                lineTo(13.2f, 5.1f)
                 close()
             }.path(
-                // Head, on top of the ear roots and the body's top edge, with
-                // heavy-lidded eye cutouts.
+                // Head — big, wide, and rounded (an oval, not a square), on
+                // top of the ear roots and the body's top edge, with big,
+                // wide-set, heavy-lidded eye cutouts.
                 fill = SolidColor(Color.Black),
                 pathFillType = PathFillType.EvenOdd,
             ) {
-                moveTo(7f, 2f)
-                lineTo(13f, 2f)
-                quadTo(17.5f, 2f, 17.5f, 6.5f)
-                lineTo(17.5f, 12f)
-                quadTo(17.5f, 17f, 13f, 17f)
-                lineTo(7f, 17f)
-                quadTo(2.5f, 17f, 2.5f, 12f)
-                lineTo(2.5f, 6.5f)
-                quadTo(2.5f, 2f, 7f, 2f)
+                moveTo(6f, 2f)
+                lineTo(14f, 2f)
+                quadTo(18.5f, 2f, 18.5f, 7f)
+                lineTo(18.5f, 12f)
+                quadTo(18.5f, 17f, 14f, 17f)
+                lineTo(6f, 17f)
+                quadTo(1.5f, 17f, 1.5f, 12f)
+                lineTo(1.5f, 7f)
+                quadTo(1.5f, 2f, 6f, 2f)
                 close()
-                // Left eye: flat heavy lid on top, rounder underneath.
-                moveTo(5.3f, 9.3f)
-                quadTo(7.3f, 8.1f, 9.3f, 9.3f)
-                quadTo(7.3f, 11.1f, 5.3f, 9.3f)
+                // Left eye: big, set toward the outer edge of the face, with
+                // a heavy flat-ish lid drooping over a rounder underside.
+                moveTo(3.8f, 9.3f)
+                quadTo(6.2f, 7.6f, 8.5f, 9.3f)
+                quadTo(6.2f, 11.4f, 3.8f, 9.3f)
                 close()
                 // Right eye, mirrored.
-                moveTo(14.7f, 9.3f)
-                quadTo(12.7f, 8.1f, 10.7f, 9.3f)
-                quadTo(12.7f, 11.1f, 14.7f, 9.3f)
+                moveTo(16.2f, 9.3f)
+                quadTo(13.8f, 7.6f, 11.5f, 9.3f)
+                quadTo(13.8f, 11.4f, 16.2f, 9.3f)
                 close()
             }.path(
-                // Pupils, sitting inside the eye cutouts, on top of everything.
+                // Pupils — small, sitting low in the eyes for a bored,
+                // uninterested gaze — on top of everything.
                 fill = SolidColor(Color.Black),
             ) {
-                moveTo(6.6f, 9.5f)
-                lineTo(7.6f, 9.5f)
-                lineTo(7.6f, 10.5f)
-                lineTo(6.6f, 10.5f)
+                moveTo(5.6f, 9.6f)
+                lineTo(6.7f, 9.6f)
+                lineTo(6.7f, 10.7f)
+                lineTo(5.6f, 10.7f)
                 close()
-                moveTo(12.4f, 9.5f)
-                lineTo(13.4f, 9.5f)
-                lineTo(13.4f, 10.5f)
-                lineTo(12.4f, 10.5f)
+                moveTo(13.3f, 9.6f)
+                lineTo(14.4f, 9.6f)
+                lineTo(14.4f, 10.7f)
+                lineTo(13.3f, 10.7f)
                 close()
             }.build()
             _catAi = built
