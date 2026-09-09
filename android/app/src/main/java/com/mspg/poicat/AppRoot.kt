@@ -14,15 +14,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Face
-import androidx.compose.material.icons.filled.Home
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -55,12 +51,17 @@ private val NavInk = Color(0xFF201E1D) // 墨色
 private val NavPink = Color(0xFFD98A9C) // existing app pink, used only as a soft selection pill
 private val NavGold = Color(0xFFC9A66B) // restrained accent — the top hairline only
 
+// Step: a matched set of 5 custom icons (NavIcons.kt) replacing the standard
+// Material glyphs, so BottomTabBar reads as this app's own designed set
+// rather than generic-Android-app icons — see NavIcons.kt for the shared
+// design language (24x24 viewport, filled-silhouette-with-cutouts) all 5
+// are drawn in.
 private fun iconFor(tab: AppTab): ImageVector = when (tab) {
-    AppTab.HOME -> Icons.Default.Home
-    AppTab.POI -> Icons.Default.CheckCircle
-    AppTab.CAL -> Icons.Default.DateRange
-    AppTab.MEMO -> Icons.Default.Edit
-    AppTab.AI -> Icons.Default.Face
+    AppTab.HOME -> NavIcons.Home
+    AppTab.POI -> NavIcons.Poi
+    AppTab.CAL -> NavIcons.Calendar
+    AppTab.MEMO -> NavIcons.Memo
+    AppTab.AI -> NavIcons.CatAi
 }
 
 // "Where was I looking" navigation state, kept across BottomNav tab switches
@@ -157,30 +158,36 @@ private fun BottomTabBar(selectedTab: AppTab, onSelect: (AppTab) -> Unit) {
         ) {
             AppTab.entries.forEach { tab ->
                 val selected = tab == selectedTab
+                // The tap target (this Box) always keeps its full weight(1f)
+                // width and a 48dp-minimum height, independent of how compact
+                // the visual pill inside it is — shrinking the look must not
+                // shrink the tappable area.
                 Box(
                     modifier = Modifier
                         .weight(1f)
+                        .heightIn(min = 48.dp)
                         .clickable { onSelect(tab) },
                     contentAlignment = Alignment.Center,
                 ) {
                     Column(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(percent = 50))
+                            .widthIn(max = 80.dp)
+                            .clip(RoundedCornerShape(10.dp))
                             .background(if (selected) NavPink.copy(alpha = 0.22f) else Color.Transparent)
-                            .padding(horizontal = 14.dp, vertical = 6.dp),
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Icon(
                             imageVector = iconFor(tab),
                             contentDescription = tab.label,
-                            tint = NavInk.copy(alpha = if (selected) 1f else 0.5f),
-                            modifier = Modifier.size(22.dp),
+                            tint = NavInk.copy(alpha = if (selected) 1f else 0.42f),
+                            modifier = Modifier.size(20.dp),
                         )
                         Spacer(Modifier.height(2.dp))
                         Text(
                             text = tab.label,
                             fontSize = 11.sp,
-                            color = NavInk.copy(alpha = if (selected) 1f else 0.5f),
+                            color = NavInk.copy(alpha = if (selected) 1f else 0.42f),
                             fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                         )
                     }
