@@ -22,4 +22,17 @@ data class CatEvent(
     val reminded1Hour: Boolean = false,
     val isTask: Boolean = false,
     val completed: Boolean = false,
-)
+    /**
+     * Poi task category — [CATEGORY_WORK] or [CATEGORY_PRIVATE], or null when
+     * not yet classified (every pre-v3 row, and every non-task schedule/memo
+     * row, for which this concept doesn't apply). Null is a real, permanent
+     * state, not just a migration artifact — it's how an unclassified task
+     * stays re-classifiable later rather than being forced into a guess.
+     */
+    val category: String? = null,
+) {
+    companion object {
+        const val CATEGORY_WORK = "work"
+        const val CATEGORY_PRIVATE = "private"
+    }
+}
