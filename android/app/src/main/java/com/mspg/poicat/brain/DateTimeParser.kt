@@ -32,7 +32,13 @@ object DateTimeParser {
     // Trailing "教えて"/"見せて" ("tell me"/"show me") and these substrings mark a
     // question even without a "？"/"?"/"いつ" — covers phrasings like "やること教えて"
     // or "まだ終わってないこと" that a real question mark would normally signal.
-    private val querySuffixHints = listOf("教えて", "見せて")
+    // "の予定は"/"予定は"/"の予定" cover the common punctuation-less way of asking
+    // "what's the plan (for X)" — e.g. "今日の予定は" — which otherwise falls through
+    // to parseRegistration(): "今日" resolves as a real date, and the remaining "の予定は"
+    // is entirely scaffolding that cleanTitle() reduces to blank, so it would silently
+    // register a same-day event with the meaningless fallback title "予定" instead of
+    // being answered as a question.
+    private val querySuffixHints = listOf("教えて", "見せて", "の予定は", "予定は", "の予定")
     // Deliberately narrow: "タスク"/"ポイ"/"やること" are NOT included here even though
     // isTaskQuestion() also checks them — those words also appear in completion phrases
     // like "牛乳のタスク終わった" (taskCompletionSuffixes below), and this check runs
