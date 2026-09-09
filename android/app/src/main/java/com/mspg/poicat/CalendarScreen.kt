@@ -139,6 +139,19 @@ fun CalendarScreen(
                     onPrev = { onYearMonthChange(yearMonth.minusMonths(1)) },
                     onNext = { onYearMonthChange(yearMonth.plusMonths(1)) },
                 )
+                if (yearMonth != YearMonth.now() || selectedDate != LocalDate.now()) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(
+                            onClick = {
+                                onYearMonthChange(YearMonth.now())
+                                onSelectedDateChange(LocalDate.now())
+                            },
+                            colors = ButtonDefaults.textButtonColors(contentColor = CalendarPink),
+                        ) {
+                            Text("今日へ戻る", fontSize = 13.sp)
+                        }
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
                 MonthGrid(
                     yearMonth = yearMonth,
