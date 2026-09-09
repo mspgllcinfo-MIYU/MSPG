@@ -125,6 +125,9 @@ fun PoiScreen() {
     val visibleTasks = when (selectedCategoryTab) {
         PoiCategoryTab.WORK -> tasks.filter { it.category == CatEvent.CATEGORY_WORK }
         PoiCategoryTab.PRIVATE -> tasks.filter { it.category == CatEvent.CATEGORY_PRIVATE || it.category == null }
+        // メモ/アルバム render MemoScreen()/AlbumScreen() instead of the task list —
+        // this list simply isn't used under either tab.
+        PoiCategoryTab.MEMO, PoiCategoryTab.ALBUM -> emptyList()
     }
 
     // Photos a chat-attached photo got linked to this task with (Phase C) — same
@@ -289,6 +292,11 @@ fun PoiScreen() {
                         val category = when (selectedCategoryTab) {
                             PoiCategoryTab.WORK -> CatEvent.CATEGORY_WORK
                             PoiCategoryTab.PRIVATE -> CatEvent.CATEGORY_PRIVATE
+                            // Unreachable: this dialog only opens from the task list's own
+                            // "＋ 追加", which isn't shown under メモ/アルバム. Kept exhaustive
+                            // rather than an `else`, so a future new tab can't silently fall
+                            // through here unnoticed.
+                            PoiCategoryTab.MEMO, PoiCategoryTab.ALBUM -> null
                         }
                         repository.addTask(title, dueMillis, category)
                     }
