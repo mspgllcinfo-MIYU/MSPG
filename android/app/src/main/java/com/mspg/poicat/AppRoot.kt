@@ -60,7 +60,6 @@ private fun iconFor(tab: AppTab): ImageVector = when (tab) {
     AppTab.HOME -> NavIcons.Home
     AppTab.POI -> NavIcons.Poi
     AppTab.CAL -> NavIcons.Calendar
-    AppTab.MEMO -> NavIcons.Memo
     AppTab.AI -> NavIcons.CatAi
 }
 
@@ -126,7 +125,6 @@ fun AppRoot() {
                         selectedDate = calendarSelectedDate,
                         onSelectedDateChange = { calendarSelectedDate = it },
                     )
-                    AppTab.MEMO -> MemoScreen()
                     AppTab.AI -> AiChatScreen(
                         selectedRoom = aiSelectedRoom,
                         onSelectedRoomChange = { aiSelectedRoom = it },
@@ -161,8 +159,8 @@ private fun BottomTabBar(selectedTab: AppTab, onSelect: (AppTab) -> Unit) {
                     if (tab == AppTab.AI) {
                         // BB's real button is the standalone overlay below (drawn on
                         // top, and free to extend above this bar's own top edge) — this
-                        // Spacer only reserves BB's normal 1/5-width share, so the other
-                        // 4 tabs' widths and this Row's own height are exactly as if BB
+                        // Spacer only reserves BB's normal 1/4-width share, so the other
+                        // 3 tabs' widths and this Row's own height are exactly as if BB
                         // were still a plain tab here.
                         Spacer(modifier = Modifier.weight(1f).heightIn(min = 48.dp))
                     } else {
@@ -205,7 +203,7 @@ private fun BottomTabBar(selectedTab: AppTab, onSelect: (AppTab) -> Unit) {
             }
         }
 
-        // BB: not a function icon like the other 4 — this is BB himself,
+        // BB: not a function icon like the other 3 — this is BB himself,
         // standing in as 猫AI's entire entry point (no pill, no label; his
         // silhouette alone is the affordance). A standalone element layered
         // on top of the bar rather than a Row child, so he's free to peek
@@ -219,11 +217,16 @@ private fun BottomTabBar(selectedTab: AppTab, onSelect: (AppTab) -> Unit) {
         // BB anywhere he's drawn, ears included, always lands inside this
         // same clickable box, across the whole range this offset is meant
         // to be tuned within.
+        //
+        // Block D: BottomNav dropped from 5 slots to 4 (メモ removed, folded into
+        // Poi) — this fraction stays matched to the Row's own weighted slot count
+        // (3 pill tabs + AI's Spacer, all weight(1f)) so BB's absolute-width overlay
+        // still lines up with the space the Row reserves for him.
         val bbSelected = selectedTab == AppTab.AI
         Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .fillMaxWidth(1f / 5f)
+                .fillMaxWidth(1f / 4f)
                 .height(76.dp)
                 .clickable { onSelect(AppTab.AI) },
             contentAlignment = Alignment.BottomCenter,

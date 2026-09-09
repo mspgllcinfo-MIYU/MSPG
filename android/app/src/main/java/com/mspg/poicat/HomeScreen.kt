@@ -140,7 +140,10 @@ fun HomeScreen(onNavigate: (AppTab) -> Unit, onOpenAlbum: () -> Unit) {
 
             recentMemo?.let { memo ->
                 Spacer(Modifier.height(12.dp))
-                HomeSection(title = "最近のメモ", onClick = { onNavigate(AppTab.MEMO) }) {
+                // Block D: メモ moved from its own BottomNav tab into Poi's internal
+                // メモ sub-tab — this lands on Poi (its own remembered sub-tab, not
+                // necessarily メモ) rather than reaching into Poi's internal state.
+                HomeSection(title = "最近のメモ", onClick = { onNavigate(AppTab.POI) }) {
                     Text(memo.title)
                 }
             }

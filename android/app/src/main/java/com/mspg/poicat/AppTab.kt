@@ -4,6 +4,5 @@ enum class AppTab(val label: String) {
     HOME("ホーム"),
     POI("ポイ"),
     CAL("カレンダー"),
-    MEMO("メモ"),
     AI("猫AI"),
 }
