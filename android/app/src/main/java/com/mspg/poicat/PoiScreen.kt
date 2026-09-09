@@ -1,6 +1,7 @@
 package com.mspg.poicat
 
 import android.app.DatePickerDialog
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -24,6 +25,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -37,6 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,10 +70,22 @@ private val PoiCard = Color(0xFFEFE7DE) // a shade deeper than the page, for tas
 private val PoiGold = Color(0xFFC9A66B) // restrained accent, never a fill color
 private val PoiPink = Color(0xFFD98A9C) // the app's existing pink, kept rare
 
+// Block C-1: Poi's internal 仕事/プラベ split — a plain Kotlin enum, saved the same
+// way ChatRoom already is elsewhere in this app (rememberSaveable's default Saver
+// stores an enum via Bundle's Serializable support, no custom Saver needed).
+private enum class PoiCategoryTab(val label: String) {
+    WORK("仕事"),
+    PRIVATE("プラベ"),
+}
+
 /**
  * Poi tab: a plain to-do list, stored as `isTask = true` rows in the same
  * shared `cat_events` table. The cat AI answers "今日やることは？" /
  * "残ってるタスクは？" from the same not-yet-done rows this screen manages.
+ *
+ * Block C-1: internally split into 仕事/プラベ sub-tabs, filtered client-side from
+ * the same full task list — no new DAO query, and category=null tasks (not yet
+ * classified) show up under プラベ without ever being written back as "private".
  */
 @Composable
 fun PoiScreen() {
@@ -78,6 +94,7 @@ fun PoiScreen() {
     val repository = remember { CatEventRepository(context.applicationContext) }
     val photoRepository = remember { PhotoRepository(context.applicationContext) }
 
+    var selectedCategoryTab by rememberSaveable { mutableStateOf(PoiCategoryTab.WORK) }
     var tasks by remember { mutableStateOf<List<CatEvent>>(emptyList()) }
     var editingTask by remember { mutableStateOf<CatEvent?>(null) }
     var showDialog by remember { mutableStateOf(false) }
@@ -88,6 +105,14 @@ fun PoiScreen() {
 
     LaunchedEffect(refreshTick) {
         tasks = repository.tasks()
+    }
+
+    // Unclassified (category == null) tasks — every pre-Block-B row, and anything
+    // added outside CatBrain — show up under プラベ so nothing existing goes missing,
+    // without ever writing "private" back onto them.
+    val visibleTasks = when (selectedCategoryTab) {
+        PoiCategoryTab.WORK -> tasks.filter { it.category == CatEvent.CATEGORY_WORK }
+        PoiCategoryTab.PRIVATE -> tasks.filter { it.category == CatEvent.CATEGORY_PRIVATE || it.category == null }
     }
 
     // Photos a chat-attached photo got linked to this task with (Phase C) — same
@@ -117,6 +142,30 @@ fun PoiScreen() {
             }
         }
 
+        // Block C-1: 仕事/プラベ switch — same FilterChip pattern AiChatScreen already
+        // uses for its 仕事/プライベート/雑談 tabs.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            PoiCategoryTab.entries.forEach { tab ->
+                val selected = tab == selectedCategoryTab
+                FilterChip(
+                    selected = selected,
+                    onClick = { selectedCategoryTab = tab },
+                    label = { Text(tab.label) },
+                    shape = RoundedCornerShape(percent = 50),
+                    colors = FilterChipDefaults.filterChipColors(
+                        containerColor = Color.Transparent,
+                        labelColor = PoiInk.copy(alpha = 0.5f),
+                        selectedContainerColor = PoiPink.copy(alpha = 0.22f),
+                        selectedLabelColor = PoiInk,
+                    ),
+                    border = BorderStroke(0.dp, Color.Transparent),
+                )
+            }
+        }
+
         Spacer(Modifier.height(16.dp))
 
         // Step4-1: capped at 640dp and centered so the list doesn't stretch
@@ -130,7 +179,7 @@ fun PoiScreen() {
                 .align(Alignment.CenterHorizontally),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (tasks.isEmpty()) {
+            if (visibleTasks.isEmpty()) {
                 item {
                     Text(
                         text = "タスクはまだ入ってないにゃ",
@@ -138,7 +187,7 @@ fun PoiScreen() {
                     )
                 }
             }
-            items(tasks, key = { it.id }) { task ->
+            items(visibleTasks, key = { it.id }) { task ->
                 TaskRow(
                     task = task,
                     onToggleCompleted = {
@@ -197,9 +246,18 @@ fun PoiScreen() {
                 scope.launch {
                     val dueMillis = dueDate?.toEpochMilli()
                     if (current != null) {
+                        // edit() only touches title/dateTime — the task's existing
+                        // category (work, private, or unclassified) is preserved as-is.
                         repository.edit(current, title, dueMillis)
                     } else {
-                        repository.addTask(title, dueMillis)
+                        // A brand-new task takes the category of whichever tab its
+                        // "＋ 追加" was pressed from — an explicit choice, not a guess,
+                        // so it's never left unclassified like an existing null row.
+                        val category = when (selectedCategoryTab) {
+                            PoiCategoryTab.WORK -> CatEvent.CATEGORY_WORK
+                            PoiCategoryTab.PRIVATE -> CatEvent.CATEGORY_PRIVATE
+                        }
+                        repository.addTask(title, dueMillis, category)
                     }
                     showDialog = false
                     editingTask = null
