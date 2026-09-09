@@ -31,6 +31,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -307,6 +308,7 @@ private fun ChatRoomView(room: ChatRoom, modifier: Modifier = Modifier) {
                     modifier = Modifier.weight(1f),
                     enabled = !isSending,
                     placeholder = { Text("ここに投げるにゃ") },
+                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = AiInk, unfocusedTextColor = AiInk),
                 )
 
                 Button(

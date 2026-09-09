@@ -38,6 +38,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -348,6 +349,7 @@ fun PhotoDetailDialog(
                 onValueChange = { caption = it },
                 label = { Text("タイトル・メモ") },
                 modifier = Modifier.fillMaxWidth(),
+                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = AlbumInk, unfocusedTextColor = AlbumInk),
             )
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
@@ -355,6 +357,7 @@ fun PhotoDetailDialog(
                 onValueChange = { album = it },
                 label = { Text("アルバム名（任意）") },
                 modifier = Modifier.fillMaxWidth(),
+                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = AlbumInk, unfocusedTextColor = AlbumInk),
             )
 
             Spacer(Modifier.height(8.dp))

@@ -24,6 +24,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -294,6 +295,7 @@ private fun MemoEditDialog(
                     label = { Text("内容") },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 3,
+                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = MemoInk, unfocusedTextColor = MemoInk),
                 )
 
                 // Photos can only be linked once the memo exists (needs an id), so this

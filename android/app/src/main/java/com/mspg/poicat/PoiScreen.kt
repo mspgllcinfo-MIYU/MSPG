@@ -28,6 +28,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -302,6 +303,7 @@ private fun TaskEditDialog(
                     onValueChange = { title = it },
                     label = { Text("やること") },
                     modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = PoiInk, unfocusedTextColor = PoiInk),
                 )
                 Spacer(Modifier.height(12.dp))
                 OutlinedButton(
