@@ -45,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -179,10 +180,16 @@ fun PoiScreen(
             }
         }
 
+        Spacer(Modifier.height(12.dp))
+
         // Block C-1: 仕事/プラベ switch — same FilterChip pattern AiChatScreen already
-        // uses for its 仕事/プライベート/雑談 tabs.
+        // uses for its 仕事/プライベート/雑談 tabs. Design pass: horizontalScroll so 4
+        // tabs never get cramped on a narrow phone (same pattern AlbumScreen's own
+        // album-name chip row already uses).
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             PoiCategoryTab.entries.forEach { tab ->
@@ -250,16 +257,20 @@ fun PoiScreen(
                     }
                 }
             }
-            // Block C-2: both embedded unmodified — each manages its own repository,
-            // state, and dialogs internally, same as when invoked at the top level.
+            // Block C-2: both embedded, each still managing its own repository, state,
+            // and dialogs internally. Design pass: embedded = true suppresses each
+            // screen's own outer padding and heading, since Poi's own padding(20.dp)
+            // above already insets this whole area — without it, the 20dp margins and
+            // "メモ"/"アルバム" headings would double up under Poi's own "ポイ" heading.
             PoiCategoryTab.MEMO -> Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                MemoScreen()
+                MemoScreen(embedded = true)
             }
             PoiCategoryTab.ALBUM -> Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 AlbumScreen(
                     onBack = { selectedCategoryTab = PoiCategoryTab.WORK },
                     selectedAlbum = poiSelectedAlbum,
                     onSelectedAlbumChange = { poiSelectedAlbum = it },
+                    embedded = true,
                 )
             }
         }
@@ -377,10 +388,14 @@ private fun TaskRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            // Design pass: a very light lift (matching BottomTabBar's own shadow(3.dp),
+            // just quieter) so cards read as sitting slightly above the page rather
+            // than flat — "少し高級" without turning into a heavy Material card.
+            .shadow(elevation = 1.dp, shape = RoundedCornerShape(16.dp))
             .clip(RoundedCornerShape(16.dp))
             .background(cardColor)
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Checkbox(

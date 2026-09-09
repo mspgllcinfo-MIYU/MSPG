@@ -67,7 +67,7 @@ private val MemoPink = Color(0xFFD98A9C) // the app's existing pink, kept rare
  * the cat AI's keyword search immediately since it's the same data.
  */
 @Composable
-fun MemoScreen() {
+fun MemoScreen(embedded: Boolean = false) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val repository = remember { CatEventRepository(context.applicationContext) }
@@ -100,13 +100,23 @@ fun MemoScreen() {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(20.dp),
+            // Design pass: embedded (inside Poi's own メモ tab) skips this screen's own
+            // outer padding entirely — Poi's own padding(20.dp) around the whole tab
+            // area already provides it, so adding it again here would double the margin.
+            .padding(if (embedded) 0.dp else 20.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("メモ", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = MemoInk, modifier = Modifier.weight(1f))
+            // Design pass: embedded drops the redundant "メモ" heading (Poi's own "ポイ"
+            // heading and selected タブ already say where you are) but keeps the ＋追加
+            // button right-aligned via the same weight(1f) spacer.
+            if (embedded) {
+                Spacer(Modifier.weight(1f))
+            } else {
+                Text("メモ", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = MemoInk, modifier = Modifier.weight(1f))
+            }
             // Step4-3: same pink-pill family as Poi/Calendar's "＋ 追加".
             Button(
                 onClick = { editingMemo = null; editText = ""; showDialog = true },

@@ -98,6 +98,7 @@ fun AlbumScreen(
     onBack: () -> Unit,
     selectedAlbum: String?,
     onSelectedAlbumChange: (String?) -> Unit,
+    embedded: Boolean = false,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -146,13 +147,29 @@ fun AlbumScreen(
         ActivityResultContracts.RequestPermission(),
     ) { granted -> if (granted) launchCamera() }
 
-    Column(modifier = Modifier.fillMaxSize().padding(20.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            // Design pass: embedded (inside Poi's own アルバム タブ) skips this screen's
+            // own outer padding entirely — Poi's own padding(20.dp) around the whole tab
+            // area already provides it, so adding it again here would double the margin.
+            .padding(if (embedded) 0.dp else 20.dp),
+    ) {
+        // Design pass: embedded drops the redundant "アルバム" heading (Poi's own "ポイ"
+        // heading and selected タブ already say where you are), but keeps "← 戻る" itself
+        // — unchanged in behavior, just no longer paired with a repeated title next to it.
+        if (embedded) {
             TextButton(onClick = onBack) {
                 Text("← 戻る", color = AlbumInk)
             }
-            Spacer(Modifier.width(4.dp))
-            Text("アルバム", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = AlbumInk)
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onBack) {
+                    Text("← 戻る", color = AlbumInk)
+                }
+                Spacer(Modifier.width(4.dp))
+                Text("アルバム", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = AlbumInk)
+            }
         }
 
         Spacer(Modifier.height(12.dp))
