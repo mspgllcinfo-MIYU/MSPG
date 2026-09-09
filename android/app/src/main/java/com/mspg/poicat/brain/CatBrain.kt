@@ -241,12 +241,15 @@ class CatBrain(
         "を忘れるな", "忘れるな",
         "忘れないように",
         "買わなきゃ", "買わないと",
-        "やる", "買う",
+        "やる", "買う", "送る",
     )
 
     // Bare dictionary-form verbs that, on their own with no other trigger, still read
-    // as "something to do" ("牛乳買う") rather than a note or a calendar event.
-    private val taskVerbEndings = listOf("買う")
+    // as "something to do" ("牛乳買う", "見積書送る") rather than a note or a calendar
+    // event. Recognizing "送る" as a task verb is separate from whether it counts
+    // toward 仕事/プラベ classification (it deliberately doesn't — see workSignals
+    // below): this list only decides *that* something is a task, not *which* category.
+    private val taskVerbEndings = listOf("買う", "送る")
 
     /**
      * Recognizes a task/reminder declaration ("牛乳買うの忘れないで", "今日ゴミ出しやる",
@@ -288,6 +291,19 @@ class CatBrain(
 
     private val workSignals = listOf(
         "見積", "会議", "資料", "提出", "メール", "顧客", "取引先", "契約", "請求", "会社", "案件",
+        // Added after real-device review: broader business/admin vocabulary, still
+        // nouns only — no generic daily-life verbs (見送る/確認する/連絡する etc. stay
+        // out, same reasoning as "送る" below). A few (支払/振込/検査/銀行/役所) were
+        // deliberately left out despite being business-flavored, since they're at
+        // least as common in private life (electric bill payment, a bank errand, a
+        // medical checkup, a city-hall errand) and would misclassify too often alone.
+        "発注", "受注", "納品", "納期",
+        "打合せ", "打ち合わせ", "商談", "業者", "客先", "現場",
+        "稟議", "決裁", "経費", "売上", "仕入", "在庫",
+        "図面", "施工", "工程", "行政",
+        "地主", "法人", "税務", "税理士", "決算", "プロジェクト", "系統",
+        "担当者", "申請", "報告書", "承認", "領収書", "入金",
+        "設計", "許可", "電力", "土地", "登記", "融資", "工事",
     )
 
     /**
