@@ -50,9 +50,14 @@ class CatBrain(
 
         // Checked before schedule registration: "今日ゴミ出しやる" contains "今日", a
         // valid schedule date, but the "やる" ending means it's a to-do, not an event.
-        val completionKeyword = extractTaskCompletionKeyword(trimmed)
-        if (completionKeyword != null) {
-            val task = repository.incompleteTasksMatching(completionKeyword).firstOrNull()
+        val completionKeywords = extractTaskCompletionKeywords(trimmed)
+        if (completionKeywords.isNotEmpty()) {
+            val task = run {
+                for (keyword in completionKeywords) {
+                    repository.incompleteTasksMatching(keyword).firstOrNull()?.let { return@run it }
+                }
+                null
+            }
             return if (task != null) {
                 repository.setTaskCompleted(task, true)
                 CatReply("${task.title}終わったにゃ")
@@ -252,6 +257,11 @@ class CatBrain(
     private fun extractTaskCommand(text: String): String? {
         for (suffix in taskTriggerSuffixes) {
             if (text.endsWith(suffix) && text.length > suffix.length) {
+                // Bare dictionary-form verbs like "買う" describe *what* to do, not just
+                // that something is due — keep them in the saved title ("牛乳買う") rather
+                // than stripping down to just the noun ("牛乳"), so a Poi list entry still
+                // shows the action at a glance.
+                if (suffix in taskVerbEndings) return text
                 val content = text.removeSuffix(suffix).replace("までに", "").trim()
                     .removeSuffix("を").removeSuffix("の").trim()
                 if (content.isNotBlank()) return content
@@ -263,12 +273,12 @@ class CatBrain(
         }
         // "牛乳買うの覚えといて" phrases a task using a memo-style "覚えといて" trigger —
         // still a task, since the content right before it ends in a task verb ("買う").
+        // The verb stays in the returned title for the same reason as above.
         for (verb in memoVerbs) {
             for (memoSuffix in listOf("って$verb", "を$verb", verb)) {
                 if (text.endsWith(memoSuffix)) {
                     val inner = text.removeSuffix(memoSuffix).trim().removeSuffix("の").removeSuffix("を").trim()
-                    val matchedVerb = taskVerbEndings.firstOrNull { inner.endsWith(it) } ?: continue
-                    return inner.removeSuffix(matchedVerb).trim().ifBlank { inner }
+                    if (taskVerbEndings.any { inner.endsWith(it) }) return inner
                 }
             }
         }
@@ -285,16 +295,24 @@ class CatBrain(
         "済んだよ", "済んだ",
     )
 
+    // "買ったよ"/"買った" report finishing a "買う" task ("牛乳買ったよ" reports "牛乳買う"
+    // is done) — extractTaskCommand() now keeps "買う" in the saved title, so completion
+    // lookup tries the reconstructed "買う" title first ("牛乳買う"), falling back to the
+    // bare noun ("牛乳") for tasks saved without it (e.g. via the "買わなきゃ" trigger).
+    private val buyCompletionSuffixes = setOf("買ったよ", "買った")
+
     /** Recognizes "牛乳買ったよ"/"薬終わった" style completion and returns the search
-     * keyword ("牛乳"/"薬") to look up the matching task by, or null. */
-    private fun extractTaskCompletionKeyword(text: String): String? {
+     * keyword(s) — most specific first — to look up the matching task by, or an empty
+     * list if [text] isn't a completion report. */
+    private fun extractTaskCompletionKeywords(text: String): List<String> {
         for (suffix in taskCompletionSuffixes) {
             if (text.endsWith(suffix) && text.length > suffix.length) {
                 val keyword = text.removeSuffix(suffix).trim()
-                if (keyword.isNotBlank()) return keyword
+                if (keyword.isBlank()) continue
+                return if (suffix in buyCompletionSuffixes) listOf("${keyword}買う", keyword) else listOf(keyword)
             }
         }
-        return null
+        return emptyList()
     }
 
     private val memoVerbs = listOf(
