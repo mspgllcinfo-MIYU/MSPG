@@ -1,5 +1,6 @@
 package com.mspg.poicat.brain
 
+import com.mspg.poicat.data.CatEvent
 import com.mspg.poicat.data.CatEventRepository
 import com.mspg.poicat.data.Photo
 import com.mspg.poicat.data.PhotoRepository
@@ -70,7 +71,7 @@ class CatBrain(
         if (taskContent != null) {
             val (dueDate, titleRaw) = DateTimeParser.parseDueDate(taskContent, now)
             val title = DateTimeParser.cleanTitle(titleRaw, fallback = "タスク")
-            repository.addTask(title, dueDate?.toEpochMilli())
+            repository.addTask(title, dueDate?.toEpochMilli(), classifyTaskCategory(title))
             return CatReply("ポイに入れたにゃ")
         }
 
@@ -129,7 +130,7 @@ class CatBrain(
         if (taskContent != null) {
             val (dueDate, titleRaw) = DateTimeParser.parseDueDate(taskContent, now)
             val title = DateTimeParser.cleanTitle(titleRaw, fallback = "タスク")
-            val task = repository.addTask(title, dueDate?.toEpochMilli())
+            val task = repository.addTask(title, dueDate?.toEpochMilli(), classifyTaskCategory(title))
             photoRepository.linkToMemo(photo, task.id)
             return CatReply("ポイに入れて写真も残したにゃ")
         }
@@ -284,6 +285,21 @@ class CatBrain(
         }
         return null
     }
+
+    private val workSignals = listOf(
+        "見積", "会議", "資料", "提出", "メール", "顧客", "取引先", "契約", "請求", "会社", "案件",
+    )
+
+    /**
+     * Classifies a registered task's saved title as work or private — keyword-based like
+     * the rest of CatBrain (see [outOfScopeSignals]). A generic verb like "送る" is
+     * deliberately absent from [workSignals] so it never decides this on its own
+     * ("写真送る" stays private); it only reads as work alongside one of the nouns above
+     * ("見積書送る" is work, because of "見積"). Anything without a clear work signal
+     * defaults to private. A simple, coarse rule by design — not meant to be precise.
+     */
+    private fun classifyTaskCategory(title: String): String =
+        if (workSignals.any { title.contains(it) }) CatEvent.CATEGORY_WORK else CatEvent.CATEGORY_PRIVATE
 
     private val taskCompletionSuffixes = listOf(
         "のタスク終わった", "のタスクが終わった", "タスクは終わった", "タスク終わった",

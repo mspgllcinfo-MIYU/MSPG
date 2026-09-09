@@ -37,8 +37,8 @@ class CatEventRepository(context: Context) {
 
     suspend fun allMatching(keyword: String) = dao.allMatching(keyword)
 
-    suspend fun addTask(title: String, dueDateTime: Long?): CatEvent {
-        val event = CatEvent(title = title, dateTime = dueDateTime, isTask = true)
+    suspend fun addTask(title: String, dueDateTime: Long?, category: String? = null): CatEvent {
+        val event = CatEvent(title = title, dateTime = dueDateTime, isTask = true, category = category)
         val id = dao.insert(event)
         return event.copy(id = id)
     }
