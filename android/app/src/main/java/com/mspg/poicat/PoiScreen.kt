@@ -210,7 +210,11 @@ fun PoiScreen(
             }
         }
 
-        Spacer(Modifier.height(16.dp))
+        // Design tweak: メモ's own header row (just a right-aligned "＋ 追加", no
+        // heading text) reads as a lot of empty space under a full 16dp gap — pull it
+        // up closer to the tab row. 仕事/プラベ/アルバム keep the original 16dp.
+        val contentTopSpacing = if (selectedCategoryTab == PoiCategoryTab.MEMO) 4.dp else 16.dp
+        Spacer(Modifier.height(contentTopSpacing))
 
         when (selectedCategoryTab) {
             PoiCategoryTab.WORK, PoiCategoryTab.PRIVATE -> {

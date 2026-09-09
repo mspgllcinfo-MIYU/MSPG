@@ -155,14 +155,12 @@ fun AlbumScreen(
             // area already provides it, so adding it again here would double the margin.
             .padding(if (embedded) 0.dp else 20.dp),
     ) {
-        // Design pass: embedded drops the redundant "アルバム" heading (Poi's own "ポイ"
-        // heading and selected タブ already say where you are), but keeps "← 戻る" itself
-        // — unchanged in behavior, just no longer paired with a repeated title next to it.
-        if (embedded) {
-            TextButton(onClick = onBack) {
-                Text("← 戻る", color = AlbumInk)
-            }
-        } else {
+        // Design tweak: embedded drops both the redundant "アルバム" heading (Poi's own
+        // "ポイ" heading and selected タブ already say where you are) and the "← 戻る"
+        // button — tapping "仕事" in the tab row above is the more direct way back, so
+        // a second, separate back affordance is redundant here. onBack stays wired for
+        // the standalone (embedded = false) case, where there's no tab row to use instead.
+        if (!embedded) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onBack) {
                     Text("← 戻る", color = AlbumInk)
@@ -170,9 +168,8 @@ fun AlbumScreen(
                 Spacer(Modifier.width(4.dp))
                 Text("アルバム", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = AlbumInk)
             }
+            Spacer(Modifier.height(12.dp))
         }
-
-        Spacer(Modifier.height(12.dp))
 
         // Step4-4: two equal utility actions, neither a single standout CTA —
         // "写真を選ぶ" gets a soft pink pill, "撮影" a quieter card-toned one.
