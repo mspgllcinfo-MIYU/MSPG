@@ -69,9 +69,7 @@ private val AiGold = Color(0xFFC9A66B) // restrained accent, never a fill color
 private val AiPink = Color(0xFFD98A9C) // the app's existing pink, kept rare
 
 @Composable
-fun AiChatScreen() {
-    var selectedRoom by remember { mutableStateOf(ChatRoom.CASUAL) }
-
+fun AiChatScreen(selectedRoom: ChatRoom, onSelectedRoomChange: (ChatRoom) -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -89,7 +87,7 @@ fun AiChatScreen() {
                 val selected = room == selectedRoom
                 FilterChip(
                     selected = selected,
-                    onClick = { selectedRoom = room },
+                    onClick = { onSelectedRoomChange(room) },
                     label = { Text(room.label) },
                     shape = RoundedCornerShape(percent = 50),
                     colors = FilterChipDefaults.filterChipColors(

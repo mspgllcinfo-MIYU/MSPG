@@ -31,6 +31,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,6 +45,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import java.time.LocalDate
+import java.time.YearMonth
 
 // Step2: bottom nav design tokens, matching HomeScreen's local palette by value
 // (HomeScreen.kt itself is not touched — these are duplicated on purpose until
@@ -59,11 +63,33 @@ private fun iconFor(tab: AppTab): ImageVector = when (tab) {
     AppTab.AI -> Icons.Default.Face
 }
 
+// "Where was I looking" navigation state, kept across BottomNav tab switches
+// (and, as a side effect of rememberSaveable, config changes like a Fold
+// fold/unfold). Deliberately limited to these 4 values — every in-progress
+// dialog/input/photo-capture state stays local `remember` in its own screen
+// and is still discarded when that screen leaves composition, unchanged.
+// YearMonth/LocalDate aren't natively Bundle-storable, so each gets an
+// explicit Saver rather than relying on rememberSaveable's default handling.
+private val YearMonthSaver = Saver<YearMonth, List<Int>>(
+    save = { listOf(it.year, it.monthValue) },
+    restore = { YearMonth.of(it[0], it[1]) },
+)
+
+private val LocalDateSaver = Saver<LocalDate, Long>(
+    save = { it.toEpochDay() },
+    restore = { LocalDate.ofEpochDay(it) },
+)
+
 @Composable
 fun AppRoot() {
     var selectedTab by remember { mutableStateOf(AppTab.AI) }
     var showAlbum by remember { mutableStateOf(false) }
     val context = LocalContext.current
+
+    var calendarYearMonth by rememberSaveable(stateSaver = YearMonthSaver) { mutableStateOf(YearMonth.now()) }
+    var calendarSelectedDate by rememberSaveable(stateSaver = LocalDateSaver) { mutableStateOf(LocalDate.now()) }
+    var aiSelectedRoom by rememberSaveable { mutableStateOf(ChatRoom.CASUAL) }
+    var albumSelectedAlbum by rememberSaveable { mutableStateOf<String?>(null) }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -84,14 +110,26 @@ fun AppRoot() {
     Column(modifier = Modifier.fillMaxSize()) {
         Box(modifier = Modifier.weight(1f)) {
             if (showAlbum) {
-                AlbumScreen(onBack = { showAlbum = false })
+                AlbumScreen(
+                    onBack = { showAlbum = false },
+                    selectedAlbum = albumSelectedAlbum,
+                    onSelectedAlbumChange = { albumSelectedAlbum = it },
+                )
             } else {
                 when (selectedTab) {
                     AppTab.HOME -> HomeScreen(onNavigate = { selectedTab = it }, onOpenAlbum = { showAlbum = true })
                     AppTab.POI -> PoiScreen()
-                    AppTab.CAL -> CalendarScreen()
+                    AppTab.CAL -> CalendarScreen(
+                        yearMonth = calendarYearMonth,
+                        onYearMonthChange = { calendarYearMonth = it },
+                        selectedDate = calendarSelectedDate,
+                        onSelectedDateChange = { calendarSelectedDate = it },
+                    )
                     AppTab.MEMO -> MemoScreen()
-                    AppTab.AI -> AiChatScreen()
+                    AppTab.AI -> AiChatScreen(
+                        selectedRoom = aiSelectedRoom,
+                        onSelectedRoomChange = { aiSelectedRoom = it },
+                    )
                 }
             }
         }

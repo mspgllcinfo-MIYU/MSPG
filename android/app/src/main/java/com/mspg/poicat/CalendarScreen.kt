@@ -78,14 +78,17 @@ private val CalendarPink = Color(0xFFD98A9C) // the app's existing pink, kept ra
  * by asking the cat. No network, no separate data store.
  */
 @Composable
-fun CalendarScreen() {
+fun CalendarScreen(
+    yearMonth: YearMonth,
+    onYearMonthChange: (YearMonth) -> Unit,
+    selectedDate: LocalDate,
+    onSelectedDateChange: (LocalDate) -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val repository = remember { CatEventRepository(context.applicationContext) }
     val photoRepository = remember { PhotoRepository(context.applicationContext) }
 
-    var yearMonth by remember { mutableStateOf(YearMonth.now()) }
-    var selectedDate by remember { mutableStateOf(LocalDate.now()) }
     var eventsInMonth by remember { mutableStateOf<List<CatEvent>>(emptyList()) }
     var eventsOnSelectedDay by remember { mutableStateOf<List<CatEvent>>(emptyList()) }
     var photosOnSelectedDay by remember { mutableStateOf<List<Photo>>(emptyList()) }
@@ -132,15 +135,15 @@ fun CalendarScreen() {
                 Spacer(Modifier.height(16.dp))
                 MonthHeader(
                     yearMonth = yearMonth,
-                    onPrev = { yearMonth = yearMonth.minusMonths(1) },
-                    onNext = { yearMonth = yearMonth.plusMonths(1) },
+                    onPrev = { onYearMonthChange(yearMonth.minusMonths(1)) },
+                    onNext = { onYearMonthChange(yearMonth.plusMonths(1)) },
                 )
                 Spacer(Modifier.height(8.dp))
                 MonthGrid(
                     yearMonth = yearMonth,
                     selectedDate = selectedDate,
                     datesWithEvents = datesWithEvents,
-                    onSelectDate = { selectedDate = it },
+                    onSelectDate = { onSelectedDateChange(it) },
                 )
                 Spacer(Modifier.height(16.dp))
                 Row(
@@ -265,8 +268,8 @@ fun CalendarScreen() {
                     }
                     showDialog = false
                     editingEvent = null
-                    selectedDate = date
-                    if (YearMonth.from(date) != yearMonth) yearMonth = YearMonth.from(date)
+                    onSelectedDateChange(date)
+                    if (YearMonth.from(date) != yearMonth) onYearMonthChange(YearMonth.from(date))
                     refreshTick++
                 }
             },

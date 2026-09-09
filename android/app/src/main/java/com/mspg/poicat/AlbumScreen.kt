@@ -93,14 +93,17 @@ private val AlbumPink = Color(0xFFD98A9C) // the app's existing pink, kept rare
  * ever referenced (never copied) from here.
  */
 @Composable
-fun AlbumScreen(onBack: () -> Unit) {
+fun AlbumScreen(
+    onBack: () -> Unit,
+    selectedAlbum: String?,
+    onSelectedAlbumChange: (String?) -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val repository = remember { PhotoRepository(context.applicationContext) }
 
     var photos by remember { mutableStateOf<List<Photo>>(emptyList()) }
     var albums by remember { mutableStateOf<List<String>>(emptyList()) }
-    var selectedAlbum by remember { mutableStateOf<String?>(null) }
     var detailPhoto by remember { mutableStateOf<Photo?>(null) }
     var pendingCameraFile by remember { mutableStateOf<File?>(null) }
 
@@ -190,7 +193,7 @@ fun AlbumScreen(onBack: () -> Unit) {
             val chipBorder = BorderStroke(0.dp, Color.Transparent)
             FilterChip(
                 selected = selectedAlbum == null,
-                onClick = { selectedAlbum = null },
+                onClick = { onSelectedAlbumChange(null) },
                 label = { Text("すべて") },
                 shape = RoundedCornerShape(percent = 50),
                 colors = chipColors,
@@ -199,7 +202,7 @@ fun AlbumScreen(onBack: () -> Unit) {
             albums.forEach { album ->
                 FilterChip(
                     selected = selectedAlbum == album,
-                    onClick = { selectedAlbum = album },
+                    onClick = { onSelectedAlbumChange(album) },
                     label = { Text(album) },
                     shape = RoundedCornerShape(percent = 50),
                     colors = chipColors,
