@@ -82,6 +82,7 @@ fun PoiScreen() {
     var editingTask by remember { mutableStateOf<CatEvent?>(null) }
     var showDialog by remember { mutableStateOf(false) }
     var linkedPhotos by remember { mutableStateOf<List<Photo>>(emptyList()) }
+    var showPhotoPicker by remember { mutableStateOf(false) }
     var detailPhoto by remember { mutableStateOf<Photo?>(null) }
     var refreshTick by remember { mutableStateOf(0) }
 
@@ -169,9 +170,16 @@ fun PoiScreen() {
             initialDueDate = current?.dateTime?.toLocalDate(),
             isEditing = current != null,
             linkedPhotos = linkedPhotos,
-            // Closes this AlertDialog before opening the detail Dialog rather than
-            // stacking a second dialog window on top of it — same approach MemoScreen
-            // already uses for its own photo strip.
+            // Closes this AlertDialog before opening the picker/detail Dialog rather
+            // than stacking a second dialog window on top of it — same approach
+            // MemoScreen already uses for its own photo strip.
+            onPickPhoto = { showDialog = false; showPhotoPicker = true },
+            onUnlinkPhoto = { photo ->
+                scope.launch {
+                    current?.let { photoRepository.unlinkFromMemo(photo, it.id) }
+                    linkedPhotos = current?.let { photoRepository.photosForMemo(it.id) } ?: emptyList()
+                }
+            },
             onPhotoClick = { showDialog = false; detailPhoto = it },
             onDismiss = { showDialog = false; editingTask = null },
             onDelete = current?.let { task ->
@@ -196,6 +204,20 @@ fun PoiScreen() {
                     showDialog = false
                     editingTask = null
                     refreshTick++
+                }
+            },
+        )
+    }
+
+    if (showPhotoPicker) {
+        AlbumPhotoPickerDialog(
+            onDismiss = { showPhotoPicker = false; showDialog = true },
+            onPick = { photo ->
+                scope.launch {
+                    editingTask?.let { photoRepository.linkToMemo(photo, it.id) }
+                    linkedPhotos = editingTask?.let { photoRepository.photosForMemo(it.id) } ?: emptyList()
+                    showPhotoPicker = false
+                    showDialog = true
                 }
             },
         )
@@ -281,6 +303,8 @@ private fun TaskEditDialog(
     initialDueDate: LocalDate?,
     isEditing: Boolean,
     linkedPhotos: List<Photo>,
+    onPickPhoto: () -> Unit,
+    onUnlinkPhoto: (Photo) -> Unit,
     onPhotoClick: (Photo) -> Unit,
     onDismiss: () -> Unit,
     onDelete: (() -> Unit)?,
@@ -327,19 +351,33 @@ private fun TaskEditDialog(
                     }
                 }
 
-                // Read-only: linked here by the cat AI (Phase C) when a photo was sent
-                // together with a Poi-registering caption — no add/unlink UI in this
-                // screen, just viewing what's already linked.
-                if (isEditing && linkedPhotos.isNotEmpty()) {
+                // Photos can only be linked once the task exists (needs an id), so this
+                // section is hidden while adding a brand-new task — same constraint
+                // MemoScreen already has for its own photo strip.
+                if (isEditing) {
                     Spacer(Modifier.height(12.dp))
-                    Text("写真", fontWeight = FontWeight.Bold, color = PoiInk)
-                    Row(
-                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        linkedPhotos.forEach { photo ->
-                            Box(modifier = Modifier.size(64.dp)) {
-                                PhotoThumbnail(photo = photo, onClick = { onPhotoClick(photo) })
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("写真", fontWeight = FontWeight.Bold, color = PoiInk, modifier = Modifier.weight(1f))
+                        TextButton(
+                            onClick = onPickPhoto,
+                            colors = ButtonDefaults.textButtonColors(contentColor = PoiPink),
+                        ) { Text("＋ 写真を選ぶ") }
+                    }
+                    if (linkedPhotos.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            linkedPhotos.forEach { photo ->
+                                Box(modifier = Modifier.size(64.dp)) {
+                                    PhotoThumbnail(photo = photo, onClick = { onPhotoClick(photo) })
+                                    IconButton(
+                                        onClick = { onUnlinkPhoto(photo) },
+                                        modifier = Modifier.align(Alignment.TopEnd).size(20.dp),
+                                    ) {
+                                        Text("✕", fontSize = 10.sp, color = MaterialTheme.colorScheme.error)
+                                    }
+                                }
                             }
                         }
                     }
