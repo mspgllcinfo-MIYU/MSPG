@@ -84,16 +84,17 @@ object NavIcons {
                 fill = SolidColor(Color.Black),
                 pathFillType = PathFillType.EvenOdd,
             ) {
-                // Rounded-square badge.
-                moveTo(9f, 4f)
-                lineTo(15f, 4f)
-                quadTo(20f, 4f, 20f, 9f)
-                lineTo(20f, 15f)
-                quadTo(20f, 20f, 15f, 20f)
-                lineTo(9f, 20f)
-                quadTo(4f, 20f, 4f, 15f)
-                lineTo(4f, 9f)
-                quadTo(4f, 4f, 9f, 4f)
+                // Rounded-square badge — rounder than before (radius 6 vs 5),
+                // reading more like a single pad than a plain square.
+                moveTo(10f, 4f)
+                lineTo(14f, 4f)
+                quadTo(20f, 4f, 20f, 10f)
+                lineTo(20f, 14f)
+                quadTo(20f, 20f, 14f, 20f)
+                lineTo(10f, 20f)
+                quadTo(4f, 20f, 4f, 14f)
+                lineTo(4f, 10f)
+                quadTo(4f, 4f, 10f, 4f)
                 close()
                 // Checkmark ribbon cutout.
                 moveTo(7.3f, 12f)
@@ -102,6 +103,33 @@ object NavIcons {
                 lineTo(18.2f, 8.7f)
                 lineTo(9.9f, 16.8f)
                 lineTo(8.5f, 15.4f)
+                close()
+            }.path(
+                // Two small toe-bean bumps straddling the top edge — a subtle,
+                // abstract paw-pad cue (not a literal 4-toe cartoon print). A
+                // separate layer, same reasoning as Memo's pen: drawn on top
+                // so it never punches a hole through the badge underneath.
+                fill = SolidColor(Color.Black),
+            ) {
+                moveTo(8.7f, 1.8f)
+                lineTo(10.3f, 1.8f)
+                quadTo(11f, 1.8f, 11f, 2.5f)
+                lineTo(11f, 4.3f)
+                quadTo(11f, 5f, 10.3f, 5f)
+                lineTo(8.7f, 5f)
+                quadTo(8f, 5f, 8f, 4.3f)
+                lineTo(8f, 2.5f)
+                quadTo(8f, 1.8f, 8.7f, 1.8f)
+                close()
+                moveTo(13.7f, 1.8f)
+                lineTo(15.3f, 1.8f)
+                quadTo(16f, 1.8f, 16f, 2.5f)
+                lineTo(16f, 4.3f)
+                quadTo(16f, 5f, 15.3f, 5f)
+                lineTo(13.7f, 5f)
+                quadTo(13f, 5f, 13f, 4.3f)
+                lineTo(13f, 2.5f)
+                quadTo(13f, 1.8f, 13.7f, 1.8f)
                 close()
             }.build()
             _poi = built
@@ -123,40 +151,41 @@ object NavIcons {
                 fill = SolidColor(Color.Black),
                 pathFillType = PathFillType.EvenOdd,
             ) {
-                // Body.
-                moveTo(7.5f, 6f)
-                lineTo(16.5f, 6f)
-                quadTo(19.5f, 6f, 19.5f, 9f)
-                lineTo(19.5f, 17f)
-                quadTo(19.5f, 20f, 16.5f, 20f)
-                lineTo(7.5f, 20f)
-                quadTo(4.5f, 20f, 4.5f, 17f)
-                lineTo(4.5f, 9f)
-                quadTo(4.5f, 6f, 7.5f, 6f)
+                // Body — enlarged to match Home/Poi's viewport coverage
+                // (previously a noticeably smaller, weaker-looking silhouette).
+                moveTo(7f, 4.5f)
+                lineTo(17f, 4.5f)
+                quadTo(20.5f, 4.5f, 20.5f, 8f)
+                lineTo(20.5f, 17.5f)
+                quadTo(20.5f, 21f, 17f, 21f)
+                lineTo(7f, 21f)
+                quadTo(3.5f, 21f, 3.5f, 17.5f)
+                lineTo(3.5f, 8f)
+                quadTo(3.5f, 4.5f, 7f, 4.5f)
                 close()
                 // Top-left tab.
-                moveTo(7.8f, 4f)
-                lineTo(9.2f, 4f)
-                lineTo(9.2f, 7f)
-                lineTo(7.8f, 7f)
+                moveTo(7.3f, 2.5f)
+                lineTo(9f, 2.5f)
+                lineTo(9f, 5.5f)
+                lineTo(7.3f, 5.5f)
                 close()
                 // Top-right tab.
-                moveTo(14.8f, 4f)
-                lineTo(16.2f, 4f)
-                lineTo(16.2f, 7f)
-                lineTo(14.8f, 7f)
+                moveTo(15f, 2.5f)
+                lineTo(16.7f, 2.5f)
+                lineTo(16.7f, 5.5f)
+                lineTo(15f, 5.5f)
                 close()
                 // Header-band cutout.
-                moveTo(6f, 9.5f)
-                lineTo(18f, 9.5f)
-                lineTo(18f, 10.8f)
-                lineTo(6f, 10.8f)
+                moveTo(5f, 8f)
+                lineTo(19f, 8f)
+                lineTo(19f, 9.5f)
+                lineTo(5f, 9.5f)
                 close()
                 // Date-marker cutout.
-                moveTo(8.5f, 14f)
-                lineTo(10f, 14f)
-                lineTo(10f, 15.5f)
-                lineTo(8.5f, 15.5f)
+                moveTo(8f, 13f)
+                lineTo(10f, 13f)
+                lineTo(10f, 15f)
+                lineTo(8f, 15f)
                 close()
             }.build()
             _calendar = built
@@ -236,64 +265,70 @@ object NavIcons {
                 viewportWidth = 24f,
                 viewportHeight = 24f,
             ).path(
-                // Ears, each with a small inner-ear cutout.
+                // Ears, each with a small inner-ear cutout — enlarged and
+                // pushed further out/up so they stay clearly "big cat ears"
+                // at this icon's larger 32dp render size.
                 fill = SolidColor(Color.Black),
                 pathFillType = PathFillType.EvenOdd,
             ) {
-                moveTo(4f, 3f)
-                lineTo(6.5f, 10f)
-                lineTo(10f, 8.5f)
+                moveTo(3.3f, 2.2f)
+                lineTo(6.3f, 10.3f)
+                lineTo(10.2f, 8.5f)
                 close()
-                moveTo(5.3f, 5.2f)
-                lineTo(6.8f, 8.8f)
-                lineTo(8.8f, 8f)
+                moveTo(4.8f, 4.8f)
+                lineTo(6.6f, 8.9f)
+                lineTo(9f, 8f)
                 close()
-                moveTo(20f, 3f)
-                lineTo(17.5f, 10f)
-                lineTo(14f, 8.5f)
+                moveTo(20.7f, 2.2f)
+                lineTo(17.7f, 10.3f)
+                lineTo(13.8f, 8.5f)
                 close()
-                moveTo(18.7f, 5.2f)
-                lineTo(17.2f, 8.8f)
-                lineTo(15.2f, 8f)
+                moveTo(19.2f, 4.8f)
+                lineTo(17.4f, 8.9f)
+                lineTo(15f, 8f)
                 close()
             }.path(
-                // Head, on top of the ear roots, with heavy-lidded eye cutouts.
+                // Head, on top of the ear roots, with heavy-lidded eye cutouts —
+                // enlarged to match the bigger ears above.
                 fill = SolidColor(Color.Black),
                 pathFillType = PathFillType.EvenOdd,
             ) {
-                moveTo(9.5f, 8f)
-                lineTo(14.5f, 8f)
-                quadTo(18.5f, 8f, 18.5f, 12f)
-                lineTo(18.5f, 17f)
-                quadTo(18.5f, 21f, 14.5f, 21f)
-                lineTo(9.5f, 21f)
-                quadTo(5.5f, 21f, 5.5f, 17f)
-                lineTo(5.5f, 12f)
-                quadTo(5.5f, 8f, 9.5f, 8f)
+                moveTo(9f, 7f)
+                lineTo(15f, 7f)
+                quadTo(19.5f, 7f, 19.5f, 11.5f)
+                lineTo(19.5f, 17f)
+                quadTo(19.5f, 21.5f, 15f, 21.5f)
+                lineTo(9f, 21.5f)
+                quadTo(4.5f, 21.5f, 4.5f, 17f)
+                lineTo(4.5f, 11.5f)
+                quadTo(4.5f, 7f, 9f, 7f)
                 close()
-                // Left eye: flat heavy lid on top, rounder underneath.
-                moveTo(8.3f, 13.6f)
-                quadTo(9.8f, 12.6f, 11.2f, 13.6f)
-                quadTo(9.8f, 15.2f, 8.3f, 13.6f)
+                // Left eye: flat heavy lid on top, rounder underneath — a
+                // touch bigger than before so the sleepy/bored look survives
+                // at nav-icon size.
+                moveTo(7.9f, 13.5f)
+                quadTo(9.6f, 12.3f, 11.3f, 13.5f)
+                quadTo(9.6f, 15.3f, 7.9f, 13.5f)
                 close()
                 // Right eye, mirrored.
-                moveTo(15.8f, 13.6f)
-                quadTo(14.2f, 12.6f, 12.8f, 13.6f)
-                quadTo(14.2f, 15.2f, 15.8f, 13.6f)
+                moveTo(16.1f, 13.5f)
+                quadTo(14.4f, 12.3f, 12.7f, 13.5f)
+                quadTo(14.4f, 15.3f, 16.1f, 13.5f)
                 close()
             }.path(
-                // Pupils, sitting inside the eye cutouts, on top of everything.
+                // Pupils, sitting inside the eye cutouts, on top of everything —
+                // enlarged to match the bigger eye holes.
                 fill = SolidColor(Color.Black),
             ) {
-                moveTo(9.2f, 13.9f)
-                lineTo(10f, 13.9f)
-                lineTo(10f, 14.7f)
-                lineTo(9.2f, 14.7f)
+                moveTo(9f, 13.9f)
+                lineTo(10.1f, 13.9f)
+                lineTo(10.1f, 15f)
+                lineTo(9f, 15f)
                 close()
-                moveTo(14f, 13.9f)
-                lineTo(14.8f, 13.9f)
-                lineTo(14.8f, 14.7f)
-                lineTo(14f, 14.7f)
+                moveTo(13.9f, 13.9f)
+                lineTo(15f, 13.9f)
+                lineTo(15f, 15f)
+                lineTo(13.9f, 15f)
                 close()
             }.build()
             _catAi = built

@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -38,6 +37,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -63,6 +63,11 @@ private fun iconFor(tab: AppTab): ImageVector = when (tab) {
     AppTab.MEMO -> NavIcons.Memo
     AppTab.AI -> NavIcons.CatAi
 }
+
+// BB gets a touch more visual size than the other 4 (which all share one
+// size) — it's this app's one character-branded tab, and needs the extra
+// room for its ears/half-lidded eyes to still read at a glance.
+private fun iconSizeFor(tab: AppTab): Dp = if (tab == AppTab.AI) 32.dp else 28.dp
 
 // "Where was I looking" navigation state, kept across BottomNav tab switches
 // (and, as a side effect of rememberSaveable, config changes like a Fold
@@ -171,22 +176,21 @@ private fun BottomTabBar(selectedTab: AppTab, onSelect: (AppTab) -> Unit) {
                 ) {
                     Column(
                         modifier = Modifier
-                            .widthIn(max = 80.dp)
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(14.dp))
                             .background(if (selected) NavPink.copy(alpha = 0.22f) else Color.Transparent)
-                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Icon(
                             imageVector = iconFor(tab),
                             contentDescription = tab.label,
                             tint = NavInk.copy(alpha = if (selected) 1f else 0.42f),
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier.size(iconSizeFor(tab)),
                         )
-                        Spacer(Modifier.height(2.dp))
+                        Spacer(Modifier.height(4.dp))
                         Text(
                             text = tab.label,
-                            fontSize = 11.sp,
+                            fontSize = 13.5.sp,
                             color = NavInk.copy(alpha = if (selected) 1f else 0.42f),
                             fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                         )
