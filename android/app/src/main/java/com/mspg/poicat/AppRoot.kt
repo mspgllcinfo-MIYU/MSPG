@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,7 +38,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -63,11 +63,6 @@ private fun iconFor(tab: AppTab): ImageVector = when (tab) {
     AppTab.MEMO -> NavIcons.Memo
     AppTab.AI -> NavIcons.CatAi
 }
-
-// BB gets a touch more visual size than the other 4 (which all share one
-// size) — it's this app's one character-branded tab, and needs the extra
-// room for its ears/half-lidded eyes to still read at a glance.
-private fun iconSizeFor(tab: AppTab): Dp = if (tab == AppTab.AI) 32.dp else 28.dp
 
 // "Where was I looking" navigation state, kept across BottomNav tab switches
 // (and, as a side effect of rememberSaveable, config changes like a Fold
@@ -145,58 +140,102 @@ fun AppRoot() {
 
 @Composable
 private fun BottomTabBar(selectedTab: AppTab, onSelect: (AppTab) -> Unit) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        // A hairline, not a heavy divider — just enough to separate the nav from
-        // whatever screen (including Home's dark hero) sits above it.
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(1.dp)
-                .background(NavGold.copy(alpha = 0.25f)),
-        )
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .shadow(elevation = 3.dp)
-                .background(MaterialTheme.colorScheme.surface)
-                .padding(vertical = 10.dp, horizontal = 6.dp),
-        ) {
-            AppTab.entries.forEach { tab ->
-                val selected = tab == selectedTab
-                // The tap target (this Box) always keeps its full weight(1f)
-                // width and a 48dp-minimum height, independent of how compact
-                // the visual pill inside it is — shrinking the look must not
-                // shrink the tappable area.
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .heightIn(min = 48.dp)
-                        .clickable { onSelect(tab) },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(if (selected) NavPink.copy(alpha = 0.22f) else Color.Transparent)
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Icon(
-                            imageVector = iconFor(tab),
-                            contentDescription = tab.label,
-                            tint = NavInk.copy(alpha = if (selected) 1f else 0.42f),
-                            modifier = Modifier.size(iconSizeFor(tab)),
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            text = tab.label,
-                            fontSize = 13.5.sp,
-                            color = NavInk.copy(alpha = if (selected) 1f else 0.42f),
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                        )
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // A hairline, not a heavy divider — just enough to separate the nav from
+            // whatever screen (including Home's dark hero) sits above it.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(NavGold.copy(alpha = 0.25f)),
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .shadow(elevation = 3.dp)
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(vertical = 10.dp, horizontal = 6.dp),
+            ) {
+                AppTab.entries.forEach { tab ->
+                    if (tab == AppTab.AI) {
+                        // BB's real button is the standalone overlay below (drawn on
+                        // top, and free to extend above this bar's own top edge) — this
+                        // Spacer only reserves BB's normal 1/5-width share, so the other
+                        // 4 tabs' widths and this Row's own height are exactly as if BB
+                        // were still a plain tab here.
+                        Spacer(modifier = Modifier.weight(1f).heightIn(min = 48.dp))
+                    } else {
+                        val selected = tab == selectedTab
+                        // The tap target (this Box) always keeps its full weight(1f)
+                        // width and a 48dp-minimum height, independent of how compact
+                        // the visual pill inside it is — shrinking the look must not
+                        // shrink the tappable area.
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 48.dp)
+                                .clickable { onSelect(tab) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(if (selected) NavPink.copy(alpha = 0.22f) else Color.Transparent)
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Icon(
+                                    imageVector = iconFor(tab),
+                                    contentDescription = tab.label,
+                                    tint = NavInk.copy(alpha = if (selected) 1f else 0.42f),
+                                    modifier = Modifier.size(28.dp),
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = tab.label,
+                                    fontSize = 13.5.sp,
+                                    color = NavInk.copy(alpha = if (selected) 1f else 0.42f),
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                )
+                            }
+                        }
                     }
                 }
             }
+        }
+
+        // BB: not a function icon like the other 4 — this is BB himself,
+        // standing in as 猫AI's entire entry point (no pill, no label; his
+        // silhouette alone is the affordance). A standalone element layered
+        // on top of the bar rather than a Row child, so he's free to peek
+        // above the bar's own top edge without affecting the Row's height.
+        //
+        // The box below is a generously tall (76dp), bottom-anchored hit
+        // target; the offset that lifts BB up is applied to the *icon*
+        // inside it, not to the box itself, so the box's own bounds — and
+        // therefore its tap region — never move. 76dp comfortably contains
+        // the 54dp icon at any offset from 0 down to about -20dp, so tapping
+        // BB anywhere he's drawn, ears included, always lands inside this
+        // same clickable box, across the whole range this offset is meant
+        // to be tuned within.
+        val bbSelected = selectedTab == AppTab.AI
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .fillMaxWidth(1f / 5f)
+                .height(76.dp)
+                .clickable { onSelect(AppTab.AI) },
+            contentAlignment = Alignment.BottomCenter,
+        ) {
+            Icon(
+                imageVector = NavIcons.CatAi,
+                contentDescription = AppTab.AI.label,
+                tint = NavInk.copy(alpha = if (bbSelected) 1f else 0.42f),
+                modifier = Modifier
+                    .size(width = 40.dp, height = 54.dp)
+                    .offset(y = (-14).dp),
+            )
         }
     }
 }

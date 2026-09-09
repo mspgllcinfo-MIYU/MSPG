@@ -245,90 +245,105 @@ object NavIcons {
             return built
         }
 
-    /** BB's face — a round black-cat head with two ears (each with a small
-     * inner-ear cutout) and heavy-lidded, slightly bored eyes. No nose or
-     * whiskers: at nav-icon size those would just blur into noise, so the
-     * silhouette + ears + sleepy eyes alone carry "it's BB, and it's a cat".
-     * Layered as 3 passes (ears, then head+eyes on top, then pupils on top
-     * of that) so the head cleanly covers the ear roots and the pupils sit
-     * inside the eye cutouts, without any pass punching an unwanted hole
-     * through another. Deliberately not a generic cat mark — this is the
-     * one icon among the 5 allowed a touch more character, since 猫AI is
-     * this app's one character-branded tab. */
+    /** BB, full-body — not a function icon like Home/Poi/Calendar/Memo, but
+     * BB himself: a round-headed, big-eared black cat standing with a
+     * heavy-lidded, faintly unimpressed look. This app's one character, so
+     * BottomTabBar renders it life-sized rather than as a matched function
+     * icon (see AppRoot.kt's dedicated BB overlay, which skips the pill
+     * background and label the other 4 tabs use). Whiskers and the chest
+     * mark from the reference art are dropped — at nav-icon scale they'd
+     * just blur into noise — so the round silhouette, big ears, and sleepy
+     * eyes alone carry "it's BB". Layered bottom-to-top (body, ears, head,
+     * pupils) so each later layer's opaque fill cleanly covers the seam
+     * where it meets the one before, the same technique used elsewhere in
+     * this file (e.g. Memo's pen, Poi's toe-beans). */
     val CatAi: ImageVector
         get() {
             _catAi?.let { return it }
             val built = ImageVector.Builder(
-                name = "NavCatAi",
-                defaultWidth = 24.dp,
-                defaultHeight = 24.dp,
-                viewportWidth = 24f,
-                viewportHeight = 24f,
+                name = "NavCatAiFull",
+                defaultWidth = 20.dp,
+                defaultHeight = 27.dp,
+                viewportWidth = 20f,
+                viewportHeight = 27f,
             ).path(
-                // Ears, each with a small inner-ear cutout — enlarged and
-                // pushed further out/up so they stay clearly "big cat ears"
-                // at this icon's larger 32dp render size.
+                // Body: a rounded torso with two short legs and a small tail curl.
                 fill = SolidColor(Color.Black),
-                pathFillType = PathFillType.EvenOdd,
             ) {
-                moveTo(3.3f, 2.2f)
-                lineTo(6.3f, 10.3f)
-                lineTo(10.2f, 8.5f)
-                close()
-                moveTo(4.8f, 4.8f)
-                lineTo(6.6f, 8.9f)
-                lineTo(9f, 8f)
-                close()
-                moveTo(20.7f, 2.2f)
-                lineTo(17.7f, 10.3f)
-                lineTo(13.8f, 8.5f)
-                close()
-                moveTo(19.2f, 4.8f)
-                lineTo(17.4f, 8.9f)
-                lineTo(15f, 8f)
+                moveTo(6f, 16f)
+                lineTo(14f, 16f)
+                lineTo(15.5f, 18f)
+                lineTo(18f, 20.5f)
+                lineTo(16.5f, 23f)
+                lineTo(15f, 21.5f)
+                lineTo(15f, 25f)
+                lineTo(13.5f, 27f)
+                lineTo(11.5f, 25.3f)
+                lineTo(8.5f, 25.3f)
+                lineTo(6.5f, 27f)
+                lineTo(5f, 25f)
+                lineTo(5f, 18f)
                 close()
             }.path(
-                // Head, on top of the ear roots, with heavy-lidded eye cutouts —
-                // enlarged to match the bigger ears above.
+                // Ears, each with a small inner-ear cutout.
                 fill = SolidColor(Color.Black),
                 pathFillType = PathFillType.EvenOdd,
             ) {
-                moveTo(9f, 7f)
-                lineTo(15f, 7f)
-                quadTo(19.5f, 7f, 19.5f, 11.5f)
-                lineTo(19.5f, 17f)
-                quadTo(19.5f, 21.5f, 15f, 21.5f)
-                lineTo(9f, 21.5f)
-                quadTo(4.5f, 21.5f, 4.5f, 17f)
-                lineTo(4.5f, 11.5f)
-                quadTo(4.5f, 7f, 9f, 7f)
+                moveTo(1.5f, 0.5f)
+                lineTo(4.5f, 7.5f)
+                lineTo(8f, 6f)
                 close()
-                // Left eye: flat heavy lid on top, rounder underneath — a
-                // touch bigger than before so the sleepy/bored look survives
-                // at nav-icon size.
-                moveTo(7.9f, 13.5f)
-                quadTo(9.6f, 12.3f, 11.3f, 13.5f)
-                quadTo(9.6f, 15.3f, 7.9f, 13.5f)
+                moveTo(2.7f, 2.7f)
+                lineTo(4.7f, 6.2f)
+                lineTo(6.6f, 5.3f)
+                close()
+                moveTo(18.5f, 0.5f)
+                lineTo(15.5f, 7.5f)
+                lineTo(12f, 6f)
+                close()
+                moveTo(17.3f, 2.7f)
+                lineTo(15.3f, 6.2f)
+                lineTo(13.4f, 5.3f)
+                close()
+            }.path(
+                // Head, on top of the ear roots and the body's top edge, with
+                // heavy-lidded eye cutouts.
+                fill = SolidColor(Color.Black),
+                pathFillType = PathFillType.EvenOdd,
+            ) {
+                moveTo(7f, 2f)
+                lineTo(13f, 2f)
+                quadTo(17.5f, 2f, 17.5f, 6.5f)
+                lineTo(17.5f, 12f)
+                quadTo(17.5f, 17f, 13f, 17f)
+                lineTo(7f, 17f)
+                quadTo(2.5f, 17f, 2.5f, 12f)
+                lineTo(2.5f, 6.5f)
+                quadTo(2.5f, 2f, 7f, 2f)
+                close()
+                // Left eye: flat heavy lid on top, rounder underneath.
+                moveTo(5.3f, 9.3f)
+                quadTo(7.3f, 8.1f, 9.3f, 9.3f)
+                quadTo(7.3f, 11.1f, 5.3f, 9.3f)
                 close()
                 // Right eye, mirrored.
-                moveTo(16.1f, 13.5f)
-                quadTo(14.4f, 12.3f, 12.7f, 13.5f)
-                quadTo(14.4f, 15.3f, 16.1f, 13.5f)
+                moveTo(14.7f, 9.3f)
+                quadTo(12.7f, 8.1f, 10.7f, 9.3f)
+                quadTo(12.7f, 11.1f, 14.7f, 9.3f)
                 close()
             }.path(
-                // Pupils, sitting inside the eye cutouts, on top of everything —
-                // enlarged to match the bigger eye holes.
+                // Pupils, sitting inside the eye cutouts, on top of everything.
                 fill = SolidColor(Color.Black),
             ) {
-                moveTo(9f, 13.9f)
-                lineTo(10.1f, 13.9f)
-                lineTo(10.1f, 15f)
-                lineTo(9f, 15f)
+                moveTo(6.6f, 9.5f)
+                lineTo(7.6f, 9.5f)
+                lineTo(7.6f, 10.5f)
+                lineTo(6.6f, 10.5f)
                 close()
-                moveTo(13.9f, 13.9f)
-                lineTo(15f, 13.9f)
-                lineTo(15f, 15f)
-                lineTo(13.9f, 15f)
+                moveTo(12.4f, 9.5f)
+                lineTo(13.4f, 9.5f)
+                lineTo(13.4f, 10.5f)
+                lineTo(12.4f, 10.5f)
                 close()
             }.build()
             _catAi = built
