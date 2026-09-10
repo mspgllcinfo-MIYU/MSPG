@@ -31,13 +31,6 @@
             </intent-filter>
         </activity>
 
-        <!-- Phase 3: Google Drive Picker用の一時的なWebView画面。他アプリからは
-             起動されない内部専用の画面なのでexported=falseで十分。 -->
-        <activity
-            android:name=".drive.DrivePickerActivity"
-            android:exported="false"
-            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
-
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

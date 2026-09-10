@@ -1,7 +1,6 @@
 package com.mspg.poicat
 
 import android.app.Activity
-import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -35,7 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mspg.poicat.auth.GoogleAuthManager
 import com.mspg.poicat.drive.DriveConnectionStore
-import com.mspg.poicat.drive.DrivePickerActivity
+import com.mspg.poicat.drive.DriveFolderRepository
 import kotlinx.coroutines.launch
 
 // Connection画面専用の色 — 既存の各画面と同じトーン("大人かわいい×ちょっと高級×
@@ -45,12 +44,25 @@ private val ConnCard = Color(0xFFEFE7DE)
 private val ConnGold = Color(0xFFC9A66B)
 private val ConnPink = Color(0xFFD98A9C)
 
-private enum class PickTarget { ALBUM, FILE }
+private enum class FolderTarget(val label: String) {
+    ALBUM("アルバム"),
+    FILE("ファイル"),
+}
 
 /**
- * Phase 3: Googleサインイン + Driveフォルダ接続（アルバム/ファイル用フォルダを一度
- * だけ選択）。実際の写真/ファイル同期ロジックはまだここには無い — サインインと
- * フォルダの紐付けだけを行う画面。
+ * Phase 3: Googleサインイン + Driveフォルダ接続。
+ *
+ * 当初はGoogle Picker（WebView埋め込み）で既存の手動作成フォルダを選ばせる設計
+ * だったが、実機テストでGoogleのWebViewセキュリティ制約（Cookieアクセス拒否→
+ * 修正後は403）に阻まれ続けたため廃止した。Googleは2026年時点でWebView内での
+ * Picker利用を非推奨としており、公式な代替は実際のWebバックエンド経由でのフル
+ * ブラウザ遷移＋ディープリンク復帰という、新たなホスティング環境が要る構成のみ。
+ *
+ * 代わりに、drive.fileスコープが常に許可している「アプリが作成したファイルには
+ * アプリ自身がその後もアクセスできる」性質だけを使うDriveFolderRepositoryへ
+ * 切り替えた — WebView/Pickerは一切使わない。ボタン一つで「POI用/アルバム」
+ * 「POI用/ファイル」フォルダを初回作成・以降は再利用する。ユーザーがGoogle
+ * Drive側で何かを操作する必要は無い。
  */
 @Composable
 fun ConnectionScreen(onBack: () -> Unit) {
@@ -65,50 +77,42 @@ fun ConnectionScreen(onBack: () -> Unit) {
     var statusText by remember { mutableStateOf<String?>(null) }
     var isBusy by remember { mutableStateOf(false) }
     var cachedAccessToken by remember { mutableStateOf<String?>(null) }
-    var pendingPickTarget by remember { mutableStateOf<PickTarget?>(null) }
+    var pendingTarget by remember { mutableStateOf<FolderTarget?>(null) }
 
-    val pickerLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) { result ->
-        val target = pendingPickTarget
-        pendingPickTarget = null
-        isBusy = false
-        if (result.resultCode == Activity.RESULT_OK && target != null) {
-            val id = result.data?.getStringExtra(DrivePickerActivity.EXTRA_FOLDER_ID)
-            val name = result.data?.getStringExtra(DrivePickerActivity.EXTRA_FOLDER_NAME)
-            if (id != null && name != null) {
+    // 「POI用」ルートフォルダの中に、選んだ対象名（アルバム/ファイル）の子フォルダを
+    // 見つけるか無ければ作る。Picker/WebViewは一切使わない、純粋なREST呼び出し。
+    fun ensureFolderFor(target: FolderTarget, accessToken: String) {
+        scope.launch {
+            isBusy = true
+            try {
+                val poiRoot = DriveFolderRepository.ensureFolder(accessToken, "POI用", null).getOrThrow()
+                val folder = DriveFolderRepository.ensureFolder(accessToken, target.label, poiRoot.id).getOrThrow()
+                val displayName = "POI用/${folder.name}"
                 when (target) {
-                    PickTarget.ALBUM -> { store.albumFolderId = id; store.albumFolderName = name; albumFolderName = name }
-                    PickTarget.FILE -> { store.fileFolderId = id; store.fileFolderName = name; fileFolderName = name }
+                    FolderTarget.ALBUM -> { store.albumFolderId = folder.id; store.albumFolderName = displayName; albumFolderName = displayName }
+                    FolderTarget.FILE -> { store.fileFolderId = folder.id; store.fileFolderName = displayName; fileFolderName = displayName }
                 }
-                statusText = "「$name」を接続したにゃ"
+                statusText = "「$displayName」を接続したにゃ"
+            } catch (e: Exception) {
+                statusText = "フォルダの準備に失敗したにゃ：${e.message ?: e.javaClass.simpleName}"
+            } finally {
+                isBusy = false
             }
-        } else {
-            statusText = "フォルダ選択をやめたにゃ"
         }
-    }
-
-    fun launchPickerFor(target: PickTarget, accessToken: String) {
-        pendingPickTarget = target
-        pickerLauncher.launch(
-            Intent(context, DrivePickerActivity::class.java).apply {
-                putExtra(DrivePickerActivity.EXTRA_ACCESS_TOKEN, accessToken)
-                putExtra(DrivePickerActivity.EXTRA_API_KEY, context.getString(R.string.google_api_key))
-            },
-        )
     }
 
     val authResolutionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult(),
     ) { result ->
         val data = result.data
-        val target = pendingPickTarget
+        val target = pendingTarget
+        pendingTarget = null
         if (data != null && target != null) {
             scope.launch {
                 GoogleAuthManager.resumeAfterResolution(activity, data)
                     .onSuccess { token ->
                         cachedAccessToken = token
-                        launchPickerFor(target, token)
+                        ensureFolderFor(target, token)
                     }
                     .onFailure {
                         isBusy = false
@@ -120,10 +124,10 @@ fun ConnectionScreen(onBack: () -> Unit) {
         }
     }
 
-    fun authorizeThenPick(target: PickTarget) {
+    fun authorizeThenEnsureFolder(target: FolderTarget) {
         val cached = cachedAccessToken
         if (cached != null) {
-            launchPickerFor(target, cached)
+            ensureFolderFor(target, cached)
             return
         }
         isBusy = true
@@ -132,12 +136,11 @@ fun ConnectionScreen(onBack: () -> Unit) {
                 .onSuccess { outcome ->
                     when (outcome) {
                         is GoogleAuthManager.AuthorizationOutcome.Granted -> {
-                            isBusy = false
                             cachedAccessToken = outcome.accessToken
-                            launchPickerFor(target, outcome.accessToken)
+                            ensureFolderFor(target, outcome.accessToken)
                         }
                         is GoogleAuthManager.AuthorizationOutcome.ResolutionNeeded -> {
-                            pendingPickTarget = target
+                            pendingTarget = target
                             val pendingIntent = outcome.result.pendingIntent
                             if (pendingIntent != null) {
                                 authResolutionLauncher.launch(
@@ -207,21 +210,21 @@ fun ConnectionScreen(onBack: () -> Unit) {
 
         Spacer(Modifier.height(16.dp))
 
-        ConnectionCard(title = "アルバム用フォルダ") {
+        ConnectionCard(title = "アルバム用フォルダ（POI用/アルバム）") {
             FolderRow(
                 folderName = albumFolderName,
                 enabled = signedInEmail != null && !isBusy,
-                onSelect = { authorizeThenPick(PickTarget.ALBUM) },
+                onSelect = { authorizeThenEnsureFolder(FolderTarget.ALBUM) },
             )
         }
 
         Spacer(Modifier.height(16.dp))
 
-        ConnectionCard(title = "ファイル用フォルダ") {
+        ConnectionCard(title = "ファイル用フォルダ（POI用/ファイル）") {
             FolderRow(
                 folderName = fileFolderName,
                 enabled = signedInEmail != null && !isBusy,
-                onSelect = { authorizeThenPick(PickTarget.FILE) },
+                onSelect = { authorizeThenEnsureFolder(FolderTarget.FILE) },
             )
         }
 
@@ -255,7 +258,7 @@ private fun FolderRow(folderName: String?, enabled: Boolean, onSelect: () -> Uni
         Text("接続済み：$folderName", color = ConnInk.copy(alpha = 0.7f))
         Spacer(Modifier.height(8.dp))
     } else {
-        Text("まだ選択していないにゃ", color = ConnInk.copy(alpha = 0.5f))
+        Text("まだ接続していないにゃ", color = ConnInk.copy(alpha = 0.5f))
         Spacer(Modifier.height(8.dp))
     }
     Button(
@@ -263,5 +266,5 @@ private fun FolderRow(folderName: String?, enabled: Boolean, onSelect: () -> Uni
         enabled = enabled,
         colors = ButtonDefaults.buttonColors(containerColor = ConnPink.copy(alpha = 0.25f), contentColor = ConnInk),
         shape = RoundedCornerShape(percent = 50),
-    ) { Text(if (folderName != null) "フォルダを選びなおす" else "フォルダを選ぶ") }
+    ) { Text(if (folderName != null) "フォルダを確認しなおす" else "フォルダを接続する") }
 }
