@@ -180,16 +180,22 @@ fun ConnectionScreen(onBack: () -> Unit) {
                     onClick = {
                         isBusy = true
                         scope.launch {
-                            GoogleAuthManager.signIn(activity, context.getString(R.string.default_web_client_id))
-                                .onSuccess {
-                                    isBusy = false
-                                    signedInEmail = GoogleAuthManager.currentUserEmail()
-                                    statusText = "サインインしたにゃ"
-                                }
-                                .onFailure {
-                                    isBusy = false
-                                    statusText = "サインインに失敗したにゃ"
-                                }
+                            // finallyでisBusyを必ず戻す — onSuccess/onFailureのどちらかに
+                            // 必ず到達する保証が(端末側のPlay Services実装次第で)無いため、
+                            // ここで確実にリセットしないと、ボタンが永久にグレーアウトした
+                            // まま操作不能になり得る。
+                            try {
+                                GoogleAuthManager.signIn(activity, context.getString(R.string.default_web_client_id))
+                                    .onSuccess {
+                                        signedInEmail = GoogleAuthManager.currentUserEmail()
+                                        statusText = "サインインしたにゃ"
+                                    }
+                                    .onFailure {
+                                        statusText = "サインインに失敗したにゃ：${it.message ?: it.javaClass.simpleName}"
+                                    }
+                            } finally {
+                                isBusy = false
+                            }
                         }
                     },
                     enabled = !isBusy,
