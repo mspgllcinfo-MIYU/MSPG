@@ -132,31 +132,41 @@ fun ConnectionScreen(onBack: () -> Unit) {
         }
         isBusy = true
         scope.launch {
-            GoogleAuthManager.requestDriveAuthorization(activity)
-                .onSuccess { outcome ->
-                    when (outcome) {
-                        is GoogleAuthManager.AuthorizationOutcome.Granted -> {
-                            cachedAccessToken = outcome.accessToken
-                            ensureFolderFor(target, outcome.accessToken)
-                        }
-                        is GoogleAuthManager.AuthorizationOutcome.ResolutionNeeded -> {
-                            pendingTarget = target
-                            val pendingIntent = outcome.result.pendingIntent
-                            if (pendingIntent != null) {
-                                authResolutionLauncher.launch(
-                                    IntentSenderRequest.Builder(pendingIntent.intentSender).build(),
-                                )
-                            } else {
-                                isBusy = false
-                                statusText = "Drive権限リクエストに失敗したにゃ"
+            // ResolutionNeededで同意画面へ遷移する間だけはisBusyをtrueのまま保つ
+            // （二重タップ防止）。それ以外の終わり方では必ずfalseへ戻す —
+            // GoogleAuthManager側にタイムアウトを追加済みなので、この呼び出し自体は
+            // 必ずいずれかの形で終わるが、念のためfinallyでも二重に保証する。
+            var awaitingSystemConsent = false
+            try {
+                GoogleAuthManager.requestDriveAuthorization(activity)
+                    .onSuccess { outcome ->
+                        when (outcome) {
+                            is GoogleAuthManager.AuthorizationOutcome.Granted -> {
+                                cachedAccessToken = outcome.accessToken
+                                ensureFolderFor(target, outcome.accessToken)
+                            }
+                            is GoogleAuthManager.AuthorizationOutcome.ResolutionNeeded -> {
+                                pendingTarget = target
+                                val pendingIntent = outcome.result.pendingIntent
+                                if (pendingIntent != null) {
+                                    awaitingSystemConsent = true
+                                    authResolutionLauncher.launch(
+                                        IntentSenderRequest.Builder(pendingIntent.intentSender).build(),
+                                    )
+                                } else {
+                                    statusText = "Drive権限リクエストに失敗したにゃ"
+                                }
                             }
                         }
                     }
-                }
-                .onFailure {
+                    .onFailure {
+                        statusText = "Drive権限リクエストに失敗したにゃ：${it.message ?: it.javaClass.simpleName}"
+                    }
+            } finally {
+                if (!awaitingSystemConsent) {
                     isBusy = false
-                    statusText = "Drive権限リクエストに失敗したにゃ"
                 }
+            }
         }
     }
 

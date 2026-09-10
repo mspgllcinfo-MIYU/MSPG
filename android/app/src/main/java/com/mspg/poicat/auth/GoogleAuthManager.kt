@@ -14,8 +14,16 @@ import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withTimeout
 
 private const val DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
+
+// Play Servicesのバックグラウンド実装が端末によって稀にTaskのコールバックを一切
+// 呼ばないまま止まることがある（実機で確認済み — サインインボタン、Drive認可
+// ボタンの両方で「グレーアウトしたまま操作不能」という同じ症状として現れた）。
+// runCatching/try-finallyだけでは真の無限ハングを救えない（そもそも中の処理が
+// 完了しないとfinallyにも到達しない）ため、明示的なタイムアウトで必ず決着させる。
+private const val GOOGLE_TASK_TIMEOUT_MS = 20_000L
 
 /**
  * Google認証の窓口。サインインはCredential Manager経由でGoogleのIDトークンを取得し、
@@ -30,21 +38,23 @@ object GoogleAuthManager {
     fun currentUserEmail(): String? = FirebaseAuth.getInstance().currentUser?.email
 
     suspend fun signIn(activity: Activity, webClientId: String): Result<Unit> = runCatching {
-        val option = GetGoogleIdOption.Builder()
-            .setServerClientId(webClientId)
-            .setFilterByAuthorizedAccounts(false)
-            .build()
-        val request = GetCredentialRequest.Builder().addCredentialOption(option).build()
-        val response = CredentialManager.create(activity).getCredential(activity, request)
+        withTimeout(GOOGLE_TASK_TIMEOUT_MS) {
+            val option = GetGoogleIdOption.Builder()
+                .setServerClientId(webClientId)
+                .setFilterByAuthorizedAccounts(false)
+                .build()
+            val request = GetCredentialRequest.Builder().addCredentialOption(option).build()
+            val response = CredentialManager.create(activity).getCredential(activity, request)
 
-        val credential = response.credential
-        require(credential is CustomCredential && credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
-            "unexpected credential type"
+            val credential = response.credential
+            require(credential is CustomCredential && credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+                "unexpected credential type"
+            }
+            val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
+            val firebaseCredential = GoogleAuthProvider.getCredential(googleIdTokenCredential.idToken, null)
+            FirebaseAuth.getInstance().signInWithCredential(firebaseCredential).await()
+            Unit
         }
-        val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
-        val firebaseCredential = GoogleAuthProvider.getCredential(googleIdTokenCredential.idToken, null)
-        FirebaseAuth.getInstance().signInWithCredential(firebaseCredential).await()
-        Unit
     }
 
     sealed class AuthorizationOutcome {
@@ -59,14 +69,16 @@ object GoogleAuthManager {
      * に渡して初めてアクセストークンが得られる。
      */
     suspend fun requestDriveAuthorization(activity: Activity): Result<AuthorizationOutcome> = runCatching {
-        val request = AuthorizationRequest.builder()
-            .setRequestedScopes(listOf(Scope(DRIVE_FILE_SCOPE)))
-            .build()
-        val result = Identity.getAuthorizationClient(activity).authorize(request).await()
-        if (result.hasResolution()) {
-            AuthorizationOutcome.ResolutionNeeded(result)
-        } else {
-            AuthorizationOutcome.Granted(requireNotNull(result.accessToken))
+        withTimeout(GOOGLE_TASK_TIMEOUT_MS) {
+            val request = AuthorizationRequest.builder()
+                .setRequestedScopes(listOf(Scope(DRIVE_FILE_SCOPE)))
+                .build()
+            val result = Identity.getAuthorizationClient(activity).authorize(request).await()
+            if (result.hasResolution()) {
+                AuthorizationOutcome.ResolutionNeeded(result)
+            } else {
+                AuthorizationOutcome.Granted(requireNotNull(result.accessToken))
+            }
         }
     }
 

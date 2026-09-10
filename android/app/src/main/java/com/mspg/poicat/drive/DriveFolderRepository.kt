@@ -85,6 +85,11 @@ object DriveFolderRepository {
     private fun request(urlString: String, method: String, accessToken: String, body: String?): String {
         val connection = URL(urlString).openConnection() as HttpURLConnection
         try {
+            // HttpURLConnectionはデフォルトでタイムアウト無制限 — 万一応答が返らない
+            // 場合でも呼び出し元(ConnectionScreen)のisBusyが永久に戻らなくなるのを
+            // 防ぐため、明示的に上限を設ける。
+            connection.connectTimeout = 15_000
+            connection.readTimeout = 15_000
             connection.requestMethod = method
             connection.setRequestProperty("Authorization", "Bearer $accessToken")
             if (body != null) {
