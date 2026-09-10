@@ -83,7 +83,11 @@ dependencies {
 
     // Firebase接続準備: 匿名認証＋Firestoreのみ（Sparkプラン無料枠、カード登録不要）。
     // Firebase Storageは使用しない — 写真/ファイル本体はGoogle Driveへ保存する方針のため。
-    implementation(platform("com.google.firebase:firebase-bom:34.16.0"))
+    // BOMは意図的に33.1.2（2024年7月）を使用: 本プロジェクトの他の依存関係
+    // （Kotlin 1.9.24 / Compose BOM 2024.06.00 / AGP 8.5.2）と同時期のバージョンで、
+    // 最新版(34.x)はより新しいKotlinコンパイラでビルドされておりメタデータ非互換で
+    // ビルド失敗する（kspDebugKotlin: "compiled with an incompatible version of Kotlin"）。
+    implementation(platform("com.google.firebase:firebase-bom:33.1.2"))
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-firestore")
 
