@@ -61,7 +61,7 @@ private val HomePink = Color(0xFFD98A9C) // the app's existing pink — kept rar
  * or a section jumps to the matching tab.
  */
 @Composable
-fun HomeScreen(onNavigate: (AppTab) -> Unit, onOpenAlbum: () -> Unit) {
+fun HomeScreen(onNavigate: (AppTab) -> Unit, onOpenAlbum: () -> Unit, onOpenConnectionSettings: () -> Unit) {
     val context = LocalContext.current
     val repository = remember { CatEventRepository(context.applicationContext) }
 
@@ -152,6 +152,14 @@ fun HomeScreen(onNavigate: (AppTab) -> Unit, onOpenAlbum: () -> Unit) {
 
             HomeSection(title = "アルバム", onClick = onOpenAlbum) {
                 Text("写真を見る・追加する", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // Phase 3: Googleサインイン＋Driveフォルダ接続の入り口。BottomNavのタブには
+            // せず、他のセクションと同じ「タップして別画面へ」の導線に揃えている。
+            HomeSection(title = "Google連携", onClick = onOpenConnectionSettings) {
+                Text("サインイン・Driveフォルダの接続", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 

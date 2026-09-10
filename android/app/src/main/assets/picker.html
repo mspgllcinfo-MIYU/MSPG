@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body>
+<script src="https://apis.google.com/js/api.js"></script>
+<script>
+  var pickerApiLoaded = false;
+  var pendingToken = null;
+  var pendingKey = null;
+
+  // Called from Kotlin (DrivePickerActivity) via evaluateJavascript once this
+  // page has finished loading.
+  function initPicker(accessToken, apiKey) {
+    pendingToken = accessToken;
+    pendingKey = apiKey;
+    gapi.load('picker', { callback: onPickerApiLoad });
+  }
+
+  function onPickerApiLoad() {
+    pickerApiLoaded = true;
+    createPicker();
+  }
+
+  function createPicker() {
+    if (!pickerApiLoaded || !pendingToken) return;
+    var view = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
+      .setSelectFolderEnabled(true)
+      .setIncludeFolders(true);
+    var picker = new google.picker.PickerBuilder()
+      .addView(view)
+      .setOAuthToken(pendingToken)
+      .setDeveloperKey(pendingKey)
+      .setCallback(pickerCallback)
+      .build();
+    picker.setVisible(true);
+  }
+
+  function pickerCallback(data) {
+    if (data.action === google.picker.Action.PICKED) {
+      var doc = data.docs[0];
+      AndroidBridge.onFolderPicked(doc.id, doc.name);
+    } else if (data.action === google.picker.Action.CANCEL) {
+      AndroidBridge.onCancelled();
+    }
+  }
+</script>
+</body>
+</html>

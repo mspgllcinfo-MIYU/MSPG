@@ -12,7 +12,12 @@
           "package_name": "com.mspg.poicat"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "898227171367-enernmr9q7u7g8skodp5ec7uqeq5o7o3.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyBKx5RzBU6BdtFMEZ2MXORp37KUiM3dmnw"
@@ -20,7 +25,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "898227171367-enernmr9q7u7g8skodp5ec7uqeq5o7o3.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

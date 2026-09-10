@@ -91,6 +91,9 @@ fun AppRoot() {
     // (see PoiScreen's requestAlbumTab) instead of the old standalone showAlbum
     // overlay — this is that request, cleared the moment PoiScreen consumes it.
     var poiRequestAlbum by remember { mutableStateOf(false) }
+    // Phase 3: Google連携（サインイン＋Driveフォルダ接続）は独立タブにせず、Home
+    // からの一時的な全画面遷移として扱う — AppTab/BottomTabBarには一切触れない。
+    var showConnectionSettings by remember { mutableStateOf(false) }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -122,25 +125,32 @@ fun AppRoot() {
 
     Column(modifier = Modifier.fillMaxSize()) {
         Box(modifier = Modifier.weight(1f)) {
-            when (selectedTab) {
-                AppTab.HOME -> HomeScreen(
-                    onNavigate = { selectedTab = it },
-                    onOpenAlbum = { poiRequestAlbum = true; selectedTab = AppTab.POI },
-                )
-                AppTab.POI -> PoiScreen(
-                    requestAlbumTab = poiRequestAlbum,
-                    onAlbumTabRequestConsumed = { poiRequestAlbum = false },
-                )
-                AppTab.CAL -> CalendarScreen(
-                    yearMonth = calendarYearMonth,
-                    onYearMonthChange = { calendarYearMonth = it },
-                    selectedDate = calendarSelectedDate,
-                    onSelectedDateChange = { calendarSelectedDate = it },
-                )
-                AppTab.AI -> AiChatScreen()
+            if (showConnectionSettings) {
+                ConnectionScreen(onBack = { showConnectionSettings = false })
+            } else {
+                when (selectedTab) {
+                    AppTab.HOME -> HomeScreen(
+                        onNavigate = { selectedTab = it },
+                        onOpenAlbum = { poiRequestAlbum = true; selectedTab = AppTab.POI },
+                        onOpenConnectionSettings = { showConnectionSettings = true },
+                    )
+                    AppTab.POI -> PoiScreen(
+                        requestAlbumTab = poiRequestAlbum,
+                        onAlbumTabRequestConsumed = { poiRequestAlbum = false },
+                    )
+                    AppTab.CAL -> CalendarScreen(
+                        yearMonth = calendarYearMonth,
+                        onYearMonthChange = { calendarYearMonth = it },
+                        selectedDate = calendarSelectedDate,
+                        onSelectedDateChange = { calendarSelectedDate = it },
+                    )
+                    AppTab.AI -> AiChatScreen()
+                }
             }
         }
-        BottomTabBar(selectedTab = selectedTab, onSelect = { selectedTab = it })
+        if (!showConnectionSettings) {
+            BottomTabBar(selectedTab = selectedTab, onSelect = { selectedTab = it })
+        }
     }
 }
 
