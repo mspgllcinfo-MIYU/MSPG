@@ -1,0 +1,78 @@
+package com.mspg.poicat
+
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import androidx.core.content.IntentCompat
+import com.mspg.poicat.brain.CatBrain
+import com.mspg.poicat.data.CatEventRepository
+import com.mspg.poicat.data.Photo
+import com.mspg.poicat.data.PhotoRepository
+
+/**
+ * Handles an incoming ACTION_SEND intent (share-to-PoiCat from another app),
+ * reusing exactly the same CatBrain/ChatRepository/PhotoRepository entry
+ * points AiChatScreen's own send() uses for typed input — no separate
+ * classification logic for shared content.
+ *
+ * Runs entirely outside Compose: ChatRepository's message lists are already
+ * globally observed SnapshotStateLists, so writing into them here is enough
+ * for the 猫AI screen to show the result the moment it's opened. The only
+ * thing handed back into the Compose tree is the one-shot "open 猫AI" signal
+ * via PendingNavigation, set last so navigation never races the write.
+ */
+object ShareIntentHandler {
+    suspend fun handle(context: Context, intent: Intent) {
+        // 1. Extract whatever was shared.
+        val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim()
+        val sharedUri: Uri? = if (intent.type?.startsWith("image/") == true) {
+            IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+        } else {
+            null
+        }
+        if (sharedText.isNullOrBlank() && sharedUri == null) return
+
+        runCatching {
+            val photoRepository = PhotoRepository(context)
+            val catBrain = CatBrain(CatEventRepository(context), photoRepository)
+
+            // 2. Import the photo (if any) and record the user message — same
+            // shape as AiChatScreen.send(): text may be blank, photoIds may be empty.
+            val photo: Photo? = sharedUri?.let { photoRepository.importFromUri(it, caption = null, albumName = null) }
+            ChatRepository.addMessage(
+                ChatRoom.CASUAL,
+                ChatMessage("user", sharedText.orEmpty(), System.currentTimeMillis(), photo?.let { listOf(it.id) } ?: emptyList()),
+            )
+
+            if (photo != null && sharedText.isNullOrBlank()) {
+                // 3. A bare photo share, no caption: already saved to the album,
+                // same as AiChatScreen's Phase B bare-photo send — nothing for
+                // CatBrain to sort.
+                return@runCatching
+            }
+
+            // 3. Same branching as send(): photo+caption vs. text-only.
+            val reply = if (photo != null) {
+                catBrain.respondToPhoto(sharedText.orEmpty(), photo)
+            } else {
+                catBrain.respond(sharedText!!)
+            }
+
+            // 4. Record the cat's reply.
+            ChatRepository.addMessage(
+                ChatRoom.CASUAL,
+                ChatMessage("assistant", reply.text, System.currentTimeMillis(), reply.photoIds),
+            )
+        }.onFailure {
+            ChatRepository.addMessage(
+                ChatRoom.CASUAL,
+                ChatMessage("assistant", "うまく受け取れなかったにゃ", System.currentTimeMillis()),
+            )
+        }
+
+        // 5. Only now signal AppRoot to open 猫AI — after the message(s) it's
+        // about to display already exist in ChatRepository.
+        PendingNavigation.requestedTab = AppTab.AI
+        PendingNavigation.requestedRoom = ChatRoom.CASUAL
+    }
+}

@@ -109,6 +109,20 @@ fun AppRoot() {
         }
     }
 
+    // Consumes ShareIntentHandler's one-shot "open 猫AI" request (see
+    // PendingNavigation) — set only after the shared content's chat messages
+    // already exist, so switching tabs here always lands on a screen that
+    // has something to show.
+    LaunchedEffect(PendingNavigation.requestedTab) {
+        val tab = PendingNavigation.requestedTab
+        if (tab != null) {
+            selectedTab = tab
+            PendingNavigation.requestedRoom?.let { aiSelectedRoom = it }
+            PendingNavigation.requestedTab = null
+            PendingNavigation.requestedRoom = null
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         Box(modifier = Modifier.weight(1f)) {
             when (selectedTab) {
