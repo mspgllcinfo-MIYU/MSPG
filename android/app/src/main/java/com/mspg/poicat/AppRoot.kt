@@ -87,7 +87,6 @@ fun AppRoot() {
 
     var calendarYearMonth by rememberSaveable(stateSaver = YearMonthSaver) { mutableStateOf(YearMonth.now()) }
     var calendarSelectedDate by rememberSaveable(stateSaver = LocalDateSaver) { mutableStateOf(LocalDate.now()) }
-    var aiSelectedRoom by rememberSaveable { mutableStateOf(ChatRoom.CASUAL) }
     // Block E: Home's アルバム entry now lands directly on Poi's own アルバム sub-tab
     // (see PoiScreen's requestAlbumTab) instead of the old standalone showAlbum
     // overlay — this is that request, cleared the moment PoiScreen consumes it.
@@ -117,9 +116,7 @@ fun AppRoot() {
         val tab = PendingNavigation.requestedTab
         if (tab != null) {
             selectedTab = tab
-            PendingNavigation.requestedRoom?.let { aiSelectedRoom = it }
             PendingNavigation.requestedTab = null
-            PendingNavigation.requestedRoom = null
         }
     }
 
@@ -140,10 +137,7 @@ fun AppRoot() {
                     selectedDate = calendarSelectedDate,
                     onSelectedDateChange = { calendarSelectedDate = it },
                 )
-                AppTab.AI -> AiChatScreen(
-                    selectedRoom = aiSelectedRoom,
-                    onSelectedRoomChange = { aiSelectedRoom = it },
-                )
+                AppTab.AI -> AiChatScreen()
             }
         }
         BottomTabBar(selectedTab = selectedTab, onSelect = { selectedTab = it })

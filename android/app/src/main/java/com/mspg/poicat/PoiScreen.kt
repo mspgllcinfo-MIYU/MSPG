@@ -72,16 +72,21 @@ private val PoiCard = Color(0xFFEFE7DE) // a shade deeper than the page, for tas
 private val PoiGold = Color(0xFFC9A66B) // restrained accent, never a fill color
 private val PoiPink = Color(0xFFD98A9C) // the app's existing pink, kept rare
 
-// Block C-1/C-2: Poi's internal 仕事/プラベ/メモ/アルバム split — a plain Kotlin enum,
-// saved the same way ChatRoom already is elsewhere in this app (rememberSaveable's
-// default Saver stores an enum via Bundle's Serializable support, no custom Saver
-// needed).
+// 100点仕様: メモは独立タブをやめ、プラベの中に統合（PrivateSubTabで切替）。
+// 仕事/プラベ/アルバム/ファイル — a plain Kotlin enum, saved the same way ChatRoom
+// already is elsewhere in this app (rememberSaveable's default Saver stores an enum
+// via Bundle's Serializable support, no custom Saver needed).
 private enum class PoiCategoryTab(val label: String) {
     WORK("仕事"),
     PRIVATE("プラベ"),
-    MEMO("メモ"),
     ALBUM("アルバム"),
     FILE("ファイル"),
+}
+
+// プラベ内部でのタスク/メモ切替 — メモは独立タブではなくプラベの子として存在する。
+private enum class PrivateSubTab(val label: String) {
+    TASK("タスク"),
+    MEMO("メモ"),
 }
 
 /**
@@ -93,10 +98,10 @@ private enum class PoiCategoryTab(val label: String) {
  * the same full task list — no new DAO query, and category=null tasks (not yet
  * classified) show up under プラベ without ever being written back as "private".
  *
- * Block C-2: メモ/アルバム join the same tab row, embedding the existing
- * MemoScreen()/AlbumScreen() composables unmodified — this is a second, temporary
- * entry point alongside the standalone BottomNav メモ tab and Home's アルバム
- * button (both untouched; Block D reconciles the single-entry-point final layout).
+ * Block C-2 / 100点仕様: アルバム/ファイルは同じタブ行に並び、既存の AlbumScreen()/
+ * FileScreen() composableをそのまま埋め込む。メモは独立タブではなく、プラベタブの
+ * 内側（PrivateSubTab）に統合されている — MemoScreen()自体は変更なし、呼び出し場所
+ * だけが変わった。
  */
 @Composable
 fun PoiScreen(
@@ -114,6 +119,8 @@ fun PoiScreen(
     val photoRepository = remember { PhotoRepository(context.applicationContext) }
 
     var selectedCategoryTab by rememberSaveable { mutableStateOf(PoiCategoryTab.WORK) }
+    // 100点仕様: プラベ内のタスク/メモ切替 — プラベタブ自身とは独立して覚えておく。
+    var privateSubTab by rememberSaveable { mutableStateOf(PrivateSubTab.TASK) }
     // Block C-2: Poi's own アルバム sub-tab keeps its own selected-album state,
     // independent of any external caller.
     var poiSelectedAlbum by rememberSaveable { mutableStateOf<String?>(null) }
@@ -145,9 +152,8 @@ fun PoiScreen(
     val visibleTasks = when (selectedCategoryTab) {
         PoiCategoryTab.WORK -> tasks.filter { it.category == CatEvent.CATEGORY_WORK }
         PoiCategoryTab.PRIVATE -> tasks.filter { it.category == CatEvent.CATEGORY_PRIVATE || it.category == null }
-        // メモ/アルバム/ファイル render their own screens instead of the task list —
-        // this list simply isn't used under any of those tabs.
-        PoiCategoryTab.MEMO, PoiCategoryTab.ALBUM, PoiCategoryTab.FILE -> emptyList()
+        // アルバム/ファイルは自分の画面を描画するため、このリストは使われない。
+        PoiCategoryTab.ALBUM, PoiCategoryTab.FILE -> emptyList()
     }
 
     // Photos a chat-attached photo got linked to this task with (Phase C) — same
@@ -157,8 +163,8 @@ fun PoiScreen(
     }
 
     // Fold's cover screen (~340dp wide) leaves very little room once the usual 20dp
-    // side margins are subtracted — enough to crowd the 仕事/プラベ/メモ/アルバム tab
-    // row. Trim the side margins (not the vertical ones) on narrow widths only;
+    // side margins are subtracted — enough to crowd the 仕事/プラベ/アルバム/ファイル
+    // tab row. Trim the side margins (not the vertical ones) on narrow widths only;
     // ordinary phones (360dp+) and Fold opened keep the original 20dp untouched.
     val screenWidthDp = LocalConfiguration.current.screenWidthDp.dp
     val horizontalPadding = if (screenWidthDp < 360.dp) 12.dp else 20.dp
@@ -175,8 +181,12 @@ fun PoiScreen(
             Text("ポイ", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = PoiInk, modifier = Modifier.weight(1f))
             // Block C-2: this is the task list's own "＋追加" — メモ/アルバム bring
             // their own add affordances (MemoScreen's "＋追加", AlbumScreen's
-            // "写真を選ぶ"/"撮影"), so this button only makes sense under 仕事/プラベ.
-            if (selectedCategoryTab == PoiCategoryTab.WORK || selectedCategoryTab == PoiCategoryTab.PRIVATE) {
+            // "写真を選ぶ"/"撮影"), so this button only makes sense under 仕事/プラベ
+            // (タスク側). 100点仕様: プラベ内でメモを見ている間はMemoScreen自身の
+            // ＋追加ボタンがあるため、こちらは隠す。
+            if (selectedCategoryTab == PoiCategoryTab.WORK ||
+                (selectedCategoryTab == PoiCategoryTab.PRIVATE && privateSubTab == PrivateSubTab.TASK)
+            ) {
                 // Step4-1: same pink-pill family as AiChatScreen's "投げる", but a
                 // quieter tint — the list is the star here, not this button.
                 Button(
@@ -191,10 +201,9 @@ fun PoiScreen(
 
         Spacer(Modifier.height(12.dp))
 
-        // Block C-1: 仕事/プラベ switch — same FilterChip pattern AiChatScreen already
-        // uses for its 仕事/プライベート/雑談 tabs. Design pass: horizontalScroll so 4
-        // tabs never get cramped on a narrow phone (same pattern AlbumScreen's own
-        // album-name chip row already uses).
+        // Block C-1: 仕事/プラベ/アルバム/ファイル switch — FilterChip row with
+        // horizontalScroll so tabs never get cramped on a narrow phone (same pattern
+        // AlbumScreen's own album-name chip row already uses).
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -219,44 +228,80 @@ fun PoiScreen(
             }
         }
 
-        // Design tweak: メモ's own header row (just a right-aligned "＋ 追加", no
-        // heading text) reads as a lot of empty space under a full 16dp gap — pull it
-        // up closer to the tab row. 仕事/プラベ/アルバム keep the original 16dp.
-        val contentTopSpacing = if (selectedCategoryTab == PoiCategoryTab.MEMO) 4.dp else 16.dp
-        Spacer(Modifier.height(contentTopSpacing))
+        Spacer(Modifier.height(16.dp))
 
         when (selectedCategoryTab) {
-            PoiCategoryTab.WORK, PoiCategoryTab.PRIVATE -> {
-                // Step4-1: capped at 640dp and centered so the list doesn't stretch
-                // edge-to-edge on a Fold's unfolded, much wider screen; a normal phone
-                // stays fillMaxWidth as before.
-                LazyColumn(
+            PoiCategoryTab.WORK -> {
+                TaskList(
+                    tasks = visibleTasks,
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
                         .widthIn(max = 640.dp)
                         .align(Alignment.CenterHorizontally),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    if (visibleTasks.isEmpty()) {
-                        item {
-                            Text(
-                                text = "タスクはまだ入ってないにゃ",
-                                color = PoiInk.copy(alpha = 0.5f),
+                    onToggleCompleted = { task ->
+                        scope.launch {
+                            repository.setTaskCompleted(task, !task.completed)
+                            refreshTick++
+                        }
+                    },
+                    onClick = { task -> editingTask = task; showDialog = true },
+                    onDelete = { task ->
+                        scope.launch {
+                            photoRepository.unlinkAllForMemo(task.id)
+                            repository.delete(task)
+                            refreshTick++
+                        }
+                    },
+                )
+            }
+            // 100点仕様: メモは独立タブをやめ、プラベの中のタスク/メモ切替に統合した。
+            // 既存のメモデータ（cat_eventsのdateTimeがnull行）はMemoScreen側でそのまま
+            // 表示・追加・削除できる — テーブルもクエリも変更なし、置き場所だけの変更。
+            PoiCategoryTab.PRIVATE -> {
+                Column(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        PrivateSubTab.entries.forEach { sub ->
+                            val selected = sub == privateSubTab
+                            FilterChip(
+                                selected = selected,
+                                onClick = { privateSubTab = sub },
+                                label = { Text(sub.label) },
+                                shape = RoundedCornerShape(percent = 50),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    containerColor = Color.Transparent,
+                                    labelColor = PoiInk.copy(alpha = 0.5f),
+                                    selectedContainerColor = PoiPink.copy(alpha = 0.22f),
+                                    selectedLabelColor = PoiInk,
+                                ),
+                                border = BorderStroke(0.dp, Color.Transparent),
                             )
                         }
                     }
-                    items(visibleTasks, key = { it.id }) { task ->
-                        TaskRow(
-                            task = task,
-                            onToggleCompleted = {
+                    // メモ側はMemoScreen自身の「＋追加」ヘッダー行があるので間隔を詰める
+                    // (以前の独立メモタブが使っていたのと同じ4dp)。タスク側は12dp。
+                    Spacer(Modifier.height(if (privateSubTab == PrivateSubTab.MEMO) 4.dp else 12.dp))
+                    when (privateSubTab) {
+                        PrivateSubTab.TASK -> TaskList(
+                            tasks = visibleTasks,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .widthIn(max = 640.dp)
+                                .align(Alignment.CenterHorizontally),
+                            onToggleCompleted = { task ->
                                 scope.launch {
                                     repository.setTaskCompleted(task, !task.completed)
                                     refreshTick++
                                 }
                             },
-                            onClick = { editingTask = task; showDialog = true },
-                            onDelete = {
+                            onClick = { task -> editingTask = task; showDialog = true },
+                            onDelete = { task ->
                                 scope.launch {
                                     // Drop the photo links before the task itself is gone, so no
                                     // link is left pointing at a now-nonexistent task id. The
@@ -267,17 +312,18 @@ fun PoiScreen(
                                 }
                             },
                         )
+                        // embedded = true: Poi自身のpadding(20.dp)/「ポイ」見出しが既に
+                        // この領域を囲んでいるため、MemoScreen自身の余白・見出しは省略する。
+                        PrivateSubTab.MEMO -> Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                            MemoScreen(embedded = true)
+                        }
                     }
                 }
             }
-            // Block C-2: both embedded, each still managing its own repository, state,
-            // and dialogs internally. Design pass: embedded = true suppresses each
-            // screen's own outer padding and heading, since Poi's own padding(20.dp)
-            // above already insets this whole area — without it, the 20dp margins and
-            // "メモ"/"アルバム" headings would double up under Poi's own "ポイ" heading.
-            PoiCategoryTab.MEMO -> Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                MemoScreen(embedded = true)
-            }
+            // Block C-2: embedded, still managing its own repository, state, and
+            // dialogs internally. Design pass: embedded = true suppresses each screen's
+            // own outer padding and heading, since Poi's own padding(20.dp) above
+            // already insets this whole area.
             PoiCategoryTab.ALBUM -> Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 AlbumScreen(
                     onBack = { selectedCategoryTab = PoiCategoryTab.WORK },
@@ -337,10 +383,10 @@ fun PoiScreen(
                             PoiCategoryTab.WORK -> CatEvent.CATEGORY_WORK
                             PoiCategoryTab.PRIVATE -> CatEvent.CATEGORY_PRIVATE
                             // Unreachable: this dialog only opens from the task list's own
-                            // "＋ 追加", which isn't shown under メモ/アルバム/ファイル. Kept
-                            // exhaustive rather than an `else`, so a future new tab can't
-                            // silently fall through here unnoticed.
-                            PoiCategoryTab.MEMO, PoiCategoryTab.ALBUM, PoiCategoryTab.FILE -> null
+                            // "＋ 追加", which isn't shown under アルバム/ファイル, nor under
+                            // プラベ>メモ. Kept exhaustive rather than an `else`, so a future
+                            // new tab can't silently fall through here unnoticed.
+                            PoiCategoryTab.ALBUM, PoiCategoryTab.FILE -> null
                         }
                         repository.addTask(title, dueMillis, category)
                     }
@@ -387,6 +433,40 @@ fun PoiScreen(
                 }
             },
         )
+    }
+}
+
+// 100点仕様: 仕事タブとプラベ>タスクの両方から同じリスト描画を使うための抽出。
+// modifier は呼び出し側（ColumnScope内）で組み立てて渡す — align(CenterHorizontally)
+// はColumnScope拡張関数のため、ここではなく呼び出し側のColumn直下で呼ぶ必要がある。
+@Composable
+private fun TaskList(
+    tasks: List<CatEvent>,
+    modifier: Modifier,
+    onToggleCompleted: (CatEvent) -> Unit,
+    onClick: (CatEvent) -> Unit,
+    onDelete: (CatEvent) -> Unit,
+) {
+    LazyColumn(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (tasks.isEmpty()) {
+            item {
+                Text(
+                    text = "タスクはまだ入ってないにゃ",
+                    color = PoiInk.copy(alpha = 0.5f),
+                )
+            }
+        }
+        items(tasks, key = { it.id }) { task ->
+            TaskRow(
+                task = task,
+                onToggleCompleted = { onToggleCompleted(task) },
+                onClick = { onClick(task) },
+                onDelete = { onDelete(task) },
+            )
+        }
     }
 }
 

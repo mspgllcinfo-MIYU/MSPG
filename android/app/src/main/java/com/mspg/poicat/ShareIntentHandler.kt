@@ -58,7 +58,6 @@ object ShareIntentHandler {
             // shape as AiChatScreen.send(): text may be blank, photoIds may be empty.
             val photo: Photo? = sharedUri?.let { photoRepository.importFromUri(it, caption = null, albumName = null) }
             ChatRepository.addMessage(
-                ChatRoom.CASUAL,
                 ChatMessage("user", sharedText.orEmpty(), System.currentTimeMillis(), photo?.let { listOf(it.id) } ?: emptyList()),
             )
 
@@ -78,12 +77,10 @@ object ShareIntentHandler {
 
             // 4. Record the cat's reply.
             ChatRepository.addMessage(
-                ChatRoom.CASUAL,
                 ChatMessage("assistant", reply.text, System.currentTimeMillis(), reply.photoIds),
             )
         }.onFailure {
             ChatRepository.addMessage(
-                ChatRoom.CASUAL,
                 ChatMessage("assistant", "うまく受け取れなかったにゃ", System.currentTimeMillis()),
             )
         }
@@ -91,6 +88,5 @@ object ShareIntentHandler {
         // 5. Only now signal AppRoot to open 猫AI — after the message(s) it's
         // about to display already exist in ChatRepository.
         PendingNavigation.requestedTab = AppTab.AI
-        PendingNavigation.requestedRoom = ChatRoom.CASUAL
     }
 }

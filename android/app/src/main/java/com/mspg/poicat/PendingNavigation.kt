@@ -13,5 +13,4 @@ import androidx.compose.runtime.setValue
  */
 object PendingNavigation {
     var requestedTab by mutableStateOf<AppTab?>(null)
-    var requestedRoom by mutableStateOf<ChatRoom?>(null)
 }

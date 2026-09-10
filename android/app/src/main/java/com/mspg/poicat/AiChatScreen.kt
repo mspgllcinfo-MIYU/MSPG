@@ -6,7 +6,6 @@ import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -18,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -28,8 +28,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -71,45 +69,26 @@ private val AiBubble = Color(0xFFEFE6D8) // warm cream — the cat's chat bubble
 private val AiGold = Color(0xFFC9A66B) // restrained accent, never a fill color
 private val AiPink = Color(0xFFD98A9C) // the app's existing pink, kept rare
 
+// 100点仕様: 仕事/プライベート/雑談の部屋分けを廃止し、猫AIの会話画面は1つだけに
+// なった。ユーザーは分類を選ばない — CatBrainはもともとメッセージの内容自体から
+// タスクの仕事/プライベート分類を判断しており（部屋の選択は一度も見ていなかった）、
+// この変更でその挙動は変わらない。
 @Composable
-fun AiChatScreen(selectedRoom: ChatRoom, onSelectedRoomChange: (ChatRoom) -> Unit) {
+fun AiChatScreen() {
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(20.dp),
     ) {
         Text("猫AI", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = AiInk)
+        Spacer(Modifier.height(12.dp))
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            ChatRoom.entries.forEach { room ->
-                val selected = room == selectedRoom
-                FilterChip(
-                    selected = selected,
-                    onClick = { onSelectedRoomChange(room) },
-                    label = { Text(room.label) },
-                    shape = RoundedCornerShape(percent = 50),
-                    colors = FilterChipDefaults.filterChipColors(
-                        containerColor = Color.Transparent,
-                        labelColor = AiInk.copy(alpha = 0.5f),
-                        selectedContainerColor = AiPink.copy(alpha = 0.22f),
-                        selectedLabelColor = AiInk,
-                    ),
-                    border = BorderStroke(0.dp, Color.Transparent),
-                )
-            }
-        }
-
-        ChatRoomView(room = selectedRoom, modifier = Modifier.weight(1f))
+        ChatView(modifier = Modifier.weight(1f))
     }
 }
 
 @Composable
-private fun ChatRoomView(room: ChatRoom, modifier: Modifier = Modifier) {
+private fun ChatView(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -124,7 +103,7 @@ private fun ChatRoomView(room: ChatRoom, modifier: Modifier = Modifier) {
     // for now sending it only saves it and shows it in the chat.
     var pendingPhoto by remember { mutableStateOf<Photo?>(null) }
 
-    val messages = ChatRepository.messages(room)
+    val messages = ChatRepository.messages()
     val listState = rememberLazyListState()
 
     val speechLauncher = rememberLauncherForActivityResult(
@@ -167,7 +146,6 @@ private fun ChatRoomView(room: ChatRoom, modifier: Modifier = Modifier) {
         if (isSending) return
 
         ChatRepository.addMessage(
-            room,
             ChatMessage("user", trimmed, System.currentTimeMillis(), photo?.let { listOf(it.id) } ?: emptyList()),
         )
         input = ""
@@ -189,7 +167,6 @@ private fun ChatRoomView(room: ChatRoom, modifier: Modifier = Modifier) {
             isSending = false
             result.onSuccess { reply ->
                 ChatRepository.addMessage(
-                    room,
                     ChatMessage("assistant", reply.text, System.currentTimeMillis(), reply.photoIds),
                 )
                 errorText = null
