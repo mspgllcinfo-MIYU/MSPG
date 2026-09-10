@@ -2,4 +2,6 @@
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Matches PhotoRepository's photoDir: context.filesDir/photos/ -->
     <files-path name="photos" path="photos/" />
+    <!-- Matches FileRepository's filesDirForShared: context.filesDir/files/ -->
+    <files-path name="files" path="files/" />
 </paths>

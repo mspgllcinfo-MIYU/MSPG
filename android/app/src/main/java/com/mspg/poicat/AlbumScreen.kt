@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.DatePickerDialog
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -317,6 +318,7 @@ fun PhotoDetailDialog(
     onDelete: () -> Unit,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var caption by remember(photo.id) { mutableStateOf(photo.caption ?: "") }
     var album by remember(photo.id) { mutableStateOf(photo.albumName ?: "") }
     var linkedDate by remember(photo.id) { mutableStateOf(photo.linkedDate?.toLocalDate()) }
@@ -397,13 +399,38 @@ fun PhotoDetailDialog(
             }
 
             Spacer(Modifier.height(12.dp))
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            // horizontalScroll: 4 buttons on one row is tight on a Fold's narrow cover
+            // screen — scrollable rather than letting any button clip or overlap, same
+            // pattern this file's own album-chip row uses. Modifier.weight() can't be
+            // combined with horizontalScroll (unbounded width), so this drops the old
+            // space-between push-right layout for a plain left-to-right flow instead.
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
                 TextButton(onClick = onDelete) {
                     Text("削除", color = MaterialTheme.colorScheme.error)
                 }
-                Spacer(Modifier.weight(1f))
+                TextButton(onClick = {
+                    scope.launch {
+                        val success = exportToDeviceStorage(
+                            context = context,
+                            sourceFile = File(photo.filePath),
+                            displayName = (photo.caption?.trim()?.ifBlank { null } ?: "photo_${photo.id}") + ".jpg",
+                            mimeType = "image/jpeg",
+                            isImage = true,
+                        )
+                        Toast.makeText(
+                            context,
+                            if (success) "端末に保存したにゃ" else "保存できなかったにゃ",
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                }) {
+                    Text("端末に保存", color = AlbumInk)
+                }
                 TextButton(onClick = onDismiss) { Text("閉じる") }
-                Spacer(Modifier.width(4.dp))
                 Button(
                     onClick = { onSave(caption.trim().ifBlank { null }, album.trim().ifBlank { null }, linkedDate) },
                     colors = ButtonDefaults.buttonColors(containerColor = AlbumPink, contentColor = Color.White),

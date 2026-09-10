@@ -81,6 +81,7 @@ private enum class PoiCategoryTab(val label: String) {
     PRIVATE("プラベ"),
     MEMO("メモ"),
     ALBUM("アルバム"),
+    FILE("ファイル"),
 }
 
 /**
@@ -144,9 +145,9 @@ fun PoiScreen(
     val visibleTasks = when (selectedCategoryTab) {
         PoiCategoryTab.WORK -> tasks.filter { it.category == CatEvent.CATEGORY_WORK }
         PoiCategoryTab.PRIVATE -> tasks.filter { it.category == CatEvent.CATEGORY_PRIVATE || it.category == null }
-        // メモ/アルバム render MemoScreen()/AlbumScreen() instead of the task list —
-        // this list simply isn't used under either tab.
-        PoiCategoryTab.MEMO, PoiCategoryTab.ALBUM -> emptyList()
+        // メモ/アルバム/ファイル render their own screens instead of the task list —
+        // this list simply isn't used under any of those tabs.
+        PoiCategoryTab.MEMO, PoiCategoryTab.ALBUM, PoiCategoryTab.FILE -> emptyList()
     }
 
     // Photos a chat-attached photo got linked to this task with (Phase C) — same
@@ -285,6 +286,9 @@ fun PoiScreen(
                     embedded = true,
                 )
             }
+            PoiCategoryTab.FILE -> Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                FileScreen(embedded = true)
+            }
         }
     }
 
@@ -333,10 +337,10 @@ fun PoiScreen(
                             PoiCategoryTab.WORK -> CatEvent.CATEGORY_WORK
                             PoiCategoryTab.PRIVATE -> CatEvent.CATEGORY_PRIVATE
                             // Unreachable: this dialog only opens from the task list's own
-                            // "＋ 追加", which isn't shown under メモ/アルバム. Kept exhaustive
-                            // rather than an `else`, so a future new tab can't silently fall
-                            // through here unnoticed.
-                            PoiCategoryTab.MEMO, PoiCategoryTab.ALBUM -> null
+                            // "＋ 追加", which isn't shown under メモ/アルバム/ファイル. Kept
+                            // exhaustive rather than an `else`, so a future new tab can't
+                            // silently fall through here unnoticed.
+                            PoiCategoryTab.MEMO, PoiCategoryTab.ALBUM, PoiCategoryTab.FILE -> null
                         }
                         repository.addTask(title, dueMillis, category)
                     }

@@ -6,6 +6,7 @@ import android.net.Uri
 import androidx.core.content.IntentCompat
 import com.mspg.poicat.brain.CatBrain
 import com.mspg.poicat.data.CatEventRepository
+import com.mspg.poicat.data.FileRepository
 import com.mspg.poicat.data.Photo
 import com.mspg.poicat.data.PhotoRepository
 
@@ -25,7 +26,24 @@ object ShareIntentHandler {
     suspend fun handle(context: Context, intent: Intent) {
         // 1. Extract whatever was shared.
         val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim()
-        val sharedUri: Uri? = if (intent.type?.startsWith("image/") == true) {
+        val mimeType = intent.type
+
+        // A general file share (PDF/Word/Excel/PowerPoint/plain text/anything else
+        // that isn't an image) — handled entirely separately from the text/photo
+        // flow below, and never touches CatBrain/ChatRepository/PendingNavigation.
+        // Checked first and returns immediately, so it can never affect the existing
+        // image/text branches; any accompanying EXTRA_TEXT caption is intentionally
+        // not processed here (mirrors the existing "bare photo" case below: nothing
+        // for CatBrain to sort out of a file with no further text-based instruction).
+        if (mimeType != null && !mimeType.startsWith("image/")) {
+            val fileUri = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+            if (fileUri != null) {
+                runCatching { FileRepository(context).importFromUri(fileUri, mimeType) }
+                return
+            }
+        }
+
+        val sharedUri: Uri? = if (mimeType?.startsWith("image/") == true) {
             IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
         } else {
             null
