@@ -72,6 +72,12 @@ private val CalendarCard = Color(0xFFEFE7DE) // a shade deeper than the page, fo
 private val CalendarGold = Color(0xFFC9A66B) // restrained accent, never a fill color
 private val CalendarPink = Color(0xFFD98A9C) // the app's existing pink, kept rare
 
+// Strips only leading/trailing 「」『』 left over from copy-pasted or typed
+// titles, leaving any brackets in the middle of the text untouched. This is
+// separate from CatBrain's own everywhere-stripping regex.
+private fun stripEdgeQuoteMarks(text: String): String =
+    text.trim().trim('「', '」', '『', '』').trim()
+
 /**
  * Calendar tab: a plain on-device month view over the same `cat_events` table
  * the AI chat reads/writes, so a schedule registered by chatting with the cat
@@ -275,10 +281,11 @@ fun CalendarScreen(
             onSave = { title, date, time ->
                 scope.launch {
                     val dateTimeMillis = LocalDateTime.of(date, time).toEpochMilli()
+                    val cleanedTitle = stripEdgeQuoteMarks(title)
                     if (current != null) {
-                        repository.edit(current, title, dateTimeMillis)
+                        repository.edit(current, cleanedTitle, dateTimeMillis)
                     } else {
-                        repository.remember(title, dateTimeMillis)
+                        repository.remember(cleanedTitle, dateTimeMillis)
                     }
                     showDialog = false
                     editingEvent = null

@@ -25,13 +25,13 @@ class ReminderWorker(appContext: Context, params: WorkerParameters) :
         val dayWindowStart = now + TimeUnit.HOURS.toMillis(20)
         val dayWindowEnd = now + TimeUnit.HOURS.toMillis(28)
         repository.dueFor1DayReminder(dayWindowStart, dayWindowEnd).forEach { event ->
-            postCatNotification(applicationContext, notificationId(event.id, 1), "明日${event.title}だよー")
+            postCatNotification(applicationContext, notificationId(event.id, 1), "明日だにゃ。${event.title}")
             repository.markReminded1Day(event)
         }
 
         val hourWindowEnd = now + TimeUnit.MINUTES.toMillis(65)
         repository.dueFor1HourReminder(now, hourWindowEnd).forEach { event ->
-            postCatNotification(applicationContext, notificationId(event.id, 2), "あと1時間で${event.title}だよ")
+            postCatNotification(applicationContext, notificationId(event.id, 2), "あと1時間だにゃ。${event.title}")
             repository.markReminded1Hour(event)
         }
 
