@@ -47,6 +47,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -154,10 +155,17 @@ fun PoiScreen(
         linkedPhotos = editingTask?.let { photoRepository.photosForMemo(it.id) } ?: emptyList()
     }
 
+    // Fold's cover screen (~340dp wide) leaves very little room once the usual 20dp
+    // side margins are subtracted — enough to crowd the 仕事/プラベ/メモ/アルバム tab
+    // row. Trim the side margins (not the vertical ones) on narrow widths only;
+    // ordinary phones (360dp+) and Fold opened keep the original 20dp untouched.
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp.dp
+    val horizontalPadding = if (screenWidthDp < 360.dp) 12.dp else 20.dp
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(20.dp),
+            .padding(horizontal = horizontalPadding, vertical = 20.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),

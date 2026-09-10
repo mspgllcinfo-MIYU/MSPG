@@ -12,8 +12,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -265,13 +267,10 @@ private fun ChatRoomView(room: ChatRoom, modifier: Modifier = Modifier) {
                 }
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                // 📷 / 🎤 stay quiet — cream on cream — so "投げる" reads as the
-                // one primary action in the tray.
+            // 📷 / 🎤 stay quiet — cream on cream — so "投げる" reads as the one
+            // primary action in the tray. Extracted so the wide (single-row) and
+            // narrow (stacked) layouts below can share the exact same buttons.
+            val photoPickerButton: @Composable () -> Unit = {
                 Button(
                     onClick = {
                         photoPickerLauncher.launch(
@@ -283,7 +282,8 @@ private fun ChatRoomView(room: ChatRoom, modifier: Modifier = Modifier) {
                 ) {
                     Text("📷")
                 }
-
+            }
+            val micButton: @Composable () -> Unit = {
                 Button(
                     onClick = {
                         val granted = ContextCompat.checkSelfPermission(
@@ -301,16 +301,8 @@ private fun ChatRoomView(room: ChatRoom, modifier: Modifier = Modifier) {
                 ) {
                     Text("🎤")
                 }
-
-                OutlinedTextField(
-                    value = input,
-                    onValueChange = { input = it },
-                    modifier = Modifier.weight(1f),
-                    enabled = !isSending,
-                    placeholder = { Text("ここに投げるにゃ") },
-                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = AiInk, unfocusedTextColor = AiInk),
-                )
-
+            }
+            val sendButton: @Composable () -> Unit = {
                 Button(
                     onClick = { send() },
                     enabled = !isSending && (input.isNotBlank() || pendingPhoto != null),
@@ -318,6 +310,57 @@ private fun ChatRoomView(room: ChatRoom, modifier: Modifier = Modifier) {
                     shape = RoundedCornerShape(percent = 50),
                 ) {
                     Text("投げる")
+                }
+            }
+
+            // Fold's cover screen (~340dp wide) can't fit 2 icon buttons + a send
+            // button + a usefully wide text field on one row — below this width the
+            // text field used to get squeezed down to a near-unusable sliver. Stack
+            // the text field above the buttons instead; ordinary phones (360dp+) and
+            // Fold opened keep the exact same single-row layout as before.
+            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                if (maxWidth < 360.dp) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedTextField(
+                            value = input,
+                            onValueChange = { input = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !isSending,
+                            placeholder = { Text("ここに投げるにゃ") },
+                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = AiInk, unfocusedTextColor = AiInk),
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            photoPickerButton()
+                            micButton()
+                            Spacer(Modifier.weight(1f))
+                            sendButton()
+                        }
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        photoPickerButton()
+                        micButton()
+                        OutlinedTextField(
+                            value = input,
+                            onValueChange = { input = it },
+                            modifier = Modifier.weight(1f),
+                            enabled = !isSending,
+                            placeholder = { Text("ここに投げるにゃ") },
+                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = AiInk, unfocusedTextColor = AiInk),
+                        )
+                        sendButton()
+                    }
                 }
             }
         }
