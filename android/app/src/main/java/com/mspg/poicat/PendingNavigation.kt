@@ -1,6 +1,8 @@
 package com.mspg.poicat
 
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 
 /**
  * A one-shot navigation request from outside the Compose tree (currently:
