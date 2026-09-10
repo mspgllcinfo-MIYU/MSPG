@@ -82,7 +82,7 @@ private val LocalDateSaver = Saver<LocalDate, Long>(
 
 @Composable
 fun AppRoot() {
-    var selectedTab by remember { mutableStateOf(AppTab.AI) }
+    var selectedTab by remember { mutableStateOf(AppTab.HOME) }
     val context = LocalContext.current
 
     var calendarYearMonth by rememberSaveable(stateSaver = YearMonthSaver) { mutableStateOf(YearMonth.now()) }
