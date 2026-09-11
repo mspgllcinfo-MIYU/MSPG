@@ -1,27 +1,10 @@
 package com.mspg.poicat.drive
 
 import android.app.Activity
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import com.mspg.poicat.auth.GoogleAuthManager
 import com.mspg.poicat.data.FileRepository
 import com.mspg.poicat.data.StoredFile
 import java.io.File
-
-/**
- * 一時的な診断用 — [PhotoUploadDebug]と同じ形で、ファイル側の直近1回分のアップロード
- * 結果を保持する。写真側とは独立したオブジェクトのまま（意図的に共有しない — 片方の
- * 表示が他方の状態で上書きされないようにするため）。
- */
-object FileUploadDebug {
-    var lastResult: String? by mutableStateOf(null)
-        private set
-
-    internal fun record(text: String) {
-        lastResult = text
-    }
-}
 
 /**
  * ファイル追加時のGoogle Driveバックグラウンドアップロード。[PhotoDriveSync]と同じ
@@ -86,11 +69,6 @@ object FileDriveSync {
                     val info = DriveFolderRepository.getFileInfo(accessToken, uploaded.id).getOrNull()
                     val driveSize = info?.size
                     val sizeMatches = driveSize != null && driveSize == localSize.toLong()
-                    FileUploadDebug.record(
-                        "file.id=${file.id} name=${file.fileName} local=${localSize}B sent=${localSize}B " +
-                            "drive size=${driveSize ?: "取得失敗"}B mimeType=${info?.mimeType ?: "取得失敗"} " +
-                            "match=$sizeMatches",
-                    )
                     if (sizeMatches) {
                         fileRepository.markDriveSynced(file.id, uploaded.id)
                     } else {
@@ -98,7 +76,6 @@ object FileDriveSync {
                     }
                 }
                 .onFailure {
-                    FileUploadDebug.record("file.id=${file.id} name=${file.fileName} local=${localSize}B アップロード自体が失敗：${it.message ?: it.javaClass.simpleName}")
                     fileRepository.markDriveSyncStatus(file.id, StoredFile.DRIVE_SYNC_FAILED)
                 }
         }

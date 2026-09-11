@@ -40,8 +40,6 @@ import androidx.compose.ui.unit.sp
 import com.mspg.poicat.auth.GoogleAuthManager
 import com.mspg.poicat.drive.DriveConnectionStore
 import com.mspg.poicat.drive.DriveFolderRepository
-import com.mspg.poicat.drive.FileUploadDebug
-import com.mspg.poicat.drive.PhotoUploadDebug
 import com.mspg.poicat.room.NotSignedInException
 import com.mspg.poicat.room.RoomEventSync
 import com.mspg.poicat.room.RoomFullException
@@ -348,48 +346,6 @@ fun ConnectionScreen(onBack: () -> Unit) {
                 Spacer(Modifier.height(8.dp))
                 Text(text, color = ConnGold)
             }
-        }
-
-        // 一時的なデバッグ表示 — 「フォルダを接続する」がグレーアウトする原因を
-        // 実機で特定するため、enabled条件に関わる全State値をそのまま表示する。
-        // signedInEmailは初回コンポジション時に一度だけ読んだ値、
-        // live currentUserEmail() は今この瞬間にFirebase Authへ直接問い合わせた値 —
-        // 両者がズレていないか比較できるようにしている。原因判明後に削除する。
-        Spacer(Modifier.height(20.dp))
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(Color(0xFFFFE0E0))
-                .padding(10.dp),
-        ) {
-            Text("【デバッグ情報・一時的】", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF800000))
-            Text("signedInEmail = ${signedInEmail ?: "null"}", fontSize = 11.sp, color = Color(0xFF800000))
-            Text(
-                "live GoogleAuthManager.currentUserEmail() = ${GoogleAuthManager.currentUserEmail() ?: "null"}",
-                fontSize = 11.sp,
-                color = Color(0xFF800000),
-            )
-            Text("isBusy = $isBusy", fontSize = 11.sp, color = Color(0xFF800000))
-            Text("cachedAccessToken = ${if (cachedAccessToken != null) "あり" else "null"}", fontSize = 11.sp, color = Color(0xFF800000))
-            Text("pendingTarget = ${pendingTarget ?: "null"}", fontSize = 11.sp, color = Color(0xFF800000))
-            Text(
-                "album enabled計算式 = (signedInEmail != null)=${signedInEmail != null} && (!isBusy)=${!isBusy} → ${signedInEmail != null && !isBusy}",
-                fontSize = 11.sp,
-                color = Color(0xFF800000),
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "直近の写真アップロード検証 = ${PhotoUploadDebug.lastResult ?: "まだ写真を追加していない"}",
-                fontSize = 11.sp,
-                color = Color(0xFF800000),
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "直近のファイルアップロード検証 = ${FileUploadDebug.lastResult ?: "まだファイルを共有していない"}",
-                fontSize = 11.sp,
-                color = Color(0xFF800000),
-            )
         }
     }
 }

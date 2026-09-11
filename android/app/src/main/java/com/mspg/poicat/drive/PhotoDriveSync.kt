@@ -1,29 +1,10 @@
 package com.mspg.poicat.drive
 
 import android.app.Activity
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import com.mspg.poicat.auth.GoogleAuthManager
 import com.mspg.poicat.data.Photo
 import com.mspg.poicat.data.PhotoRepository
 import java.io.File
-
-/**
- * 一時的な診断用— 写真アップロードがDrive上で正しく開けるようになったことを実機で
- * 確認できるまでの間だけ、直近1回分のアップロード結果（ローカルバイト数／送信バイト数
- * ／Drive側が実際に記録したサイズ・mimeType）をConnectionScreenのデバッグパネルに
- * 表示するために保持する。Compose Stateなので値を更新すれば読んでいる画面が自動で
- * 再コンポーズされる（画面側から明示的にポーリングする必要はない）。
- */
-object PhotoUploadDebug {
-    var lastResult: String? by mutableStateOf(null)
-        private set
-
-    internal fun record(text: String) {
-        lastResult = text
-    }
-}
 
 /**
  * 写真追加時のGoogle Driveバックグラウンドアップロード。
@@ -91,11 +72,6 @@ object PhotoDriveSync {
                     val info = DriveFolderRepository.getFileInfo(accessToken, uploaded.id).getOrNull()
                     val driveSize = info?.size
                     val sizeMatches = driveSize != null && driveSize == localSize.toLong()
-                    PhotoUploadDebug.record(
-                        "photo.id=${photo.id} local=${localSize}B sent=${localSize}B " +
-                            "drive size=${driveSize ?: "取得失敗"}B mimeType=${info?.mimeType ?: "取得失敗"} " +
-                            "match=$sizeMatches",
-                    )
                     if (sizeMatches) {
                         photoRepository.markDriveSynced(photo.id, uploaded.id)
                     } else {
@@ -106,7 +82,6 @@ object PhotoDriveSync {
                     }
                 }
                 .onFailure {
-                    PhotoUploadDebug.record("photo.id=${photo.id} local=${localSize}B アップロード自体が失敗：${it.message ?: it.javaClass.simpleName}")
                     photoRepository.markDriveSyncStatus(photo.id, Photo.DRIVE_SYNC_FAILED)
                 }
         }
