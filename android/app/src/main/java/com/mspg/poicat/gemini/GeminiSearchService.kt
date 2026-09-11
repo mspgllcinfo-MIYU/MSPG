@@ -41,12 +41,17 @@ sealed class GeminiOutcome {
  * だけの定型文）以外にAPIへ渡すものはない。
  */
 object GeminiSearchService {
-    // 実機デバッグで判明した実際のAPIエラー(HTTP 404)より: "models/gemini-2.5-flash
-    // is no longer available to new users. Please update your code to use
-    // models/gemini-3.6-flash" — Google側の案内に従い、推測ではなくこのエラー
-    // メッセージが直接指定したモデルIDへ切り替えた。将来また変わった場合は
-    // この定数だけを差し替えれば良い。
-    private const val MODEL = "gemini-3.6-flash"
+    // モデル選定方針: マリたんの最優先要件は「性能」ではなく「できるだけ長時間・
+    // 多くの回数を無料で会話できること」。ユーザーがGoogle AI Studioの
+    // 「Gemini API のレート制限」画面(Project: MIYUxAI、無料枠)で実際に確認した
+    // 値では、gemini-3.6-flashの無料枠は5 RPMだったのに対し、
+    // gemini-3.5-flash-liteは15 RPM — 同じFlash系列の中で最も無料枠が大きい
+    // （軽量="Lite"な分、上限が緩い）。天気・簡単な検索・雑談程度の応答には
+    // 十分な性能と判断し、無料での会話可能回数を最優先してこちらへ切り替えた。
+    // (以前使っていたgemini-2.5-flashは新規ユーザー向け提供終了、
+    // gemini-3.6-flashはRPMが厳しく実機で429が頻発したため経由してこの結論に
+    // 至った。) 将来また変わった場合はこの定数だけを差し替えれば良い。
+    private const val MODEL = "gemini-3.5-flash-lite"
     private const val API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
     private const val SYSTEM_INSTRUCTION =
         "あなたは「マリたん」という知的で好奇心旺盛なキジ猫です。ユーザーの質問について" +
