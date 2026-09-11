@@ -3,6 +3,8 @@ package com.mspg.poicat
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.speech.RecognizerIntent
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -38,6 +40,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -373,32 +376,88 @@ private fun ChatView(modifier: Modifier = Modifier) {
     }
 }
 
-private enum class MariTanState { IDLE, LISTENING, THINKING, SULKING, NOT_CONFIGURED, ERROR }
+private enum class MariTanState { IDLE, LISTENING, THINKING, SPEAKING, SULKING, NOT_CONFIGURED, ERROR }
 
 /**
- * マリたん：外部検索・最新情報担当のキジ猫。専用のチャット画面は作らず、この
- * アバター行1つだけを既存の黒猫AI会話画面(ChatView)の先頭に追加する形で実装する。
+ * マリたん：「外の情報を声で聞くための女の子猫AI」。黒猫POI AIとは完全に別役割・
+ * 別UI要素として、この小さなアバター行1つだけを既存の黒猫AI会話画面(ChatView)の
+ * 先頭に置く形で実装する。専用のチャット画面・文字入力欄・独立した会話履歴は
+ * 一切持たない。
  *
  * タップ→（権限が無ければ許可ダイアログ→）即マイク起動→音声認識→Gemini
- * (Google Search grounding付き)へ質問文だけを送信→回答を黒猫AIの同じ会話画面
- * (ChatRepository)へuser/assistantメッセージとして追加、という一直線の流れ。
- * マリたん自身の文字入力欄は持たない。
+ * (Google Search grounding付き)へ質問文だけを送信→回答をAndroid標準の音声合成
+ * (TextToSpeech)でマリたん自身が声で読み上げる、という一直線の流れ。回答は
+ * 黒猫AIのチャット履歴(ChatRepository)へは一切書き込まない — 黒猫とマリたんを
+ * 混同させないため。通常時は長い回答テキストを画面表示せず、短い状態ラベル
+ * （聞いてるにゃ/調べてるにゃ/お話するにゃ等）だけを表示する。
  *
  * Geminiへ送るのは今回認識された音声テキストのみ — 黒猫AIの会話履歴やPOI内部の
  * 他データ（仕事/プラベ/タスク/メモ/カレンダー/アルバム/ファイル/Drive/ルーム共有）
  * は一切渡さない（[GeminiSearchService]のクラスコメント参照）。
  *
- * 無料枠を使い切った場合(HTTP 429)はSULKING状態にするだけで、課金機能への自動
- * 移行は一切行わない。
+ * 無料枠を使い切った場合(HTTP 429)やGemini呼び出し失敗時はSULKING/ERROR状態に
+ * するだけで、課金機能への自動移行は一切行わない。
+ *
+ * 音声合成の方式: Android標準のTextToSpeech（端末内蔵、APIキー不要・通信不要・
+ * レート制限なし）を採用した。Google AI Studioの無料枠一覧で確認したところ
+ * Gemini 3.1 Flash TTSは無料枠が3 RPMしかなく、マリたんの主要機能である会話の
+ * たびに毎回消費するには不安定すぎる（既にGemini 3.6 Flashのテキスト生成
+ * だけでも5 RPMで429が発生していた）。安定運用・無料運用を優先し、TextToSpeech
+ * を選んだ。
  */
 @Composable
 private fun MariTanRow() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var state by remember { mutableStateOf(MariTanState.IDLE) }
-    // 一時的なデバッグ用 — Geminiへの問い合わせが失敗した実際の原因（例外メッセージ）を
-    // 画面に出す。原因が判明し次第この変数とその表示は削除する。
+    // Gemini呼び出しが失敗した際の実際の原因（429レスポンス本文/例外メッセージ）。
+    // 429の原因調査がまだ続いているため一時的に残している — 原因確定後、この
+    // デバッグ用の項目と表示は削除する。
     var lastErrorDetail by remember { mutableStateOf<String?>(null) }
+
+    // マリたんの声。画面が破棄される際は必ずshutdown()する（TextToSpeechは
+    // ネイティブリソース/バックグラウンドサービス接続を持つため）。
+    var ttsEngine by remember { mutableStateOf<TextToSpeech?>(null) }
+    DisposableEffect(Unit) {
+        lateinit var instance: TextToSpeech
+        instance = TextToSpeech(context.applicationContext) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                instance.language = Locale.JAPAN
+                // 子供っぽさ/甲高さを避けつつ、機械的にならない自然な速さ・高さ
+                // ——端末デフォルトの日本語音声(多くの機種で女性声)をそのまま使う。
+                instance.setPitch(1.0f)
+                instance.setSpeechRate(1.0f)
+            }
+        }
+        ttsEngine = instance
+        onDispose {
+            instance.stop()
+            instance.shutdown()
+            ttsEngine = null
+        }
+    }
+
+    fun speak(text: String, onDone: () -> Unit) {
+        val engine = ttsEngine
+        if (engine == null) {
+            onDone()
+            return
+        }
+        engine.setOnUtteranceProgressListener(
+            object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {}
+                override fun onDone(utteranceId: String?) {
+                    scope.launch { onDone() }
+                }
+
+                @Suppress("OVERRIDE_DEPRECATION", "DEPRECATION")
+                override fun onError(utteranceId: String?) {
+                    scope.launch { onDone() }
+                }
+            },
+        )
+        engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "mari_tan_answer")
+    }
 
     val speechLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -412,26 +471,23 @@ private fun MariTanRow() {
             state = MariTanState.THINKING
             scope.launch {
                 val outcome = GeminiSearchService.ask(text)
-                state = when (val answer = outcome.getOrNull()) {
+                when (val answer = outcome.getOrNull()) {
                     is GeminiOutcome.Answer -> {
-                        ChatRepository.addMessage(ChatMessage("user", "🎤 $text", System.currentTimeMillis()))
-                        ChatRepository.addMessage(
-                            ChatMessage("assistant", "🐈マリたん：${answer.text}", System.currentTimeMillis()),
-                        )
-                        MariTanState.IDLE
+                        state = MariTanState.SPEAKING
+                        speak(answer.text) { state = MariTanState.IDLE }
                     }
                     is GeminiOutcome.QuotaExceeded -> {
                         // 429の実際のレスポンス本文(error.message/status/details等)を
-                        // そのまま表示する — 「短時間レート制限」「日次無料枠」
+                        // そのまま保持する — 「短時間レート制限」「日次無料枠」
                         // 「モデル固有クォータ」のどれかを推測せず実機で特定するため。
                         lastErrorDetail = answer.detail
-                        MariTanState.SULKING
+                        state = MariTanState.SULKING
                     }
-                    GeminiOutcome.NotConfigured -> MariTanState.NOT_CONFIGURED
+                    GeminiOutcome.NotConfigured -> state = MariTanState.NOT_CONFIGURED
                     null -> {
                         val e = outcome.exceptionOrNull()
                         lastErrorDetail = "${e?.javaClass?.simpleName}: ${e?.message}"
-                        MariTanState.ERROR
+                        state = MariTanState.ERROR
                     }
                 }
             }
@@ -448,11 +504,6 @@ private fun MariTanRow() {
         }
     }
 
-    // 一時的なデバッグ対応中: ERRORになった実際の原因(lastErrorDetail)を実機で読める
-    // よう、以前あった「4秒で自動的にIDLEへ戻す」処理は外してある — 原因判明後に
-    // lastErrorDetailの表示ごと元に戻す。SULKING/NOT_CONFIGUREDはそのままタップし
-    // 直すまで表示し続ける。
-
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -466,7 +517,12 @@ private fun MariTanRow() {
             modifier = Modifier
                 .size(48.dp)
                 .clip(CircleShape)
-                .clickable(enabled = state != MariTanState.THINKING && state != MariTanState.LISTENING) {
+                .clickable(
+                    enabled = state != MariTanState.THINKING &&
+                        state != MariTanState.LISTENING &&
+                        state != MariTanState.SPEAKING,
+                ) {
+                    lastErrorDetail = null
                     val granted = ContextCompat.checkSelfPermission(
                         context,
                         android.Manifest.permission.RECORD_AUDIO,
@@ -485,7 +541,8 @@ private fun MariTanRow() {
                 MariTanState.IDLE -> "マリたん：タップして話しかけてにゃ（外部を調べる担当）"
                 MariTanState.LISTENING -> "マリたん：聞いてるにゃ…"
                 MariTanState.THINKING -> "マリたん：調べてるにゃ…"
-                // 一時的デバッグ: 原因判明後はlastErrorDetailの付与をやめる。
+                MariTanState.SPEAKING -> "マリたん：お話するにゃ…"
+                // 一時的デバッグ: 429の原因確定後はlastErrorDetailの付与をやめる。
                 MariTanState.SULKING -> "マリたん：今日はもう調べられないにゃ…（ふて寝中）\n（デバッグ: ${lastErrorDetail ?: "詳細不明"}）"
                 MariTanState.NOT_CONFIGURED -> "マリたん：まだ準備中にゃ"
                 MariTanState.ERROR -> "マリたん：うまく聞こえなかったにゃ\n（デバッグ: ${lastErrorDetail ?: "詳細不明"}）"
