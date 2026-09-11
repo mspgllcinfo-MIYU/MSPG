@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedTextField
@@ -236,6 +238,10 @@ fun ConnectionScreen(onBack: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            // Galaxy実機で「夫婦でシェア（ルーム）」カードが画面下に見切れて操作
+            // できなかった問題への対応 — 画面全体を縦スクロール可能にし、機種の
+            // 画面サイズ/文字サイズによらず全カードの末尾まで到達できるようにする。
+            .verticalScroll(rememberScrollState())
             .padding(20.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
