@@ -64,7 +64,6 @@ import com.mspg.poicat.gemini.GeminiOutcome
 import com.mspg.poicat.gemini.GeminiSearchService
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -397,6 +396,9 @@ private fun MariTanRow() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var state by remember { mutableStateOf(MariTanState.IDLE) }
+    // 一時的なデバッグ用 — Geminiへの問い合わせが失敗した実際の原因（例外メッセージ）を
+    // 画面に出す。原因が判明し次第この変数とその表示は削除する。
+    var lastErrorDetail by remember { mutableStateOf<String?>(null) }
 
     val speechLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -420,7 +422,11 @@ private fun MariTanRow() {
                     }
                     GeminiOutcome.QuotaExceeded -> MariTanState.SULKING
                     GeminiOutcome.NotConfigured -> MariTanState.NOT_CONFIGURED
-                    null -> MariTanState.ERROR
+                    null -> {
+                        val e = outcome.exceptionOrNull()
+                        lastErrorDetail = "${e?.javaClass?.simpleName}: ${e?.message}"
+                        MariTanState.ERROR
+                    }
                 }
             }
         }
@@ -436,14 +442,10 @@ private fun MariTanRow() {
         }
     }
 
-    // 一時的なエラー表示は少し経ったら自動でIDLEへ戻す — 「ふて寝(SULKING)」と
-    // 「未設定(NOT_CONFIGURED)」はタップし直すまで表示し続ける(状態として意味がある)。
-    LaunchedEffect(state) {
-        if (state == MariTanState.ERROR) {
-            delay(4000)
-            state = MariTanState.IDLE
-        }
-    }
+    // 一時的なデバッグ対応中: ERRORになった実際の原因(lastErrorDetail)を実機で読める
+    // よう、以前あった「4秒で自動的にIDLEへ戻す」処理は外してある — 原因判明後に
+    // lastErrorDetailの表示ごと元に戻す。SULKING/NOT_CONFIGUREDはそのままタップし
+    // 直すまで表示し続ける。
 
     Row(
         modifier = Modifier
@@ -479,7 +481,8 @@ private fun MariTanRow() {
                 MariTanState.THINKING -> "マリたん：調べてるにゃ…"
                 MariTanState.SULKING -> "マリたん：今日はもう調べられないにゃ…（ふて寝中）"
                 MariTanState.NOT_CONFIGURED -> "マリたん：まだ準備中にゃ"
-                MariTanState.ERROR -> "マリたん：うまく聞こえなかったにゃ"
+                // 一時的デバッグ: 原因判明後はlastErrorDetailの付与をやめる。
+                MariTanState.ERROR -> "マリたん：うまく聞こえなかったにゃ\n（デバッグ: ${lastErrorDetail ?: "詳細不明"}）"
             },
             fontSize = 12.sp,
             color = AiInk.copy(alpha = 0.6f),

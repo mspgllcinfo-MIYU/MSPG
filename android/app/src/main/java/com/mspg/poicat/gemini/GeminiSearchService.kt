@@ -49,7 +49,9 @@ object GeminiSearchService {
 
     suspend fun ask(query: String): Result<GeminiOutcome> = withContext(Dispatchers.IO) {
         runCatching {
-            val apiKey = BuildConfig.GEMINI_API_KEY
+            // GitHub Actions Secretの値がコピペ等で前後に空白/改行を含んでいた場合に
+            // URLが壊れないよう防御的にtrimする。
+            val apiKey = BuildConfig.GEMINI_API_KEY.trim()
             if (apiKey.isBlank()) return@runCatching GeminiOutcome.NotConfigured
 
             val requestBody = JSONObject().apply {
@@ -82,13 +84,17 @@ object GeminiSearchService {
                 connection.doOutput = true
                 connection.outputStream.use { it.write(requestBody.toString().toByteArray(Charsets.UTF_8)) }
 
-                val ok = connection.responseCode in 200..299
+                val responseCode = connection.responseCode
+                val ok = responseCode in 200..299
+                // errorStreamがnullになるケース(一部の接続失敗等)でもHTTPコード自体は
+                // デバッグ表示に残るよう、本文読み取り失敗はtext側だけで吸収する。
                 val stream = if (ok) connection.inputStream else connection.errorStream
-                val text = BufferedReader(InputStreamReader(stream, Charsets.UTF_8)).use { it.readText() }
+                val text = stream?.let { s -> BufferedReader(InputStreamReader(s, Charsets.UTF_8)).use { it.readText() } }
+                    ?: "(no response body)"
 
                 if (!ok) {
-                    if (connection.responseCode == 429) return@runCatching GeminiOutcome.QuotaExceeded
-                    error("Gemini API error ${connection.responseCode}: $text")
+                    if (responseCode == 429) return@runCatching GeminiOutcome.QuotaExceeded
+                    error("Gemini API error $responseCode: $text")
                 }
 
                 GeminiOutcome.Answer(text = extractAnswerText(text))
