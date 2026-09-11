@@ -32,14 +32,7 @@ jobs:
 
       # マリたん用Gemini APIキーはVersion 2以降APKへ一切埋め込まない(Cloudflare
       # Worker経由に変更、GeminiSearchService.kt参照) — ビルドにキーは不要。
-      # MARI_TAN_WORKER_BASE_URLはCloudflare WorkerのURL(秘密情報ではない)を
-      # 渡すGitHub Actions Variable — リポジトリのSettings > Secrets and
-      # variables > Actions > Variablesタブで設定する(Secretsタブではない)。
-      # 未設定の場合は空文字列になり、ビルド自体は問題なく通る(アプリ側が
-      # マリたん未設定として扱うだけ)。
       - name: Build debug APK
-        env:
-          ORG_GRADLE_PROJECT_MARI_TAN_WORKER_BASE_URL: ${{ vars.MARI_TAN_WORKER_BASE_URL }}
         run: ./gradlew assembleDebug --stacktrace
 
       - name: Upload debug APK

@@ -18,9 +18,6 @@ RATE_LIMIT_PER_MINUTE = "20"
 # ここで固定する(無料枠が最大のモデルを維持しやすくするため)。
 GEMINI_MODEL = "gemini-3.5-flash-lite"
 GEMINI_RATE_LIMIT_PER_MINUTE = "15"
-# uid制限(上記)を回避する「新しいuidの量産」的な乱用への補助的な多層防御。
-# 家庭内Wi-Fiで複数端末から使う分には影響しない程度に緩めた値。
-GEMINI_IP_RATE_LIMIT_PER_MINUTE = "30"
 
 # Created via the Cloudflare Dashboard (Storage & Databases > KV).
 [[kv_namespaces]]

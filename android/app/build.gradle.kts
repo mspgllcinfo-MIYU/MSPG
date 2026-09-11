@@ -22,17 +22,6 @@ android {
         // 持たせないよう、Cloudflare Worker(cloudflare/openai-proxy)経由でGeminiを
         // 呼ぶ構成へ変更した。APIキーはWorkerのシークレットとしてのみ存在する
         // (GeminiSearchService.kt参照)。
-        //
-        // Worker URL自体は秘密情報ではない(Firebase IDトークン無しではWorkerが
-        // 401で弾くため)ので、CIのGitHub Actions Variable(vars.MARI_TAN_WORKER_
-        // BASE_URL、Secretではない)経由でこのプロジェクトプロパティへ渡す。未設定
-        // 時は空文字列のままビルドが通り、アプリ側は空URLを「マリたん未設定」として
-        // 扱う(クラッシュしない)。
-        buildConfigField(
-            "String",
-            "MARI_TAN_WORKER_BASE_URL",
-            "\"${project.findProperty("MARI_TAN_WORKER_BASE_URL") ?: ""}\"",
-        )
     }
 
     signingConfigs {

@@ -1,7 +1,6 @@
 package com.mspg.poicat.gemini
 
 import android.util.Log
-import com.mspg.poicat.BuildConfig
 import com.mspg.poicat.auth.FirebaseAnonymousAuth
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -65,10 +64,12 @@ object GeminiSearchService {
     // ただしVersion 2ではモデル名自体もWorker側(wrangler.tomlのGEMINI_MODEL)で
     // 固定しており、クライアントはモデルを指定しない(コスト管理・誤用防止のため)。
 
-    // Worker URLはCI側のGitHub Actions Variable(vars.MARI_TAN_WORKER_BASE_URL、
-    // Secretではない)経由でBuildConfigへ渡される(app/build.gradle.kts参照)。
-    // Worker URL自体は秘密情報ではない(Firebase IDトークン無しではWorkerが401で
-    // 弾くため)が、Variableで一元管理することでソースコードへの直書きを避けている。
+    // TODO: Cloudflare Workerを実際にデプロイした後、あなたのアカウントの
+    // サブドメインへ差し替えてください(cloudflare/openai-proxy/README.md参照)。
+    // Worker URL自体は秘密情報ではありません(Firebase IDトークン無しではWorker
+    // が401で弾くため) — ソースコードに書いても問題ありません。
+    private const val WORKER_BASE_URL = "https://poicat-openai-proxy.YOUR-SUBDOMAIN.workers.dev"
+    private const val UNCONFIGURED_MARKER = "YOUR-SUBDOMAIN"
 
     // 性格(知的で好奇心旺盛、猫らしい親しみやすい口調)は変更していない —
     // ユーザーが気に入っている「ちょっとおしゃべりでアホ可愛い」雰囲気はこの
@@ -89,8 +90,7 @@ object GeminiSearchService {
 
     suspend fun ask(query: String, memories: List<String> = emptyList()): Result<GeminiOutcome> = withContext(Dispatchers.IO) {
         runCatching {
-            val workerBaseUrl = BuildConfig.MARI_TAN_WORKER_BASE_URL.trim()
-            if (workerBaseUrl.isBlank()) return@runCatching GeminiOutcome.NotConfigured
+            if (WORKER_BASE_URL.contains(UNCONFIGURED_MARKER)) return@runCatching GeminiOutcome.NotConfigured
 
             val idToken = FirebaseAnonymousAuth.currentIdToken()
             if (idToken.isNullOrBlank()) return@runCatching GeminiOutcome.NotConfigured
@@ -122,7 +122,7 @@ object GeminiSearchService {
                 // toolsは付けない(Google Search Grounding封じ) — クラスコメント参照。
             }
 
-            val url = "$workerBaseUrl/v1/gemini/generate"
+            val url = "$WORKER_BASE_URL/v1/gemini/generate"
             val connection = URL(url).openConnection() as HttpURLConnection
             try {
                 connection.connectTimeout = 15_000

@@ -13,9 +13,6 @@ export interface Env {
   GEMINI_API_KEY: string;
   GEMINI_MODEL: string;
   GEMINI_RATE_LIMIT_PER_MINUTE: string;
-  // 家族の家庭内Wi-Fi等、同一IPから複数端末で使うケースを想定してuid制限より
-  // 緩めの値にしてある(uid制限が主、IP制限は乱用の量産的パターンを防ぐ補助)。
-  GEMINI_IP_RATE_LIMIT_PER_MINUTE: string;
 }
 
 const OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions";
@@ -76,19 +73,6 @@ interface GeminiRequestBody {
  * でも許可しない)。
  */
 async function handleGeminiGenerate(request: Request, env: Env): Promise<Response> {
-  // IPベースのレート制限を認証より前にかける — Firebase匿名認証は誰でも新しい
-  // uidを取得できてしまう(公開のFirebase Web APIキーでsignInAnonymouslyを直接
-  // 叩けば、POIアプリを一切経由せずIDトークンを取得できる)ため、uidだけの制限
-  // では「新しいuidを量産する」形の乱用を防げない。同一IPからの量産的な乱用に
-  // 対する多層防御の1つとして、IP単位の上限も別枠で設ける(uid制限を回避しても
-  // ここで止まる)。これも万能ではない(IP自体を変える相手には効かない)ため、
-  // Firebase App Check/Play Integrity等のより強い対策は別途検証中。
-  const clientIp = request.headers.get("cf-connecting-ip") ?? "unknown";
-  const ipLimit = Number.parseInt(env.GEMINI_IP_RATE_LIMIT_PER_MINUTE, 10) || 30;
-  if (!(await checkRateLimit(env, clientIp, "ip-gl", ipLimit))) {
-    return jsonResponse({ error: "rate limit exceeded, try again later" }, 429);
-  }
-
   const authHeader = request.headers.get("authorization") ?? "";
   const match = authHeader.match(/^Bearer (.+)$/);
   if (!match) {
