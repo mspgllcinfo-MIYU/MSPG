@@ -20,8 +20,11 @@ sealed class ForgetResult {
     data class Removed(val memory: MariTanMemory) : ForgetResult()
 }
 
-private val REMEMBER_TRIGGERS = listOf("覚えて", "おぼえて")
-private val FORGET_TRIGGERS = listOf("忘れて", "わすれて")
+// 「覚えて」本体に加え、「覚えといて」(=覚えておいての口語縮約形。「覚えて」を
+// 部分文字列として含まないため別途必要)等の自然な言い方も拾う。長い表現を先に
+// 並べる必要は無い(firstOrNullはどれか1つ一致すれば十分なため)。
+private val REMEMBER_TRIGGERS = listOf("覚えて", "おぼえて", "覚えといて", "おぼえといて")
+private val FORGET_TRIGGERS = listOf("忘れて", "わすれて", "忘れといて", "わすれといて")
 private val MARI_TAN_PREFIXES = listOf("ねえマリたん、", "ねえマリたん", "マリたん、", "マリたん")
 
 /** 認識された音声テキストが「覚えて」依頼なら、保存すべき内容を返す。違えばnull。 */
@@ -38,7 +41,10 @@ fun extractForgetQuery(text: String): String? {
     return content.ifBlank { null }
 }
 
-private fun stripMariTanPrefix(text: String): String {
+/** マリたん呼びかけ部分の接頭辞を取り除く。[ExternalAiLauncher]からも
+ * (発話全体が起動キーワードそのものかどうかの判定に)再利用するため同一
+ * パッケージへ公開している。 */
+internal fun stripMariTanPrefix(text: String): String {
     val trimmed = text.trim()
     val prefix = MARI_TAN_PREFIXES.firstOrNull { trimmed.startsWith(it) }
     return if (prefix != null) trimmed.removePrefix(prefix).trim() else trimmed

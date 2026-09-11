@@ -12,49 +12,55 @@ import android.content.Intent
  * 拡張可能な設計: [APPS]に1件追加するだけで「Claude開いて」等に将来対応できる。
  * Version 1ではChatGPTとGeminiの2つに正式対応する。
  *
- * 実機で「ChatGPT」「Gemini」と話しても起動しなかった不具合(2件)の原因と対策:
- * 1. AndroidManifest.xmlに`<queries>`宣言が無く、Android 11(API 30)以降の
- *    package visibility制限により、対象アプリが実機にインストール済みでも
- *    [android.content.pm.PackageManager.getLaunchIntentForPackage]が常にnullを
- *    返していた（未インストールと区別がつかない状態）。AndroidManifest.xmlへ
- *    `<queries><package android:name="com.openai.chatgpt" />
- *    <package android:name="com.google.android.apps.bard" /></queries>`を
- *    追加して解消した。
- * 2. 音声認識はJapanese([Locale.JAPANESE])で行っている
- *    ([com.mspg.poicat.buildSpeechIntent]参照)ため、「ChatGPT」「Gemini」と
- *    発話しても認識結果はカタカナ（例:「チャットジーピーティー」「ジェミニ」）
- *    になることが多く、英字"chatgpt"/"gemini"としか一致しない判定では
- *    検出できず、外部AI起動の意図判定に到達すらしないまま通常のGemini質問
- *    として扱われていた（「他のAIは開けないにゃ」等はGemini自身が生成した
- *    相槌であり、本ランチャーが返す文言ではない）。主要なカタカナ表記ゆれを
- *    [ExternalAiApp.triggers]へ追加して解消した。
+ * 「耳」(音声コマンド判定)の設計方針: マリたんの性格(ちょっと抜けていて愛嬌が
+ * ある、完璧すぎない)は変えず、判定ロジックだけを実機での聞き取り失敗例に
+ * 合わせて強化する。
+ * - [ExternalAiApp.strongTriggers]: 「ChatGPT」「チャッピー」「ジェミニ」等、
+ *   日常会話にまず出てこない一意な呼び名。文中のどこにあっても起動と判定する。
+ * - [ExternalAiApp.weakTriggers]: 「GPT」「AIちゃん」「GoogleのAI」等、単体では
+ *   雑談中にも出てきうる一般的な言い方。誤起動を防ぐため、(a)「開いて/行って/
+ *   呼んで/起動して」等の起動意図の言葉と一緒に言われた場合、または
+ *   (b)発話全体がその言い方だけで完結している場合(＝雑談の一部ではなく単独の
+ *   コマンドとして発話された場合)のみ起動と判定する。
  */
-private data class ExternalAiApp(val packageName: String, val displayName: String, val triggers: List<String>)
+private data class ExternalAiApp(
+    val packageName: String,
+    val displayName: String,
+    val strongTriggers: List<String>,
+    val weakTriggers: List<String> = emptyList(),
+)
+
+// 「開いて」「行って」「呼んで」等、起動意図を示す言葉。weakTriggersと組み合わせて
+// 判定する時だけ使う(strongTriggersは単体で判定できるため不要)。
+private val ACTION_WORDS = listOf("開いて", "行って", "呼んで", "起動して")
 
 object ExternalAiLauncher {
-    // キーワード(検出用の内部キー) → アプリ情報。
     private val APPS = linkedMapOf(
         "chatgpt" to ExternalAiApp(
             packageName = "com.openai.chatgpt",
             displayName = "ChatGPT",
-            triggers = listOf(
+            strongTriggers = listOf(
                 "chatgpt",
-                "チャットジーピーティー",
                 "チャットgpt",
+                "チャットジーピーティー",
                 "チャットジーピーティ",
                 "チャッピー",
             ),
+            weakTriggers = listOf("gpt", "aiちゃん"),
         ),
         "gemini" to ExternalAiApp(
             packageName = "com.google.android.apps.bard",
             displayName = "Gemini",
-            triggers = listOf(
+            strongTriggers = listOf(
                 "gemini",
                 "ジェミニ",
                 "ジェミナイ",
+                "ジェミニー",
             ),
+            weakTriggers = listOf("googleのai"),
         ),
-        // 将来追加予定（未検証）: "claude" to ExternalAiApp("com.anthropic.claude", "Claude", listOf("claude", "クロード"))
+        // 将来追加予定（未検証）:
+        // "claude" to ExternalAiApp("com.anthropic.claude", "Claude", strongTriggers = listOf("claude", "クロード"))
     )
 
     /** [detectTarget]が返したキーワードから、ユーザー向けの表示名を得る。
@@ -62,12 +68,24 @@ object ExternalAiLauncher {
     fun displayName(keyword: String): String = APPS[keyword]?.displayName ?: keyword
 
     /** [text]（今回認識された音声そのまま）から起動対象のキーワードを検出する。
-     * 該当が無ければnull。英字表記に加え、日本語音声認識時によく現れるカタカナ
-     * 表記ゆれ（[ExternalAiApp.triggers]）も見る — 全ての表記ゆれを網羅しては
-     * いないが、代表的なものはカバーする。 */
+     * 該当が無ければnull。クラスコメント参照 — strongTriggersは単体で、
+     * weakTriggersは起動意図の言葉との組み合わせ、または発話全体がその呼び名
+     * だけの場合のみ判定する（雑談中の「AI」「Google」等への誤反応を防ぐ）。 */
     fun detectTarget(text: String): String? {
-        val normalized = text.lowercase().replace(" ", "").replace("　", "")
-        return APPS.entries.firstOrNull { (_, app) -> app.triggers.any { normalized.contains(it) } }?.key
+        val normalized = normalize(text)
+        val hasActionWord = ACTION_WORDS.any { normalized.contains(it) }
+        val wholeUtterance = normalize(
+            stripMariTanPrefix(text).trimEnd('、', '。', '！', '!', '？', '?', ' ', '　'),
+        )
+
+        for ((key, app) in APPS) {
+            if (app.strongTriggers.any { normalized.contains(it) }) return key
+            val weakMatch = app.weakTriggers.any { trigger ->
+                normalized.contains(trigger) && (hasActionWord || wholeUtterance == trigger)
+            }
+            if (weakMatch) return key
+        }
+        return null
     }
 
     /** [keyword]に対応するアプリを起動する。未インストール/起動失敗時はアプリを
@@ -84,4 +102,13 @@ object ExternalAiLauncher {
             true
         }.getOrDefault(false)
     }
+
+    // 英字の大文字/半角・全角スペース・中黒・ハイフンの揺れを一括で吸収する。
+    // (「チャット・ジーピーティー」「Chat-GPT」等)
+    private fun normalize(text: String): String =
+        text.lowercase()
+            .replace(" ", "")
+            .replace("　", "")
+            .replace("・", "")
+            .replace("-", "")
 }
