@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.sp
 import com.mspg.poicat.auth.GoogleAuthManager
 import com.mspg.poicat.drive.DriveConnectionStore
 import com.mspg.poicat.drive.DriveFolderRepository
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 // Connection画面専用の色 — 既存の各画面と同じトーン("大人かわいい×ちょっと高級×
@@ -104,6 +105,7 @@ fun ConnectionScreen(onBack: () -> Unit) {
     val authResolutionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult(),
     ) { result ->
+        statusText = "同意画面から復帰（resultCode=${result.resultCode}）"
         val data = result.data
         val target = pendingTarget
         pendingTarget = null
@@ -116,11 +118,12 @@ fun ConnectionScreen(onBack: () -> Unit) {
                     }
                     .onFailure {
                         isBusy = false
-                        statusText = "Drive権限の取得に失敗したにゃ"
+                        statusText = "Drive権限の取得に失敗したにゃ：${it.message ?: it.javaClass.simpleName}"
                     }
             }
         } else {
             isBusy = false
+            statusText = "同意画面から結果を受け取れなかったにゃ（data=${data != null}, target=${target != null}）"
         }
     }
 
@@ -131,6 +134,7 @@ fun ConnectionScreen(onBack: () -> Unit) {
             return
         }
         isBusy = true
+        statusText = "Drive権限を確認中…"
         scope.launch {
             // ResolutionNeededで同意画面へ遷移する間だけはisBusyをtrueのまま保つ
             // （二重タップ防止）。それ以外の終わり方では必ずfalseへ戻す —
@@ -142,6 +146,7 @@ fun ConnectionScreen(onBack: () -> Unit) {
                     .onSuccess { outcome ->
                         when (outcome) {
                             is GoogleAuthManager.AuthorizationOutcome.Granted -> {
+                                statusText = "Drive権限OK。フォルダを準備中…"
                                 cachedAccessToken = outcome.accessToken
                                 ensureFolderFor(target, outcome.accessToken)
                             }
@@ -150,11 +155,24 @@ fun ConnectionScreen(onBack: () -> Unit) {
                                 val pendingIntent = outcome.result.pendingIntent
                                 if (pendingIntent != null) {
                                     awaitingSystemConsent = true
+                                    statusText = "Drive確認画面を起動中…"
                                     authResolutionLauncher.launch(
                                         IntentSenderRequest.Builder(pendingIntent.intentSender).build(),
                                     )
+                                    // 同意画面のIntentSenderが実際には何も表示せず、
+                                    // コールバックも一度も呼ばれないまま止まるケースへの
+                                    // 保険 — 一定時間待っても戻ってこなければ強制的に
+                                    // isBusyを解除し、原因調査用にその旨を表示する。
+                                    scope.launch {
+                                        delay(25_000)
+                                        if (pendingTarget == target) {
+                                            pendingTarget = null
+                                            isBusy = false
+                                            statusText = "Drive確認画面から25秒応答が無かったにゃ（原因調査中）"
+                                        }
+                                    }
                                 } else {
-                                    statusText = "Drive権限リクエストに失敗したにゃ"
+                                    statusText = "Drive権限リクエストに失敗したにゃ（pendingIntentがnull）"
                                 }
                             }
                         }
