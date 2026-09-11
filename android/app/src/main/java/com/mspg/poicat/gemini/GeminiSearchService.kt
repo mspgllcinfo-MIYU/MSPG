@@ -1,5 +1,6 @@
 package com.mspg.poicat.gemini
 
+import android.util.Log
 import com.mspg.poicat.BuildConfig
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -11,17 +12,15 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
+private const val TAG = "MariTanGemini"
+
 /** マリたんが1回の質問に対してGeminiから受け取った結果。 */
 sealed class GeminiOutcome {
     data class Answer(val text: String) : GeminiOutcome()
 
     /** 無料枠を使い切った(HTTP 429)。マリたんを「ふて寝」状態にする合図 — 自動的に
-     * 有料機能へ移行することは絶対にしない。[detail]はGoogleが返した429レスポンス
-     * 本文そのもの（error.message/status/details.quotaMetric/quotaId/retryDelay等）
-     * — 「短時間レート制限」「日次無料枠」「モデル固有クォータ」のどれかを推測せず
-     * 特定するための一時的な項目。原因確定後はUI側の表示だけ削除する予定（このデータ
-     * 自体はデバッグに有用なので残してもよい）。 */
-    data class QuotaExceeded(val detail: String) : GeminiOutcome()
+     * 有料機能へ移行することは絶対にしない。 */
+    object QuotaExceeded : GeminiOutcome()
 
     /** APIキーが未設定(BuildConfig.GEMINI_API_KEYが空)。ネットワークには一切出ない。 */
     object NotConfigured : GeminiOutcome()
@@ -39,6 +38,14 @@ sealed class GeminiOutcome {
  * メモ/カレンダー/アルバム/ファイル/Google Drive/ルーム共有データ等、POI内部の
  * 情報は一切含めない。固定のsystem_instruction（簡潔に日本語で答えるよう指示する
  * だけの定型文）以外にAPIへ渡すものはない。
+ *
+ * Version 1ではGoogle Search Grounding(tools.google_search)を使わない: 実機と
+ * GitHub Actions上でのA/Bテストで、全く同じキー/モデル/エンドポイントでも
+ * grounding無し=HTTP 200成功、grounding有り=HTTP 429(RESOURCE_EXHAUSTED)が
+ * 再現し、grounding機能自体の無料枠がこのプロジェクトでは極端に少ないことが
+ * 確定した。マリたんの最優先要件は「無料でできるだけ長く・多く会話できること」
+ * のため、Version 1では通常のテキスト生成のみを使い、天気/最新ニュース等の
+ * リアルタイム検索が要る質問への対応はVersion 2で別途検討する。
  */
 object GeminiSearchService {
     // モデル選定方針: マリたんの最優先要件は「性能」ではなく「できるだけ長時間・
@@ -46,17 +53,14 @@ object GeminiSearchService {
     // 「Gemini API のレート制限」画面(Project: MIYUxAI、無料枠)で実際に確認した
     // 値では、gemini-3.6-flashの無料枠は5 RPMだったのに対し、
     // gemini-3.5-flash-liteは15 RPM — 同じFlash系列の中で最も無料枠が大きい
-    // （軽量="Lite"な分、上限が緩い）。天気・簡単な検索・雑談程度の応答には
-    // 十分な性能と判断し、無料での会話可能回数を最優先してこちらへ切り替えた。
-    // (以前使っていたgemini-2.5-flashは新規ユーザー向け提供終了、
-    // gemini-3.6-flashはRPMが厳しく実機で429が頻発したため経由してこの結論に
-    // 至った。) 将来また変わった場合はこの定数だけを差し替えれば良い。
+    // （軽量="Lite"な分、上限が緩い）。通常会話・一般的な質問には十分な性能と
+    // 判断し、無料での会話可能回数を最優先してこちらを使う。将来また変わった
+    // 場合はこの定数だけを差し替えれば良い。
     private const val MODEL = "gemini-3.5-flash-lite"
     private const val API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
     private const val SYSTEM_INSTRUCTION =
-        "あなたは「マリたん」という知的で好奇心旺盛なキジ猫です。ユーザーの質問について" +
-            "Google検索で最新情報を調べ、簡潔に（3〜4文程度まで）日本語で、猫らしい親しみやすい" +
-            "口調で答えてください。"
+        "あなたは「マリたん」という知的で好奇心旺盛なキジ猫です。ユーザーの質問に対して" +
+            "簡潔に（3〜4文程度まで）日本語で、猫らしい親しみやすい口調で答えてください。"
 
     suspend fun ask(query: String): Result<GeminiOutcome> = withContext(Dispatchers.IO) {
         runCatching {
@@ -79,10 +83,9 @@ object GeminiSearchService {
                         },
                     ),
                 )
-                // Google Search groundingを有効化 — 「今日の天気」等、モデル単体の
-                // 知識だけでは答えられない最新情報を調べて持って帰ってくる、マリたんの
-                // 役割そのものに必要な機能。
-                put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
+                // Version 1ではGoogle Search Grounding(tools.google_search)を使わない
+                // — grounding機能自体の無料枠が別枠かつ極端に少なく、A/Bテストで
+                // 429の直接原因と確定したため。クラスコメント参照。
             }
 
             val url = "$API_BASE/$MODEL:generateContent?key=${URLEncoder.encode(apiKey, "UTF-8")}"
@@ -97,15 +100,16 @@ object GeminiSearchService {
 
                 val responseCode = connection.responseCode
                 val ok = responseCode in 200..299
-                // errorStreamがnullになるケース(一部の接続失敗等)でもHTTPコード自体は
-                // デバッグ表示に残るよう、本文読み取り失敗はtext側だけで吸収する。
                 val stream = if (ok) connection.inputStream else connection.errorStream
                 val text = stream?.let { s -> BufferedReader(InputStreamReader(s, Charsets.UTF_8)).use { it.readText() } }
                     ?: "(no response body)"
 
                 if (!ok) {
-                    if (responseCode == 429) return@runCatching GeminiOutcome.QuotaExceeded(text)
-                    error("Gemini API error $responseCode: $text")
+                    if (responseCode == 429) return@runCatching GeminiOutcome.QuotaExceeded
+                    // 一般ユーザー画面には出さないが、実機調査が要る場合はlogcat
+                    // (タグ: MariTanGemini)で追える。
+                    Log.w(TAG, "Gemini API error $responseCode: $text")
+                    error("Gemini API error $responseCode")
                 }
 
                 GeminiOutcome.Answer(text = extractAnswerText(text))

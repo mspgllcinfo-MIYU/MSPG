@@ -67,6 +67,7 @@ import com.mspg.poicat.gemini.GeminiOutcome
 import com.mspg.poicat.gemini.GeminiSearchService
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -385,24 +386,30 @@ private enum class MariTanState { IDLE, LISTENING, THINKING, SPEAKING, SULKING, 
  * 一切持たない。
  *
  * タップ→（権限が無ければ許可ダイアログ→）即マイク起動→音声認識→Gemini
- * (Google Search grounding付き)へ質問文だけを送信→回答をAndroid標準の音声合成
- * (TextToSpeech)でマリたん自身が声で読み上げる、という一直線の流れ。回答は
- * 黒猫AIのチャット履歴(ChatRepository)へは一切書き込まない — 黒猫とマリたんを
- * 混同させないため。通常時は長い回答テキストを画面表示せず、短い状態ラベル
- * （聞いてるにゃ/調べてるにゃ/お話するにゃ等）だけを表示する。
+ * へ質問文だけを送信→回答をAndroid標準の音声合成(TextToSpeech)でマリたん
+ * 自身が声で読み上げる、という一直線の流れ。回答は黒猫AIのチャット履歴
+ * (ChatRepository)へは一切書き込まない — 黒猫とマリたんを混同させないため。
+ * 通常時は長い回答テキストを画面表示せず、短い状態ラベル（聞いてるにゃ/
+ * 調べてるにゃ/お話するにゃ等）だけを表示する。
  *
  * Geminiへ送るのは今回認識された音声テキストのみ — 黒猫AIの会話履歴やPOI内部の
  * 他データ（仕事/プラベ/タスク/メモ/カレンダー/アルバム/ファイル/Drive/ルーム共有）
  * は一切渡さない（[GeminiSearchService]のクラスコメント参照）。
  *
- * 無料枠を使い切った場合(HTTP 429)やGemini呼び出し失敗時はSULKING/ERROR状態に
- * するだけで、課金機能への自動移行は一切行わない。
+ * Version 1ではGoogle Search Groundingを使わない（実機A/Bテストで、grounding
+ * 機能自体の無料枠がこのプロジェクトでは極端に少なく、429の直接原因と確定した
+ * ため — [GeminiSearchService]参照）。無料での会話可能時間・回数を最優先し、
+ * 天気/最新ニュース等のリアルタイム検索が要る質問への対応はVersion 2で検討する。
+ *
+ * 無料枠を使い切った場合(HTTP 429)はSULKING状態にするだけで、課金機能への自動
+ * 移行は一切行わない。Gemini呼び出し自体が失敗した場合もERROR状態を短く見せる
+ * だけで、詳細なエラー内容は画面に出さない（実機調査が要る場合はlogcatの
+ * MariTanGeminiタグで追える — [GeminiSearchService]参照）。
  *
  * 音声合成の方式: Android標準のTextToSpeech（端末内蔵、APIキー不要・通信不要・
  * レート制限なし）を採用した。Google AI Studioの無料枠一覧で確認したところ
  * Gemini 3.1 Flash TTSは無料枠が3 RPMしかなく、マリたんの主要機能である会話の
- * たびに毎回消費するには不安定すぎる（既にGemini 3.6 Flashのテキスト生成
- * だけでも5 RPMで429が発生していた）。安定運用・無料運用を優先し、TextToSpeech
+ * たびに毎回消費するには不安定すぎる。安定運用・無料運用を優先し、TextToSpeech
  * を選んだ。
  */
 @Composable
@@ -410,10 +417,6 @@ private fun MariTanRow() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var state by remember { mutableStateOf(MariTanState.IDLE) }
-    // Gemini呼び出しが失敗した際の実際の原因（429レスポンス本文/例外メッセージ）。
-    // 429の原因調査がまだ続いているため一時的に残している — 原因確定後、この
-    // デバッグ用の項目と表示は削除する。
-    var lastErrorDetail by remember { mutableStateOf<String?>(null) }
 
     // マリたんの声。画面が破棄される際は必ずshutdown()する（TextToSpeechは
     // ネイティブリソース/バックグラウンドサービス接続を持つため）。
@@ -476,19 +479,9 @@ private fun MariTanRow() {
                         state = MariTanState.SPEAKING
                         speak(answer.text) { state = MariTanState.IDLE }
                     }
-                    is GeminiOutcome.QuotaExceeded -> {
-                        // 429の実際のレスポンス本文(error.message/status/details等)を
-                        // そのまま保持する — 「短時間レート制限」「日次無料枠」
-                        // 「モデル固有クォータ」のどれかを推測せず実機で特定するため。
-                        lastErrorDetail = answer.detail
-                        state = MariTanState.SULKING
-                    }
+                    GeminiOutcome.QuotaExceeded -> state = MariTanState.SULKING
                     GeminiOutcome.NotConfigured -> state = MariTanState.NOT_CONFIGURED
-                    null -> {
-                        val e = outcome.exceptionOrNull()
-                        lastErrorDetail = "${e?.javaClass?.simpleName}: ${e?.message}"
-                        state = MariTanState.ERROR
-                    }
+                    null -> state = MariTanState.ERROR
                 }
             }
         }
@@ -522,7 +515,6 @@ private fun MariTanRow() {
                         state != MariTanState.LISTENING &&
                         state != MariTanState.SPEAKING,
                 ) {
-                    lastErrorDetail = null
                     val granted = ContextCompat.checkSelfPermission(
                         context,
                         android.Manifest.permission.RECORD_AUDIO,
@@ -538,18 +530,27 @@ private fun MariTanRow() {
         Spacer(Modifier.width(10.dp))
         Text(
             text = when (state) {
-                MariTanState.IDLE -> "マリたん：タップして話しかけてにゃ（外部を調べる担当）"
+                MariTanState.IDLE -> "マリたん：タップして話しかけてにゃ"
                 MariTanState.LISTENING -> "マリたん：聞いてるにゃ…"
                 MariTanState.THINKING -> "マリたん：調べてるにゃ…"
                 MariTanState.SPEAKING -> "マリたん：お話するにゃ…"
-                // 一時的デバッグ: 429の原因確定後はlastErrorDetailの付与をやめる。
-                MariTanState.SULKING -> "マリたん：今日はもう調べられないにゃ…（ふて寝中）\n（デバッグ: ${lastErrorDetail ?: "詳細不明"}）"
+                MariTanState.SULKING -> "マリたん：今日はもう調べられないにゃ…（ふて寝中）"
                 MariTanState.NOT_CONFIGURED -> "マリたん：まだ準備中にゃ"
-                MariTanState.ERROR -> "マリたん：うまく聞こえなかったにゃ\n（デバッグ: ${lastErrorDetail ?: "詳細不明"}）"
+                MariTanState.ERROR -> "マリたん：うまく聞こえなかったにゃ"
             },
             fontSize = 12.sp,
             color = AiInk.copy(alpha = 0.6f),
         )
+    }
+
+    // ERRORは一時的な状態表示 — 少し経ったら自動でIDLEへ戻す(再タップしなくても
+    // 元の「タップして話しかけてにゃ」に戻る)。SULKING/NOT_CONFIGUREDは
+    // タップし直すまでそのまま表示し続ける(状態として意味があるため)。
+    LaunchedEffect(state) {
+        if (state == MariTanState.ERROR) {
+            delay(4000)
+            if (state == MariTanState.ERROR) state = MariTanState.IDLE
+        }
     }
 }
 
