@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mspg.poicat.auth.GoogleAuthManager
 import com.mspg.poicat.room.NotSignedInException
+import com.mspg.poicat.room.RoomBackfill
 import com.mspg.poicat.room.RoomEventSync
 import com.mspg.poicat.room.RoomFullException
 import com.mspg.poicat.room.RoomManager
@@ -97,6 +98,10 @@ fun RoomShareScreen(onBack: () -> Unit) {
                         roomId = newRoomId
                         roomStatusText = "ルームに参加したにゃ"
                         RoomEventSync.startListening(context.applicationContext)
+                        // 参加前からあった自分側の既存データ(まだ誰とも共有していない
+                        // 予定/タスク/メモ/写真/ファイル)を一括で送る。ローカルの表示・
+                        // データには一切影響しない、後追いのfire-and-forget処理。
+                        scope.launch { RoomBackfill.pushUnsyncedToRoom(activity) }
                     }
                     .onFailure {
                         roomStatusText = when (it) {

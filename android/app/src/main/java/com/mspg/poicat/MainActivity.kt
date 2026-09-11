@@ -7,6 +7,7 @@ import androidx.activity.compose.setContent
 import androidx.lifecycle.lifecycleScope
 import com.mspg.poicat.notify.ReminderWorker
 import com.mspg.poicat.notify.ensureNotificationChannel
+import com.mspg.poicat.room.RoomBackfill
 import com.mspg.poicat.room.RoomEventSync
 import kotlinx.coroutines.launch
 
@@ -21,6 +22,10 @@ class MainActivity : ComponentActivity() {
         // 参加済みならFirestoreのリアルタイムリスナーを起動し、パートナー端末側の
         // 変更をローカルのcat_eventsへ反映する。
         RoomEventSync.startListening(applicationContext)
+        // 参加済みでかつ前回の起動時にバックフィル(既存データの共有)が通信失敗等で
+        // 途中までしか終わらなかった場合の自然な再試行機会。ルーム未参加、または
+        // 前回までに全て送信済みなら実質何もしない(RoomBackfill参照)。
+        lifecycleScope.launch { RoomBackfill.pushUnsyncedToRoom(this@MainActivity) }
         handleIncomingIntent(intent)
 
         setContent {

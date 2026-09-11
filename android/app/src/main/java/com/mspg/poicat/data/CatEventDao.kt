@@ -31,6 +31,13 @@ interface CatEventDao {
     @Query("SELECT * FROM cat_events WHERE id = :id LIMIT 1")
     suspend fun byId(id: Long): CatEvent?
 
+    /** Rows never yet pushed to a shared room (created before a room existed, or while
+     * unlinked) — used by [com.mspg.poicat.room.RoomBackfill] to send pre-existing local
+     * data once a room is joined. A row that already has a roomEventId is never returned
+     * here, so re-running the backfill after a partial failure only retries what's left. */
+    @Query("SELECT * FROM cat_events WHERE roomEventId IS NULL")
+    suspend fun unsyncedRoomEvents(): List<CatEvent>
+
     /** All dated schedule events (tasks excluded), soonest first. */
     @Query("SELECT * FROM cat_events WHERE isTask = 0 AND dateTime IS NOT NULL AND dateTime >= :from ORDER BY dateTime ASC")
     suspend fun upcoming(from: Long): List<CatEvent>

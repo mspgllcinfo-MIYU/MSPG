@@ -104,4 +104,25 @@ class CatEventRepository(context: Context) {
     suspend fun markReminded1Hour(event: CatEvent) {
         updateAndSync(event.copy(reminded1Hour = true))
     }
+
+    /**
+     * ルーム参加時の既存データバックフィル専用。まだ一度もFirestoreへ送っていない
+     * (roomEventIdがnullの)行だけを対象に、通常の新規保存と全く同じpushUpsert経路
+     * (syncScope上のfire-and-forget、失敗してもローカルには一切影響しない)で送る。
+     * 送信が成功した行だけmarkRoomEventIdでroomEventIdが埋まるため、通信が途中で
+     * 失敗しても、次にこの関数が呼ばれたときは「まだnullのまま残っている行」だけが
+     * 自然に再試行される(グローバルな完了フラグは持たない設計)。
+     *
+     * このバックフィルはローカル→リモートへの追加送信のみで、ここでdao.delete等を
+     * 呼ぶことは無い — 既存のローカル行を消したり上書きしたりしない。
+     *
+     * 呼び出し元は[com.mspg.poicat.room.RoomBackfill]。
+     */
+    suspend fun pushUnsyncedToRoom() {
+        dao.unsyncedRoomEvents().forEach { event ->
+            syncScope.launch {
+                RoomEventSync.pushUpsert(appContext, event) { roomEventId -> markRoomEventId(event.id, roomEventId) }
+            }
+        }
+    }
 }
