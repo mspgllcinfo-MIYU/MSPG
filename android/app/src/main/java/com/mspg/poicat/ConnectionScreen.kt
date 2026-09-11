@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.sp
 import com.mspg.poicat.auth.GoogleAuthManager
 import com.mspg.poicat.drive.DriveConnectionStore
 import com.mspg.poicat.drive.DriveFolderRepository
+import com.mspg.poicat.drive.FileUploadDebug
 import com.mspg.poicat.drive.PhotoUploadDebug
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -293,6 +294,12 @@ fun ConnectionScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(6.dp))
             Text(
                 "直近の写真アップロード検証 = ${PhotoUploadDebug.lastResult ?: "まだ写真を追加していない"}",
+                fontSize = 11.sp,
+                color = Color(0xFF800000),
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "直近のファイルアップロード検証 = ${FileUploadDebug.lastResult ?: "まだファイルを共有していない"}",
                 fontSize = 11.sp,
                 color = Color(0xFF800000),
             )

@@ -51,6 +51,20 @@ class FileRepository(private val context: Context) {
 
     suspend fun all() = dao.all()
 
+    /** Marks a file's Drive sync state (PENDING/SYNCING/FAILED — see [markDriveSynced] for
+     * the success case). A no-op if the file no longer exists (e.g. deleted mid-upload). */
+    suspend fun markDriveSyncStatus(fileId: Long, status: String) = withContext(Dispatchers.IO) {
+        val file = dao.byIds(listOf(fileId)).firstOrNull() ?: return@withContext
+        dao.update(file.copy(driveSyncStatus = status))
+    }
+
+    /** Records a successful Drive upload's file id, so a later sync attempt for the same
+     * file can recognize it's already there instead of uploading a duplicate. */
+    suspend fun markDriveSynced(fileId: Long, driveFileId: String) = withContext(Dispatchers.IO) {
+        val file = dao.byIds(listOf(fileId)).firstOrNull() ?: return@withContext
+        dao.update(file.copy(driveSyncStatus = StoredFile.DRIVE_SYNC_SYNCED, driveFileId = driveFileId))
+    }
+
     /** Deletes the row and its backing file — the file is only ever referenced by this
      * one row, and no other data (photos, schedules, tasks, memos) references it. */
     suspend fun delete(file: StoredFile) = withContext(Dispatchers.IO) {

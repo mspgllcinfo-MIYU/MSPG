@@ -1,6 +1,6 @@
 package com.mspg.poicat
 
-import android.content.Context
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import androidx.core.content.IntentCompat
@@ -9,6 +9,7 @@ import com.mspg.poicat.data.CatEventRepository
 import com.mspg.poicat.data.FileRepository
 import com.mspg.poicat.data.Photo
 import com.mspg.poicat.data.PhotoRepository
+import com.mspg.poicat.drive.FileDriveSync
 
 /**
  * Handles an incoming ACTION_SEND intent (share-to-PoiCat from another app),
@@ -23,7 +24,9 @@ import com.mspg.poicat.data.PhotoRepository
  * via PendingNavigation, set last so navigation never races the write.
  */
 object ShareIntentHandler {
-    suspend fun handle(context: Context, intent: Intent) {
+    /** [context] is required to be an [Activity] (not just applicationContext) because the
+     * file-share branch needs one for [FileDriveSync]'s silent Drive-authorization check. */
+    suspend fun handle(context: Activity, intent: Intent) {
         // 1. Extract whatever was shared.
         val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim()
         val mimeType = intent.type
@@ -38,7 +41,14 @@ object ShareIntentHandler {
         if (mimeType != null && !mimeType.startsWith("image/")) {
             val fileUri = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
             if (fileUri != null) {
-                runCatching { FileRepository(context).importFromUri(fileUri, mimeType) }
+                runCatching {
+                    val fileRepository = FileRepository(context)
+                    val storedFile = fileRepository.importFromUri(fileUri, mimeType)
+                    // ローカル保存は上の行で既に完了済み — この先のDriveアップロード
+                    // 試行が何であれ、ここまでの結果には影響しない（PhotoDriveSyncと
+                    // 同じ考え方）。
+                    FileDriveSync.syncNewFile(context, fileRepository, storedFile)
+                }
                 return
             }
         }

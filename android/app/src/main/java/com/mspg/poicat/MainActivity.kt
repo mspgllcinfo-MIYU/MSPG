@@ -42,7 +42,10 @@ class MainActivity : ComponentActivity() {
     private fun handleIncomingIntent(intent: Intent?) {
         if (intent?.action != Intent.ACTION_SEND) return
         lifecycleScope.launch {
-            ShareIntentHandler.handle(applicationContext, intent)
+            // Driveアップロード(GoogleAuthManager経由)にはActivityが要るため、ここだけ
+            // applicationContextではなくthis(MainActivity)を渡す — importFromUri等の
+            // 既存のローカル保存処理自体はContextのままで一切変わらない。
+            ShareIntentHandler.handle(this@MainActivity, intent)
         }
         intent.action = null
     }

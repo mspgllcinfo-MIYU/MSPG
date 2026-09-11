@@ -23,4 +23,17 @@ data class StoredFile(
     val mimeType: String,
     /** Epoch millis when the file was saved into the app. */
     val savedAt: Long = System.currentTimeMillis(),
-)
+    /** Google Driveへのアップロード状態。既存行(この列追加前に保存されたファイル)は
+     * マイグレーションでPENDINGになるが、自動で再送はされない — 新規追加分のみ
+     * 追加直後にアップロードを試みる。[Photo.driveSyncStatus]と同じ4値。 */
+    val driveSyncStatus: String = DRIVE_SYNC_PENDING,
+    /** アップロード成功後のDrive側ファイルID。再アップロード防止に使う。 */
+    val driveFileId: String? = null,
+) {
+    companion object {
+        const val DRIVE_SYNC_PENDING = "PENDING"
+        const val DRIVE_SYNC_SYNCING = "SYNCING"
+        const val DRIVE_SYNC_SYNCED = "SYNCED"
+        const val DRIVE_SYNC_FAILED = "FAILED"
+    }
+}
