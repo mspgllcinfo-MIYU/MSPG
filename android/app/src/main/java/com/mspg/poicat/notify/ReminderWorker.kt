@@ -35,6 +35,10 @@ class ReminderWorker(appContext: Context, params: WorkerParameters) :
             repository.markReminded1Hour(event)
         }
 
+        // 毎朝9時台の「今日の予定」まとめ通知。新しい定期ジョブは追加せず、この
+        // 既存チェックに便乗している — 詳細はMorningDigest参照。
+        MorningDigest.checkAndSend(applicationContext)
+
         return Result.success()
     }
 
