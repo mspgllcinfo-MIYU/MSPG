@@ -284,6 +284,9 @@ fun AlbumScreen(
                     repository.delete(photo)
                     reload()
                     detailPhoto = null
+                    // ローカル削除は上で既に完了済み — この先のDrive削除試行が何であれ、
+                    // ここまでの結果(画面から消えた写真)には影響しない。
+                    PhotoDriveSync.syncDeletedPhoto(activity, photo)
                 }
             },
         )

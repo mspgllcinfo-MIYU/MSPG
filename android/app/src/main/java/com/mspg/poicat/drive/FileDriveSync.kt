@@ -80,4 +80,30 @@ object FileDriveSync {
                 }
         }
     }
+
+    /**
+     * ファイル削除時のGoogle Driveバックグラウンド削除。[PhotoDriveSync.syncDeletedPhoto]
+     * と同じ設計をそのまま踏襲する（写真側のコードは変更していない）: ローカル削除
+     * ([FileRepository.delete])は呼び出し側で必ず先に完了済みで、これは後追いの
+     * best-effort処理。安全設計として、削除前に[DriveFolderRepository.getFileInfo]で
+     * 実際の親フォルダが現在接続中の「POI用/ファイル」フォルダと一致することを確認して
+     * から削除する（無関係なファイルを誤って消さないため）。
+     */
+    suspend fun syncDeletedFile(activity: Activity, file: StoredFile) {
+        runCatching {
+            val driveFileId = file.driveFileId ?: return@runCatching
+            val folderId = DriveConnectionStore(activity).fileFolderId ?: return@runCatching
+
+            val outcome = GoogleAuthManager.requestDriveAuthorization(activity).getOrNull() ?: return@runCatching
+            val accessToken = (outcome as? GoogleAuthManager.AuthorizationOutcome.Granted)?.accessToken
+                ?: return@runCatching
+
+            val info = DriveFolderRepository.getFileInfo(accessToken, driveFileId).getOrNull() ?: return@runCatching
+            if (info.parents == null || folderId !in info.parents) {
+                return@runCatching
+            }
+
+            DriveFolderRepository.deleteFile(accessToken, driveFileId)
+        }
+    }
 }

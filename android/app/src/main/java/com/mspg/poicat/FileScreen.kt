@@ -42,6 +42,7 @@ import androidx.core.content.FileProvider
 import com.mspg.poicat.brain.toLocalDateTime
 import com.mspg.poicat.data.FileRepository
 import com.mspg.poicat.data.StoredFile
+import com.mspg.poicat.drive.FileDriveSync
 import com.mspg.poicat.drive.RoomCatalogSync
 import java.io.File
 import kotlinx.coroutines.launch
@@ -153,6 +154,9 @@ fun FileScreen(embedded: Boolean = false) {
                         repository.delete(file)
                         pendingDelete = null
                         reload()
+                        // ローカル削除は上で既に完了済み — この先のDrive削除試行が何であれ、
+                        // ここまでの結果(画面から消えたファイル)には影響しない。
+                        FileDriveSync.syncDeletedFile(activity, file)
                     }
                 }) {
                     Text("削除", color = MaterialTheme.colorScheme.error)

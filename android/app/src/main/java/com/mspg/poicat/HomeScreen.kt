@@ -61,7 +61,12 @@ private val HomePink = Color(0xFFD98A9C) // the app's existing pink — kept rar
  * or a section jumps to the matching tab.
  */
 @Composable
-fun HomeScreen(onNavigate: (AppTab) -> Unit, onOpenAlbum: () -> Unit, onOpenConnectionSettings: () -> Unit) {
+fun HomeScreen(
+    onNavigate: (AppTab) -> Unit,
+    onOpenAlbum: () -> Unit,
+    onOpenConnectionSettings: () -> Unit,
+    onOpenRoomShare: () -> Unit,
+) {
     val context = LocalContext.current
     val repository = remember { CatEventRepository(context.applicationContext) }
 
@@ -162,6 +167,13 @@ fun HomeScreen(onNavigate: (AppTab) -> Unit, onOpenAlbum: () -> Unit, onOpenConn
             // HomeSection(title = "Google連携", onClick = onOpenConnectionSettings) {
             //     Text("サインイン・Driveフォルダの接続", color = MaterialTheme.colorScheme.onSurfaceVariant)
             // }
+
+            // 「Google連携」タイル全体は復活させず、夫婦間ルーム共有(4桁PIN)だけに
+            // 絞った専用入口を別途追加(ユーザー指示)。RoomShareScreen.kt参照。
+            Spacer(Modifier.height(12.dp))
+            HomeSection(title = "夫婦でシェア", onClick = onOpenRoomShare) {
+                Text("4桁の合言葉でご主人の端末とつなぐ", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
 
         Spacer(Modifier.height(20.dp))

@@ -94,6 +94,9 @@ fun AppRoot() {
     // Phase 3: Google連携（サインイン＋Driveフォルダ接続）は独立タブにせず、Home
     // からの一時的な全画面遷移として扱う — AppTab/BottomTabBarには一切触れない。
     var showConnectionSettings by remember { mutableStateOf(false) }
+    // 「夫婦でシェア」(4桁PINルーム共有)専用入口 — showConnectionSettingsと同じ
+    // 「Homeからの一時的な全画面遷移」パターン。AppTab/BottomTabBarには触れない。
+    var showRoomShare by remember { mutableStateOf(false) }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -127,12 +130,15 @@ fun AppRoot() {
         Box(modifier = Modifier.weight(1f)) {
             if (showConnectionSettings) {
                 ConnectionScreen(onBack = { showConnectionSettings = false })
+            } else if (showRoomShare) {
+                RoomShareScreen(onBack = { showRoomShare = false })
             } else {
                 when (selectedTab) {
                     AppTab.HOME -> HomeScreen(
                         onNavigate = { selectedTab = it },
                         onOpenAlbum = { poiRequestAlbum = true; selectedTab = AppTab.POI },
                         onOpenConnectionSettings = { showConnectionSettings = true },
+                        onOpenRoomShare = { showRoomShare = true },
                     )
                     AppTab.POI -> PoiScreen(
                         requestAlbumTab = poiRequestAlbum,
@@ -148,7 +154,7 @@ fun AppRoot() {
                 }
             }
         }
-        if (!showConnectionSettings) {
+        if (!showConnectionSettings && !showRoomShare) {
             BottomTabBar(selectedTab = selectedTab, onSelect = { selectedTab = it })
         }
     }
