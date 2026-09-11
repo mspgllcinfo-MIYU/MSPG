@@ -10,6 +10,11 @@ name: Gemini API Diagnostic (temporary)
 
 on:
   workflow_dispatch: {}
+  push:
+    branches:
+      - "claude/step-3-uouuf6"
+    paths:
+      - ".github/workflows/gemini-diagnostic.yml"
 
 jobs:
   diagnose:
