@@ -7,8 +7,11 @@ import androidx.room.PrimaryKey
  * A single thing the cat remembers: a schedule with a date+time, a plain
  * memo with no date, or (when [isTask] is set) a to-do item from the Poi
  * screen whose [dateTime] — if any — is its due date rather than a
- * reminder-worthy event time. Everything is stored only on-device
- * (Room/SQLite) — there is no server and no network call involved.
+ * reminder-worthy event time. Stored on-device (Room/SQLite) as the source
+ * of truth; if a 4-digit-PIN room has been joined, [roomEventId]/[updatedAt]
+ * also let [com.mspg.poicat.room.RoomEventSync] mirror this row to/from
+ * Firestore as a best-effort background step — see that class for details.
+ * With no room joined, nothing here ever touches the network.
  */
 @Entity(tableName = "cat_events")
 data class CatEvent(
@@ -30,6 +33,15 @@ data class CatEvent(
      * stays re-classifiable later rather than being forced into a guess.
      */
     val category: String? = null,
+    /** ルーム共有用のFirestore側ドキュメントID（`rooms/{roomId}/events/{roomEventId}`）。
+     * ローカルの[id]は端末ごとに独立したautoIncrementなので共有には使えず、初回の
+     * Firestoreプッシュ時にランダムなUUIDとして割り当てられ、以後はこのIDで
+     * 同じ行を指し続ける。ルーム未参加、またはこの行がまだ一度もプッシュされて
+     * いない間はnull。 */
+    val roomEventId: String? = null,
+    /** この行が最後に変更された時刻（epoch millis）。ルーム共有時の
+     * 「新しい方を勝たせる」競合解決にのみ使う — 通常のローカル専用動作には影響しない。 */
+    val updatedAt: Long = System.currentTimeMillis(),
 ) {
     companion object {
         const val CATEGORY_WORK = "work"

@@ -12,13 +12,14 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  *  - v1: title, dateTime, createdAt, reminded1Day, reminded1Hour
  *  - v2: added isTask, completed (Poi tasks) — see MIGRATION_1_2
  *  - v3: added category (Poi work/private classification) — see MIGRATION_2_3
+ *  - v4: added roomEventId, updatedAt (4桁PINルーム共有) — see MIGRATION_3_4
  *
  * Real schedules/memos/tasks now live in this database on-device, so any
  * future version bump must ship its own explicit Migration here (following
  * MIGRATION_1_2's pattern, same as PhotoDatabase.MIGRATION_1_2) instead of
  * falling back to a destructive recreate, which would silently wipe them.
  */
-@Database(entities = [CatEvent::class], version = 3, exportSchema = true)
+@Database(entities = [CatEvent::class], version = 4, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun catEventDao(): CatEventDao
 
@@ -43,6 +44,16 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // v3 -> v4: added roomEventId (Firestoreルーム共有ドキュメントID)とupdatedAt
+        // (競合解決用タイムスタンプ)。どちらも既存行を壊さない — roomEventIdはNULL
+        // (ルーム未参加/未プッシュ)、updatedAtは現在時刻がデフォルトで入る。
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE cat_events ADD COLUMN roomEventId TEXT")
+                db.execSQL("ALTER TABLE cat_events ADD COLUMN updatedAt INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         @Volatile
         private var instance: AppDatabase? = null
 
@@ -53,7 +64,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "poicat.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .build().also { instance = it }
             }
     }

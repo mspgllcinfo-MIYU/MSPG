@@ -69,6 +69,7 @@ import com.mspg.poicat.brain.toLocalDate
 import com.mspg.poicat.data.Photo
 import com.mspg.poicat.data.PhotoRepository
 import com.mspg.poicat.drive.PhotoDriveSync
+import com.mspg.poicat.drive.RoomCatalogSync
 import java.io.File
 import java.time.LocalDate
 import kotlinx.coroutines.Dispatchers
@@ -119,6 +120,14 @@ fun AlbumScreen(
     }
 
     LaunchedEffect(selectedAlbum) { reload() }
+
+    // ルーム共有(4桁PIN)が有効な場合のみ、パートナー端末が共有Driveフォルダへ追加した
+    // 写真をローカルへ取り込む（ルーム未参加なら即noop）。画面を開いたときに一度だけ
+    // 試すだけで、既存のreload()自体は変更しない。
+    LaunchedEffect(Unit) {
+        runCatching { RoomCatalogSync.refreshAlbumCatalog(activity, repository) }
+        reload()
+    }
 
     val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {

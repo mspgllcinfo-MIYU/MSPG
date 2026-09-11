@@ -1,5 +1,6 @@
 package com.mspg.poicat
 
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.widget.Toast
@@ -41,6 +42,7 @@ import androidx.core.content.FileProvider
 import com.mspg.poicat.brain.toLocalDateTime
 import com.mspg.poicat.data.FileRepository
 import com.mspg.poicat.data.StoredFile
+import com.mspg.poicat.drive.RoomCatalogSync
 import java.io.File
 import kotlinx.coroutines.launch
 
@@ -63,6 +65,7 @@ private val FileGold = Color(0xFFC9A66B) // restrained accent, never a fill colo
 @Composable
 fun FileScreen(embedded: Boolean = false) {
     val context = LocalContext.current
+    val activity = context as Activity
     val scope = rememberCoroutineScope()
     val repository = remember { FileRepository(context.applicationContext) }
 
@@ -73,7 +76,12 @@ fun FileScreen(embedded: Boolean = false) {
         files = repository.all()
     }
 
-    LaunchedEffect(Unit) { reload() }
+    LaunchedEffect(Unit) {
+        // ルーム共有(4桁PIN)が有効な場合のみ、パートナー端末が共有Driveフォルダへ追加
+        // したファイルをローカルへ取り込む（ルーム未参加なら即noop）。
+        runCatching { RoomCatalogSync.refreshFileCatalog(activity, repository) }
+        reload()
+    }
 
     Column(
         modifier = Modifier

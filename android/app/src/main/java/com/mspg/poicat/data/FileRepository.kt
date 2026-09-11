@@ -51,6 +51,31 @@ class FileRepository(private val context: Context) {
 
     suspend fun all() = dao.all()
 
+    /** Saves bytes already downloaded from the shared Drive file folder (room-share catalog
+     * refresh) as a new local file — already marked SYNCED with the given [driveFileId] since
+     * it's already on Drive, so it's never re-uploaded from this device. Keeps the original
+     * [fileName]/[mimeType] exactly as reported by Drive, same as a locally-shared file. */
+    suspend fun importFromDrive(bytes: ByteArray, driveFileId: String, fileName: String, mimeType: String): StoredFile =
+        withContext(Dispatchers.IO) {
+            val destFile = File(
+                filesDirForShared,
+                "file_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(8)}_${sanitizeForFileName(fileName)}",
+            )
+            destFile.writeBytes(bytes)
+            val file = StoredFile(
+                filePath = destFile.absolutePath,
+                fileName = fileName,
+                mimeType = mimeType,
+                driveSyncStatus = StoredFile.DRIVE_SYNC_SYNCED,
+                driveFileId = driveFileId,
+            )
+            file.copy(id = dao.insert(file))
+        }
+
+    /** Whether a file with this Drive file id already exists locally — used to avoid
+     * re-importing the same shared-Drive file on every catalog refresh. */
+    suspend fun byDriveFileId(driveFileId: String) = dao.byDriveFileId(driveFileId)
+
     /** Marks a file's Drive sync state (PENDING/SYNCING/FAILED — see [markDriveSynced] for
      * the success case). A no-op if the file no longer exists (e.g. deleted mid-upload). */
     suspend fun markDriveSyncStatus(fileId: Long, status: String) = withContext(Dispatchers.IO) {

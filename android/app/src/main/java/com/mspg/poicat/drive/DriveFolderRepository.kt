@@ -16,6 +16,8 @@ data class DriveFolder(val id: String, val name: String)
 data class DriveUploadedFile(val id: String)
 /** アップロード後にDrive側へ問い合わせて実際に保存された内容を検証するための情報。 */
 data class DriveFileInfo(val id: String, val size: Long?, val mimeType: String?)
+/** [listFiles]が返す、フォルダ内の1ファイルのメタデータ（バイナリ本体は含まない）。 */
+data class DriveListedFile(val id: String, val name: String, val mimeType: String?)
 
 /**
  * 「POI用」配下フォルダ（アルバム/ファイル）へのアクセス方式。
@@ -128,6 +130,57 @@ object DriveFolderRepository {
                     size = if (obj.has("size")) obj.optString("size").toLongOrNull() else null,
                     mimeType = if (obj.has("mimeType")) obj.getString("mimeType") else null,
                 )
+            }
+        }
+
+    /**
+     * 指定フォルダ直下のファイル（サブフォルダは除く）一覧を取得する。ルーム共有
+     * （4桁PIN）機能が、パートナー端末が同じ共有Driveフォルダへアップロードした
+     * 写真/ファイルをこちら側のローカルRoom DBへも取り込むために使う — 取り込み済み
+     * かどうかの判定はこの一覧のidと、ローカル側に保存済みのdriveFileIdを比較して行う
+     * （呼び出し側の責務）。
+     */
+    suspend fun listFiles(accessToken: String, parentFolderId: String): Result<List<DriveListedFile>> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val query = "'${escapeQueryValue(parentFolderId)}' in parents and trashed=false " +
+                    "and mimeType != '$FOLDER_MIME'"
+                val url = "$API_BASE?q=${URLEncoder.encode(query, "UTF-8")}" +
+                    "&fields=${URLEncoder.encode("files(id,name,mimeType)", "UTF-8")}"
+                val response = request(url, "GET", accessToken, body = null)
+                val files = JSONObject(response).optJSONArray("files") ?: JSONArray()
+                (0 until files.length()).map { i ->
+                    val obj = files.getJSONObject(i)
+                    DriveListedFile(
+                        id = obj.getString("id"),
+                        name = obj.getString("name"),
+                        mimeType = if (obj.has("mimeType")) obj.getString("mimeType") else null,
+                    )
+                }
+            }
+        }
+
+    /** [fileId]の実バイトをダウンロードする（`alt=media`）。ルーム共有でパートナー端末が
+     * アップロードした写真/ファイルを、こちら側のローカルストレージへも保存するために使う。 */
+    suspend fun downloadFile(accessToken: String, fileId: String): Result<ByteArray> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val url = "$API_BASE/${URLEncoder.encode(fileId, "UTF-8")}?alt=media"
+                val connection = URL(url).openConnection() as HttpURLConnection
+                try {
+                    connection.connectTimeout = 20_000
+                    connection.readTimeout = 30_000
+                    connection.requestMethod = "GET"
+                    connection.setRequestProperty("Authorization", "Bearer $accessToken")
+                    val ok = connection.responseCode in 200..299
+                    check(ok) {
+                        val text = BufferedReader(InputStreamReader(connection.errorStream, Charsets.UTF_8)).use { it.readText() }
+                        "Drive download error ${connection.responseCode}: $text"
+                    }
+                    connection.inputStream.use { it.readBytes() }
+                } finally {
+                    connection.disconnect()
+                }
             }
         }
 

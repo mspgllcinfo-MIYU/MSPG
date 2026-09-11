@@ -7,6 +7,7 @@ import androidx.activity.compose.setContent
 import androidx.lifecycle.lifecycleScope
 import com.mspg.poicat.notify.ReminderWorker
 import com.mspg.poicat.notify.ensureNotificationChannel
+import com.mspg.poicat.room.RoomEventSync
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -16,6 +17,10 @@ class MainActivity : ComponentActivity() {
         ChatRepository.init(applicationContext)
         ensureNotificationChannel(applicationContext)
         ReminderWorker.schedule(applicationContext)
+        // ルーム未参加なら即noop（RoomEventSync.startListening内でチェック済み）。
+        // 参加済みならFirestoreのリアルタイムリスナーを起動し、パートナー端末側の
+        // 変更をローカルのcat_eventsへ反映する。
+        RoomEventSync.startListening(applicationContext)
         handleIncomingIntent(intent)
 
         setContent {

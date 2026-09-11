@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -30,6 +32,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mspg.poicat.auth.GoogleAuthManager
@@ -37,6 +40,11 @@ import com.mspg.poicat.drive.DriveConnectionStore
 import com.mspg.poicat.drive.DriveFolderRepository
 import com.mspg.poicat.drive.FileUploadDebug
 import com.mspg.poicat.drive.PhotoUploadDebug
+import com.mspg.poicat.room.NotSignedInException
+import com.mspg.poicat.room.RoomEventSync
+import com.mspg.poicat.room.RoomFullException
+import com.mspg.poicat.room.RoomManager
+import com.mspg.poicat.room.RoomStore
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -73,6 +81,7 @@ fun ConnectionScreen(onBack: () -> Unit) {
     val activity = context as Activity
     val scope = rememberCoroutineScope()
     val store = remember { DriveConnectionStore(context) }
+    val roomStore = remember { RoomStore(context) }
 
     var signedInEmail by remember { mutableStateOf(GoogleAuthManager.currentUserEmail()) }
     var albumFolderName by remember { mutableStateOf(store.albumFolderName) }
@@ -81,6 +90,40 @@ fun ConnectionScreen(onBack: () -> Unit) {
     var isBusy by remember { mutableStateOf(false) }
     var cachedAccessToken by remember { mutableStateOf<String?>(null) }
     var pendingTarget by remember { mutableStateOf<FolderTarget?>(null) }
+
+    var roomId by remember { mutableStateOf(roomStore.roomId) }
+    var pinInput by remember { mutableStateOf("") }
+    var roomStatusText by remember { mutableStateOf<String?>(null) }
+    var roomBusy by remember { mutableStateOf(false) }
+
+    fun joinRoom() {
+        val pin = pinInput.trim()
+        if (pin.length != 4 || pin.any { !it.isDigit() }) {
+            roomStatusText = "4桁の数字を入力してにゃ"
+            return
+        }
+        roomBusy = true
+        scope.launch {
+            try {
+                RoomManager.createOrJoinRoom(pin, roomStore.deviceId)
+                    .onSuccess { newRoomId ->
+                        roomStore.roomId = newRoomId
+                        roomId = newRoomId
+                        roomStatusText = "ルームに参加したにゃ"
+                        RoomEventSync.startListening(context.applicationContext)
+                    }
+                    .onFailure {
+                        roomStatusText = when (it) {
+                            is RoomFullException -> it.message
+                            is NotSignedInException -> it.message
+                            else -> "ルーム参加に失敗したにゃ：${it.message ?: it.javaClass.simpleName}"
+                        }
+                    }
+            } finally {
+                roomBusy = false
+            }
+        }
+    }
 
     // 「POI用」ルートフォルダの中に、選んだ対象名（アルバム/ファイル）の子フォルダを
     // 見つけるか無ければ作る。Picker/WebViewは一切使わない、純粋なREST呼び出し。
@@ -261,6 +304,44 @@ fun ConnectionScreen(onBack: () -> Unit) {
         statusText?.let { text ->
             Spacer(Modifier.height(16.dp))
             Text(text, color = ConnGold)
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        ConnectionCard(title = "夫婦でシェア（ルーム）") {
+            val currentRoomId = roomId
+            if (currentRoomId != null) {
+                Text("参加済み：このルームでPOI内データを共有中にゃ", color = ConnInk.copy(alpha = 0.7f))
+            } else {
+                Text(
+                    "4桁の番号を決めて、2台とも同じ番号を入力すると同じルームになるにゃ" +
+                        "（違う番号なら別のルーム）。1ルームにつき最大2台まで。",
+                    color = ConnInk.copy(alpha = 0.5f),
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = pinInput,
+                    onValueChange = { value -> pinInput = value.filter { it.isDigit() }.take(4) },
+                    label = { Text("4桁の番号") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    singleLine = true,
+                )
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = { joinRoom() },
+                    enabled = !roomBusy && signedInEmail != null,
+                    colors = ButtonDefaults.buttonColors(containerColor = ConnPink.copy(alpha = 0.25f), contentColor = ConnInk),
+                    shape = RoundedCornerShape(percent = 50),
+                ) { Text("ルームに参加する") }
+                if (signedInEmail == null) {
+                    Spacer(Modifier.height(4.dp))
+                    Text("先に上の「Googleでサインイン」が必要にゃ", color = ConnGold, fontSize = 12.sp)
+                }
+            }
+            roomStatusText?.let { text ->
+                Spacer(Modifier.height(8.dp))
+                Text(text, color = ConnGold)
+            }
         }
 
         // 一時的なデバッグ表示 — 「フォルダを接続する」がグレーアウトする原因を

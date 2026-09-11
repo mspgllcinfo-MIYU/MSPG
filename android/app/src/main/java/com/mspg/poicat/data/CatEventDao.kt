@@ -21,6 +21,16 @@ interface CatEventDao {
     @Query("SELECT * FROM cat_events WHERE isTask = 0 AND dateTime = :dateTime AND title = :title LIMIT 1")
     suspend fun findDuplicate(title: String, dateTime: Long): CatEvent?
 
+    /** Looks up a row by its room-sync id — used by [com.mspg.poicat.room.RoomEventSync] to
+     * find the local counterpart of a Firestore-side event. */
+    @Query("SELECT * FROM cat_events WHERE roomEventId = :roomEventId LIMIT 1")
+    suspend fun byRoomEventId(roomEventId: String): CatEvent?
+
+    /** Looks up a row by its local primary key — used after a first successful Firestore push
+     * to record the newly-assigned roomEventId back onto the row that triggered it. */
+    @Query("SELECT * FROM cat_events WHERE id = :id LIMIT 1")
+    suspend fun byId(id: Long): CatEvent?
+
     /** All dated schedule events (tasks excluded), soonest first. */
     @Query("SELECT * FROM cat_events WHERE isTask = 0 AND dateTime IS NOT NULL AND dateTime >= :from ORDER BY dateTime ASC")
     suspend fun upcoming(from: Long): List<CatEvent>

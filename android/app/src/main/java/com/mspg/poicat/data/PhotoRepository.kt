@@ -38,6 +38,24 @@ class PhotoRepository(private val context: Context) {
     /** A fresh, not-yet-existing file for the camera to write a capture into. */
     fun newCameraCaptureFile(): File = newPhotoFile()
 
+    /** Saves bytes already downloaded from the shared Drive album folder (room-share catalog
+     * refresh) as a new local photo — already marked SYNCED with the given [driveFileId] since
+     * it's already on Drive, so it's never re-uploaded from this device. */
+    suspend fun importFromDrive(bytes: ByteArray, driveFileId: String): Photo = withContext(Dispatchers.IO) {
+        val destFile = newPhotoFile()
+        destFile.writeBytes(bytes)
+        val photo = Photo(
+            filePath = destFile.absolutePath,
+            driveSyncStatus = Photo.DRIVE_SYNC_SYNCED,
+            driveFileId = driveFileId,
+        )
+        photo.copy(id = dao.insert(photo))
+    }
+
+    /** Whether a photo with this Drive file id already exists locally — used to avoid
+     * re-importing the same shared-Drive photo on every catalog refresh. */
+    suspend fun byDriveFileId(driveFileId: String) = dao.byDriveFileId(driveFileId)
+
     /** Saves a [Photo] row for a file the camera already wrote (see [newCameraCaptureFile]). */
     suspend fun registerCapturedFile(file: File, caption: String?, albumName: String?): Photo = withContext(Dispatchers.IO) {
         val photo = Photo(filePath = file.absolutePath, caption = caption, albumName = albumName)

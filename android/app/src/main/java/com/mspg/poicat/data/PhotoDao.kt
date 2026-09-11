@@ -32,6 +32,11 @@ interface PhotoDao {
     @Query("SELECT * FROM photos WHERE id IN (:ids) ORDER BY addedAt DESC")
     suspend fun byIds(ids: List<Long>): List<Photo>
 
+    /** Looks up a photo already known by its Drive file id — used by the room-share catalog
+     * refresh to skip a Drive file this device already has a local row for. */
+    @Query("SELECT * FROM photos WHERE driveFileId = :driveFileId LIMIT 1")
+    suspend fun byDriveFileId(driveFileId: String): Photo?
+
     /** Distinct album names in use, for the filter chips / picker. */
     @Query("SELECT DISTINCT albumName FROM photos WHERE albumName IS NOT NULL AND albumName != '' ORDER BY albumName ASC")
     suspend fun albumNames(): List<String>
