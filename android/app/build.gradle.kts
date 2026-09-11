@@ -16,12 +16,16 @@ android {
         versionCode = 1
         versionName = "0.2"
 
-        // マリたん(音声AI)用のGemini APIキーはVersion 2以降、APKへ一切埋め込まない
-        // (BuildConfigField経由の注入をやめた) — GitHub ReleaseでAPKをログイン不要
-        // 公開する方針になったため、デコンパイルで読み取れる形でキーをアプリ内に
-        // 持たせないよう、Cloudflare Worker(cloudflare/openai-proxy)経由でGeminiを
-        // 呼ぶ構成へ変更した。APIキーはWorkerのシークレットとしてのみ存在する
-        // (GeminiSearchService.kt参照)。
+        // マリたん(外部検索キャラクター)用のGemini APIキー。リポジトリには一切コミット
+        // しない — CI(GitHub Actions)がGEMINI_API_KEYというリポジトリシークレットを
+        // ORG_GRADLE_PROJECT_GEMINI_API_KEY環境変数として渡し、それをGradleが自動的に
+        // このプロジェクトプロパティとして読み込む。未設定の場合は空文字列のままビルドが
+        // 通り、アプリ側は空キーを「マリたん未設定」として扱う(クラッシュしない)。
+        buildConfigField(
+            "String",
+            "GEMINI_API_KEY",
+            "\"${project.findProperty("GEMINI_API_KEY") ?: ""}\"",
+        )
     }
 
     signingConfigs {

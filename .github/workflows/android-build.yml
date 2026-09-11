@@ -30,9 +30,14 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
 
-      # マリたん用Gemini APIキーはVersion 2以降APKへ一切埋め込まない(Cloudflare
-      # Worker経由に変更、GeminiSearchService.kt参照) — ビルドにキーは不要。
       - name: Build debug APK
+        env:
+          # マリたん用Gemini APIキー。リポジトリシークレットGEMINI_API_KEYが未設定の
+          # 場合は空文字列になり、ビルド自体は問題なく通る(アプリ側がキー未設定を
+          # 検出してマリたんを無効表示にするだけ)。ORG_GRADLE_PROJECT_接頭辞は
+          # Gradleがこの環境変数を自動的にプロジェクトプロパティGEMINI_API_KEYとして
+          # 読み込むための規約。
+          ORG_GRADLE_PROJECT_GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: ./gradlew assembleDebug --stacktrace
 
       - name: Upload debug APK
@@ -41,34 +46,6 @@ jobs:
           name: poicat-app-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-
-      # ログイン不要でAPKを配布するためのGitHub Releases公開。Actions Artifact
-      # (上のUpload debug APK)は90日で失効しGitHubログインが必要になるため、
-      # 旦那さんのGalaxy等、GitHubアカウントを持たない相手へも「同じURLを1本
-      # 送るだけ」で最新版を渡せるよう、公開リポジトリのGitHub Releaseへ
-      # APKを固定タグ"latest-apk"で毎回上書き公開する。開発中の作業ブランチ
-      # 等からの誤公開を避けるため、安定版ブランチ(claude/step-3-uouuf6)への
-      # pushの時だけ実行する。gh CLIはGitHub Actionsのubuntu-latestランナーに
-      # 標準搭載済みで、GH_TOKENにはこのジョブ自身のGITHUB_TOKEN(上のpermissions:
-      # contents: writeで書き込み許可済み)を使うため、新しいSecretの追加は不要。
-      # このAPKにはGemini APIキーが一切埋め込まれていない(Cloudflare Worker
-      # 経由に変更済み、GeminiSearchService.kt参照)ため、ログイン不要で公開
-      # しても秘密情報は漏洩しない。
-      - name: Publish latest APK to GitHub Release
-        if: github.ref == 'refs/heads/claude/step-3-uouuf6'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          cp app/build/outputs/apk/debug/app-debug.apk /tmp/POI.apk
-          NOTES="最新のPOI debug APKです。
-          commit ${{ github.sha }}
-          GitHub Actions Run #${{ github.run_number }}: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          if gh release view latest-apk --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            gh release upload latest-apk /tmp/POI.apk --repo "${{ github.repository }}" --clobber
-            gh release edit latest-apk --repo "${{ github.repository }}" --title "POI 最新版" --notes "$NOTES"
-          else
-            gh release create latest-apk /tmp/POI.apk --repo "${{ github.repository }}" --title "POI 最新版" --notes "$NOTES"
-          fi
 
       - name: Upload Room schema exports
         uses: actions/upload-artifact@v4

@@ -1,11 +1,12 @@
 package com.mspg.poicat.gemini
 
 import android.util.Log
-import com.mspg.poicat.auth.FirebaseAnonymousAuth
+import com.mspg.poicat.BuildConfig
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -21,60 +22,46 @@ sealed class GeminiOutcome {
      * 有料機能へ移行することは絶対にしない。 */
     object QuotaExceeded : GeminiOutcome()
 
-    /** Worker未設定、またはFirebase認証に失敗した場合。ネットワークには出ない
-     * (Worker未設定時)か、Gemini本体には到達しない(認証失敗時)。 */
+    /** APIキーが未設定(BuildConfig.GEMINI_API_KEYが空)。ネットワークには一切出ない。 */
     object NotConfigured : GeminiOutcome()
 }
 
 /**
- * マリたん専用のGemini呼び出し窓口。
+ * マリたん専用のGemini呼び出し窓口。DriveFolderRepositoryと同じ方針で、新規SDK依存
+ * (com.google.ai.client.generativeai等)は追加せず、HttpURLConnection + org.jsonの
+ * 素のREST呼び出しのみを使う — このプロジェクトは過去にFirebase BOMのKotlin
+ * メタデータ非互換でCIが壊れた経験があり、新しいSDKバージョンを増やすこと自体が
+ * リスクになるため。
  *
- * 【Version 2での変更: Gemini APIキーをAPKへ一切埋め込まない】
- * Version 1はBuildConfig.GEMINI_API_KEY経由でAPIキーをアプリへ直接埋め込み、
- * Gemini APIを直接呼んでいた。しかしAPKをGitHub Releaseでログイン不要公開する
- * 方針になったため、APKを入手した誰もがデコンパイルでキーを読み取れてしまう
- * 状態は許容できない。そのためVersion 2では、Cloudflare Worker
- * (cloudflare/openai-proxy、`/v1/gemini/generate`エンドポイント)を薄い中継
- * として経由する構成へ変更した:
- *
- *   マリたん(このクラス)
- *     --[Firebase IDトークンを添えてHTTPS]--> Cloudflare Worker
- *     --[Workerのシークレットとして保持するGEMINI_API_KEYを付与]--> Gemini API
- *
- * Gemini APIキー自体はWorkerのシークレットとしてのみ存在し、Androidアプリの
- * コード・APK・GitHubリポジトリのどこにも一切登場しない。認証は
- * [FirebaseAnonymousAuth]による匿名認証 — Google連携でのサインインは不要で、
- * アプリ起動時に自動的に済む。
- *
- * system_instruction/contentsの組み立て（キャラクター設定・Memory注入・回答の
- * 長さルール）は引き続きこのクラス(クライアント側)で行う — Cloudflare側の
- * 再デプロイ無しでマリたんの応答調整ができるようにするため。Workerは認証・
- * レート制限・APIキー注入だけを担当する薄いプロキシ。DriveFolderRepositoryと
- * 同じ方針で、新規SDK依存は追加せずHttpURLConnection + org.jsonの素のREST
- * 呼び出しのみを使う。
+ * 送信する内容は呼び出し元(MariTan UI)が渡した[query]（マリたんのマイクで今回
+ * 認識された音声テキストそのもの）だけ — 黒猫AIの会話履歴、仕事/プラベ/タスク/
+ * メモ/カレンダー/アルバム/ファイル/Google Drive/ルーム共有データ等、POI内部の
+ * 情報は一切含めない。固定のsystem_instruction（簡潔に日本語で答えるよう指示する
+ * だけの定型文）以外にAPIへ渡すものはない。
  *
  * Version 1ではGoogle Search Grounding(tools.google_search)を使わない: 実機と
  * GitHub Actions上でのA/Bテストで、全く同じキー/モデル/エンドポイントでも
  * grounding無し=HTTP 200成功、grounding有り=HTTP 429(RESOURCE_EXHAUSTED)が
  * 再現し、grounding機能自体の無料枠がこのプロジェクトでは極端に少ないことが
- * 確定した。Version 2でも変更なし(Worker側も`tools`を受け付けない)。
+ * 確定した。マリたんの最優先要件は「無料でできるだけ長く・多く会話できること」
+ * のため、Version 1では通常のテキスト生成のみを使い、天気/最新ニュース等の
+ * リアルタイム検索が要る質問への対応はVersion 2で別途検討する。
  */
 object GeminiSearchService {
-    // モデル選定方針は変更なし(gemini-3.5-flash-liteが無料枠15 RPMで最大)。
-    // ただしVersion 2ではモデル名自体もWorker側(wrangler.tomlのGEMINI_MODEL)で
-    // 固定しており、クライアントはモデルを指定しない(コスト管理・誤用防止のため)。
-
-    // TODO: Cloudflare Workerを実際にデプロイした後、あなたのアカウントの
-    // サブドメインへ差し替えてください(cloudflare/openai-proxy/README.md参照)。
-    // Worker URL自体は秘密情報ではありません(Firebase IDトークン無しではWorker
-    // が401で弾くため) — ソースコードに書いても問題ありません。
-    private const val WORKER_BASE_URL = "https://poicat-openai-proxy.YOUR-SUBDOMAIN.workers.dev"
-    private const val UNCONFIGURED_MARKER = "YOUR-SUBDOMAIN"
-
-    // 性格(知的で好奇心旺盛、猫らしい親しみやすい口調)は変更していない —
-    // ユーザーが気に入っている「ちょっとおしゃべりでアホ可愛い」雰囲気はこの
-    // 一文が生み出しているため、そのまま維持し、回答の長さだけを発話内容に
-    // 応じて使い分けるルールを追記してある。
+    // モデル選定方針: マリたんの最優先要件は「性能」ではなく「できるだけ長時間・
+    // 多くの回数を無料で会話できること」。ユーザーがGoogle AI Studioの
+    // 「Gemini API のレート制限」画面(Project: MIYUxAI、無料枠)で実際に確認した
+    // 値では、gemini-3.6-flashの無料枠は5 RPMだったのに対し、
+    // gemini-3.5-flash-liteは15 RPM — 同じFlash系列の中で最も無料枠が大きい
+    // （軽量="Lite"な分、上限が緩い）。通常会話・一般的な質問には十分な性能と
+    // 判断し、無料での会話可能回数を最優先してこちらを使う。将来また変わった
+    // 場合はこの定数だけを差し替えれば良い。
+    private const val MODEL = "gemini-3.5-flash-lite"
+    private const val API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+    // 性格(知的で好奇心旺盛、猫らしい親しみやすい口調)はVersion 1から変更していない
+    // — ユーザーが気に入っている「ちょっとおしゃべりでアホ可愛い」雰囲気はこの
+    // 一文が生み出しているため、ここは変えずに、回答の長さだけを発話内容に応じて
+    // 使い分けるルールを追記した。
     private const val SYSTEM_INSTRUCTION =
         "あなたは「マリたん」という知的で好奇心旺盛なキジ猫です。日本語で、猫らしい" +
             "親しみやすい口調で答えてください。" +
@@ -90,10 +77,10 @@ object GeminiSearchService {
 
     suspend fun ask(query: String, memories: List<String> = emptyList()): Result<GeminiOutcome> = withContext(Dispatchers.IO) {
         runCatching {
-            if (WORKER_BASE_URL.contains(UNCONFIGURED_MARKER)) return@runCatching GeminiOutcome.NotConfigured
-
-            val idToken = FirebaseAnonymousAuth.currentIdToken()
-            if (idToken.isNullOrBlank()) return@runCatching GeminiOutcome.NotConfigured
+            // GitHub Actions Secretの値がコピペ等で前後に空白/改行を含んでいた場合に
+            // URLが壊れないよう防御的にtrimする。
+            val apiKey = BuildConfig.GEMINI_API_KEY.trim()
+            if (apiKey.isBlank()) return@runCatching GeminiOutcome.NotConfigured
 
             // マリたん専用Memory(「覚えて」で保存された分のみ、MariTanMemoryStore経由)を
             // 必要な範囲でsystem_instructionへ追記する。黒猫AIの会話履歴やPOI内の他の
@@ -119,17 +106,18 @@ object GeminiSearchService {
                         },
                     ),
                 )
-                // toolsは付けない(Google Search Grounding封じ) — クラスコメント参照。
+                // Version 1ではGoogle Search Grounding(tools.google_search)を使わない
+                // — grounding機能自体の無料枠が別枠かつ極端に少なく、A/Bテストで
+                // 429の直接原因と確定したため。クラスコメント参照。
             }
 
-            val url = "$WORKER_BASE_URL/v1/gemini/generate"
+            val url = "$API_BASE/$MODEL:generateContent?key=${URLEncoder.encode(apiKey, "UTF-8")}"
             val connection = URL(url).openConnection() as HttpURLConnection
             try {
                 connection.connectTimeout = 15_000
                 connection.readTimeout = 30_000
                 connection.requestMethod = "POST"
                 connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-                connection.setRequestProperty("Authorization", "Bearer $idToken")
                 connection.doOutput = true
                 connection.outputStream.use { it.write(requestBody.toString().toByteArray(Charsets.UTF_8)) }
 
@@ -143,8 +131,8 @@ object GeminiSearchService {
                     if (responseCode == 429) return@runCatching GeminiOutcome.QuotaExceeded
                     // 一般ユーザー画面には出さないが、実機調査が要る場合はlogcat
                     // (タグ: MariTanGemini)で追える。
-                    Log.w(TAG, "Gemini proxy error $responseCode: $text")
-                    error("Gemini proxy error $responseCode")
+                    Log.w(TAG, "Gemini API error $responseCode: $text")
+                    error("Gemini API error $responseCode")
                 }
 
                 GeminiOutcome.Answer(text = extractAnswerText(text))

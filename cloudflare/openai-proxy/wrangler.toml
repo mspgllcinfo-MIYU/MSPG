@@ -2,22 +2,14 @@ name = "poicat-openai-proxy"
 main = "src/index.ts"
 compatibility_date = "2024-11-01"
 
-# OPENAI_API_KEY / GEMINI_API_KEY are intentionally NOT set here.
-# They are stored as encrypted Worker secrets:
+# OPENAI_API_KEY is intentionally NOT set here.
+# It is stored as an encrypted Worker secret:
 #   wrangler secret put OPENAI_API_KEY
-#   wrangler secret put GEMINI_API_KEY
 [vars]
-# 実際にPOI Androidアプリが使っているFirebaseプロジェクト(google-services.json
-# のproject_id)に合わせた値。以前は別プロジェクト("miyuki-neko-ai")のIDが
-# 入っており、このままではIDトークン検証(issuer/audience)が必ず失敗していた。
-FIREBASE_PROJECT_ID = "miyuxai"
+FIREBASE_PROJECT_ID = "miyuki-neko-ai"
 ALLOWED_MODELS = "gpt-4o-mini"
 MAX_TOKENS_LIMIT = "1024"
 RATE_LIMIT_PER_MINUTE = "20"
-# マリたん(/v1/gemini/generate)専用の設定。クライアント側でモデルを選ばせず、
-# ここで固定する(無料枠が最大のモデルを維持しやすくするため)。
-GEMINI_MODEL = "gemini-3.5-flash-lite"
-GEMINI_RATE_LIMIT_PER_MINUTE = "15"
 
 # Created via the Cloudflare Dashboard (Storage & Databases > KV).
 [[kv_namespaces]]
