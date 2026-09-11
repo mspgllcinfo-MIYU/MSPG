@@ -1,0 +1,32 @@
+name: Gemini API Diagnostic (temporary)
+
+# POIアプリ(Android)を一切介さず、GEMINI_API_KEYで直接Gemini APIへ最小構成の
+# リクエストを1回投げるだけの、一時的な原因切り分け用ワークフロー。
+# アプリのコード・モデル選定・課金設定には一切触れない。
+# 原因判明後、このファイルは削除する。
+#
+# workflow_dispatchのみで、pushでは動かない — android-build.ymlの動作には
+# 一切影響しない。
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Gemini API directly (isolated from the Android app)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          set -e
+          http_code=$(curl -s -o /tmp/response.json -w "%{http_code}" \
+            -X POST \
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GEMINI_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"contents":[{"parts":[{"text":"こんにちは"}]}]}')
+          echo "HTTP_STATUS=${http_code}"
+          echo "---- response body ----"
+          cat /tmp/response.json
+          echo ""
+          echo "---- end response body ----"
