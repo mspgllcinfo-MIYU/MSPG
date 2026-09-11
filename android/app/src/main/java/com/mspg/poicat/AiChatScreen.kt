@@ -63,8 +63,13 @@ import com.mspg.poicat.brain.toEpochMilli
 import com.mspg.poicat.data.CatEventRepository
 import com.mspg.poicat.data.Photo
 import com.mspg.poicat.data.PhotoRepository
+import com.mspg.poicat.gemini.ExternalAiLauncher
+import com.mspg.poicat.gemini.ForgetResult
 import com.mspg.poicat.gemini.GeminiOutcome
 import com.mspg.poicat.gemini.GeminiSearchService
+import com.mspg.poicat.gemini.MariTanMemoryStore
+import com.mspg.poicat.gemini.extractForgetQuery
+import com.mspg.poicat.gemini.extractRememberContent
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -401,6 +406,20 @@ private enum class MariTanState { IDLE, LISTENING, THINKING, SPEAKING, SULKING, 
  * ため — [GeminiSearchService]参照）。無料での会話可能時間・回数を最優先し、
  * 天気/最新ニュース等のリアルタイム検索が要る質問への対応はVersion 2で検討する。
  *
+ * 音声認識結果は、Geminiへ送る前にまずローカルだけで3種類の意図を判定する
+ * （いずれもGemini APIを呼ばない — 無料枠の消費を増やさないための設計）:
+ * 1. 外部AIアプリの起動依頼（[ExternalAiLauncher]） — 「ChatGPT」「Gemini」等の
+ *    キーワードを検出したらAndroid Intentで該当アプリを起動するだけ。ChatGPT/
+ *    Gemini APIをPOI内部へ新たに組み込むものではなく、起動後の会話内容も
+ *    POIは一切取得・保存・監視しない。
+ * 2. 「覚えて」依頼（[extractRememberContent]） — マリたん専用Memory
+ *    （[MariTanMemoryStore]、黒猫AIの会話履歴とは別ファイル）へ、発言内容のみを
+ *    追加保存する。全会話を自動保存することはしない。
+ * 3. 「忘れて」依頼（[extractForgetQuery]） — 文字bigramの近さで最も一致する
+ *    記憶を1件だけ削除する。候補が複数で曖昧な場合は何も削除しない。
+ * いずれにも該当しない場合のみ、通常のGemini質問として扱い、保存済みMemoryを
+ * （件数上限つきで）system_instructionへ添えて送る。
+ *
  * 無料枠を使い切った場合(HTTP 429)はSULKING状態にするだけで、課金機能への自動
  * 移行は一切行わない。Gemini呼び出し自体が失敗した場合もERROR状態を短く見せる
  * だけで、詳細なエラー内容は画面に出さない（実機調査が要る場合はlogcatの
@@ -471,17 +490,55 @@ private fun MariTanRow() {
         if (text.isNullOrBlank()) {
             state = MariTanState.IDLE
         } else {
-            state = MariTanState.THINKING
-            scope.launch {
-                val outcome = GeminiSearchService.ask(text)
-                when (val answer = outcome.getOrNull()) {
-                    is GeminiOutcome.Answer -> {
+            // Gemini APIを呼ぶ前に、ローカルだけで判定できる3種類の意図を優先的に
+            // 処理する（クラス冒頭のコメント参照）。
+            val appTarget = ExternalAiLauncher.detectTarget(text)
+            val rememberContent = extractRememberContent(text)
+            val forgetQuery = extractForgetQuery(text)
+            when {
+                appTarget != null -> {
+                    val launched = ExternalAiLauncher.launch(context.applicationContext, appTarget)
+                    val appName = ExternalAiLauncher.displayName(appTarget)
+                    val reply = if (launched) "${appName}を開くにゃ" else "${appName}が見つからないにゃ"
+                    state = MariTanState.SPEAKING
+                    speak(reply) { state = MariTanState.IDLE }
+                }
+                rememberContent != null -> {
+                    state = MariTanState.THINKING
+                    scope.launch {
+                        MariTanMemoryStore.remember(context.applicationContext, rememberContent)
                         state = MariTanState.SPEAKING
-                        speak(answer.text) { state = MariTanState.IDLE }
+                        speak("覚えたにゃ♡") { state = MariTanState.IDLE }
                     }
-                    GeminiOutcome.QuotaExceeded -> state = MariTanState.SULKING
-                    GeminiOutcome.NotConfigured -> state = MariTanState.NOT_CONFIGURED
-                    null -> state = MariTanState.ERROR
+                }
+                forgetQuery != null -> {
+                    state = MariTanState.THINKING
+                    scope.launch {
+                        val result = MariTanMemoryStore.forget(context.applicationContext, forgetQuery)
+                        val reply = when (result) {
+                            is ForgetResult.Removed -> "忘れたにゃ"
+                            ForgetResult.Ambiguous -> "どれのことか分からなかったにゃ…もう少し詳しく言ってほしいにゃ"
+                            ForgetResult.NotFound, ForgetResult.NothingStored -> "そんなこと覚えてないにゃ"
+                        }
+                        state = MariTanState.SPEAKING
+                        speak(reply) { state = MariTanState.IDLE }
+                    }
+                }
+                else -> {
+                    state = MariTanState.THINKING
+                    scope.launch {
+                        val memories = MariTanMemoryStore.all(context.applicationContext).map { it.text }
+                        val outcome = GeminiSearchService.ask(text, memories)
+                        when (val answer = outcome.getOrNull()) {
+                            is GeminiOutcome.Answer -> {
+                                state = MariTanState.SPEAKING
+                                speak(answer.text) { state = MariTanState.IDLE }
+                            }
+                            GeminiOutcome.QuotaExceeded -> state = MariTanState.SULKING
+                            GeminiOutcome.NotConfigured -> state = MariTanState.NOT_CONFIGURED
+                            null -> state = MariTanState.ERROR
+                        }
+                    }
                 }
             }
         }

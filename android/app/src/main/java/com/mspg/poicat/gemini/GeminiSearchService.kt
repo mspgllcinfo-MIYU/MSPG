@@ -62,17 +62,27 @@ object GeminiSearchService {
         "あなたは「マリたん」という知的で好奇心旺盛なキジ猫です。ユーザーの質問に対して" +
             "簡潔に（3〜4文程度まで）日本語で、猫らしい親しみやすい口調で答えてください。"
 
-    suspend fun ask(query: String): Result<GeminiOutcome> = withContext(Dispatchers.IO) {
+    suspend fun ask(query: String, memories: List<String> = emptyList()): Result<GeminiOutcome> = withContext(Dispatchers.IO) {
         runCatching {
             // GitHub Actions Secretの値がコピペ等で前後に空白/改行を含んでいた場合に
             // URLが壊れないよう防御的にtrimする。
             val apiKey = BuildConfig.GEMINI_API_KEY.trim()
             if (apiKey.isBlank()) return@runCatching GeminiOutcome.NotConfigured
 
+            // マリたん専用Memory(「覚えて」で保存された分のみ、MariTanMemoryStore経由)を
+            // 必要な範囲でsystem_instructionへ追記する。黒猫AIの会話履歴やPOI内の他の
+            // データは一切含めない。件数はMariTanMemoryStore側でMAX_MEMORIES件に上限
+            // されているため、ここで際限なく肥大化することはない。
+            val systemInstructionText = if (memories.isEmpty()) {
+                SYSTEM_INSTRUCTION
+            } else {
+                SYSTEM_INSTRUCTION + "\n\nユーザーについて覚えていること:\n・" + memories.joinToString("\n・")
+            }
+
             val requestBody = JSONObject().apply {
                 put(
                     "system_instruction",
-                    JSONObject().put("parts", JSONArray().put(JSONObject().put("text", SYSTEM_INSTRUCTION))),
+                    JSONObject().put("parts", JSONArray().put(JSONObject().put("text", systemInstructionText))),
                 )
                 put(
                     "contents",
