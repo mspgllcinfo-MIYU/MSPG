@@ -420,7 +420,13 @@ private fun MariTanRow() {
                         )
                         MariTanState.IDLE
                     }
-                    GeminiOutcome.QuotaExceeded -> MariTanState.SULKING
+                    is GeminiOutcome.QuotaExceeded -> {
+                        // 429の実際のレスポンス本文(error.message/status/details等)を
+                        // そのまま表示する — 「短時間レート制限」「日次無料枠」
+                        // 「モデル固有クォータ」のどれかを推測せず実機で特定するため。
+                        lastErrorDetail = answer.detail
+                        MariTanState.SULKING
+                    }
                     GeminiOutcome.NotConfigured -> MariTanState.NOT_CONFIGURED
                     null -> {
                         val e = outcome.exceptionOrNull()
@@ -479,9 +485,9 @@ private fun MariTanRow() {
                 MariTanState.IDLE -> "マリたん：タップして話しかけてにゃ（外部を調べる担当）"
                 MariTanState.LISTENING -> "マリたん：聞いてるにゃ…"
                 MariTanState.THINKING -> "マリたん：調べてるにゃ…"
-                MariTanState.SULKING -> "マリたん：今日はもう調べられないにゃ…（ふて寝中）"
-                MariTanState.NOT_CONFIGURED -> "マリたん：まだ準備中にゃ"
                 // 一時的デバッグ: 原因判明後はlastErrorDetailの付与をやめる。
+                MariTanState.SULKING -> "マリたん：今日はもう調べられないにゃ…（ふて寝中）\n（デバッグ: ${lastErrorDetail ?: "詳細不明"}）"
+                MariTanState.NOT_CONFIGURED -> "マリたん：まだ準備中にゃ"
                 MariTanState.ERROR -> "マリたん：うまく聞こえなかったにゃ\n（デバッグ: ${lastErrorDetail ?: "詳細不明"}）"
             },
             fontSize = 12.sp,

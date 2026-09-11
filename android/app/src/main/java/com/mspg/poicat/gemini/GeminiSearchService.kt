@@ -16,8 +16,12 @@ sealed class GeminiOutcome {
     data class Answer(val text: String) : GeminiOutcome()
 
     /** 無料枠を使い切った(HTTP 429)。マリたんを「ふて寝」状態にする合図 — 自動的に
-     * 有料機能へ移行することは絶対にしない。 */
-    object QuotaExceeded : GeminiOutcome()
+     * 有料機能へ移行することは絶対にしない。[detail]はGoogleが返した429レスポンス
+     * 本文そのもの（error.message/status/details.quotaMetric/quotaId/retryDelay等）
+     * — 「短時間レート制限」「日次無料枠」「モデル固有クォータ」のどれかを推測せず
+     * 特定するための一時的な項目。原因確定後はUI側の表示だけ削除する予定（このデータ
+     * 自体はデバッグに有用なので残してもよい）。 */
+    data class QuotaExceeded(val detail: String) : GeminiOutcome()
 
     /** APIキーが未設定(BuildConfig.GEMINI_API_KEYが空)。ネットワークには一切出ない。 */
     object NotConfigured : GeminiOutcome()
@@ -95,7 +99,7 @@ object GeminiSearchService {
                     ?: "(no response body)"
 
                 if (!ok) {
-                    if (responseCode == 429) return@runCatching GeminiOutcome.QuotaExceeded
+                    if (responseCode == 429) return@runCatching GeminiOutcome.QuotaExceeded(text)
                     error("Gemini API error $responseCode: $text")
                 }
 
