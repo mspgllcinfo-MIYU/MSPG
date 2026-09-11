@@ -154,13 +154,14 @@ fun HomeScreen(onNavigate: (AppTab) -> Unit, onOpenAlbum: () -> Unit, onOpenConn
                 Text("写真を見る・追加する", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
-            Spacer(Modifier.height(12.dp))
-
-            // Phase 3: Googleサインイン＋Driveフォルダ接続の入り口。BottomNavのタブには
-            // せず、他のセクションと同じ「タップして別画面へ」の導線に揃えている。
-            HomeSection(title = "Google連携", onClick = onOpenConnectionSettings) {
-                Text("サインイン・Driveフォルダの接続", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            // 「Google連携」の入り口(HomeSection)はホーム画面から非表示にした
+            // (ユーザー指示) — ConnectionScreen自体・onOpenConnectionSettingsの配線
+            // ([AppRoot]側)は変更していないため、必要になれば下の1ブロックを
+            // 元に戻すだけで復活できる:
+            // Spacer(Modifier.height(12.dp))
+            // HomeSection(title = "Google連携", onClick = onOpenConnectionSettings) {
+            //     Text("サインイン・Driveフォルダの接続", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // }
         }
 
         Spacer(Modifier.height(20.dp))
