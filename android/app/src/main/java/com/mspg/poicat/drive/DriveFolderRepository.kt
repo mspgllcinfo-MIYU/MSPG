@@ -5,6 +5,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
+import java.io.ByteArrayOutputStream
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
@@ -13,6 +14,8 @@ import java.net.URLEncoder
 
 data class DriveFolder(val id: String, val name: String)
 data class DriveUploadedFile(val id: String)
+/** アップロード後にDrive側へ問い合わせて実際に保存された内容を検証するための情報。 */
+data class DriveFileInfo(val id: String, val size: Long?, val mimeType: String?)
 
 /**
  * 「POI用」配下フォルダ（アルバム/ファイル）へのアクセス方式。
@@ -55,6 +58,11 @@ object DriveFolderRepository {
      * を1リクエストで送る標準的なDrive v3アップロード方式）。ensureFolderで作成/取得
      * した「POI用/アルバム」「POI用/ファイル」フォルダはアプリ自身が作成したものなので
      * drive.fileスコープのまま子ファイルの作成が許可されている。
+     *
+     * 本文（metadata部＋バイナリ部）は送信前にByteArrayへ丸ごと組み立ててから
+     * setFixedLengthStreamingMode()で送る — outputStreamへ書き込みながら送る方式だと
+     * Content-Lengthが実際に送ったバイト数と食い違っていても気づけないため、事前に
+     * 全体サイズを確定させてHttpURLConnection側にも明示的に伝える。
      */
     suspend fun uploadFile(
         accessToken: String,
@@ -67,8 +75,18 @@ object DriveFolderRepository {
             val boundary = "poicat-${System.currentTimeMillis()}"
             val metadata = JSONObject().apply {
                 put("name", displayName)
+                put("mimeType", mimeType)
                 put("parents", JSONArray().put(parentFolderId))
             }
+            val body = ByteArrayOutputStream().apply {
+                write("--$boundary\r\n".toByteArray(Charsets.UTF_8))
+                write("Content-Type: application/json; charset=UTF-8\r\n\r\n".toByteArray(Charsets.UTF_8))
+                write(metadata.toString().toByteArray(Charsets.UTF_8))
+                write("\r\n--$boundary\r\n".toByteArray(Charsets.UTF_8))
+                write("Content-Type: $mimeType\r\n\r\n".toByteArray(Charsets.UTF_8))
+                write(bytes)
+                write("\r\n--$boundary--\r\n".toByteArray(Charsets.UTF_8))
+            }.toByteArray()
             val url = "https://www.googleapis.com/upload/drive/v3/files" +
                 "?uploadType=multipart&fields=${URLEncoder.encode("id", "UTF-8")}"
             val connection = URL(url).openConnection() as HttpURLConnection
@@ -80,15 +98,8 @@ object DriveFolderRepository {
                 connection.setRequestProperty("Authorization", "Bearer $accessToken")
                 connection.setRequestProperty("Content-Type", "multipart/related; boundary=$boundary")
                 connection.doOutput = true
-                connection.outputStream.use { out ->
-                    out.write("--$boundary\r\n".toByteArray(Charsets.UTF_8))
-                    out.write("Content-Type: application/json; charset=UTF-8\r\n\r\n".toByteArray(Charsets.UTF_8))
-                    out.write(metadata.toString().toByteArray(Charsets.UTF_8))
-                    out.write("\r\n--$boundary\r\n".toByteArray(Charsets.UTF_8))
-                    out.write("Content-Type: $mimeType\r\n\r\n".toByteArray(Charsets.UTF_8))
-                    out.write(bytes)
-                    out.write("\r\n--$boundary--".toByteArray(Charsets.UTF_8))
-                }
+                connection.setFixedLengthStreamingMode(body.size)
+                connection.outputStream.use { out -> out.write(body) }
                 val ok = connection.responseCode in 200..299
                 val stream = if (ok) connection.inputStream else connection.errorStream
                 val text = BufferedReader(InputStreamReader(stream, Charsets.UTF_8)).use { it.readText() }
@@ -99,6 +110,26 @@ object DriveFolderRepository {
             }
         }
     }
+
+    /**
+     * アップロード後の検証専用。fileIdが返っただけでは中身が正しく保存された保証には
+     * ならないため、Drive側が実際に記録したsize/mimeTypeを問い合わせ、呼び出し側で
+     * ローカルの元バイト数と突き合わせる。
+     */
+    suspend fun getFileInfo(accessToken: String, fileId: String): Result<DriveFileInfo> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val url = "$API_BASE/${URLEncoder.encode(fileId, "UTF-8")}" +
+                    "?fields=${URLEncoder.encode("id,size,mimeType", "UTF-8")}"
+                val response = request(url, "GET", accessToken, body = null)
+                val obj = JSONObject(response)
+                DriveFileInfo(
+                    id = obj.getString("id"),
+                    size = if (obj.has("size")) obj.optString("size").toLongOrNull() else null,
+                    mimeType = if (obj.has("mimeType")) obj.getString("mimeType") else null,
+                )
+            }
+        }
 
     private fun findFolder(accessToken: String, name: String, parentId: String?): DriveFolder? {
         val query = buildString {
