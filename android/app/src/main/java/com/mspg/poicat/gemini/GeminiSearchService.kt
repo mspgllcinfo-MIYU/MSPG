@@ -37,10 +37,12 @@ sealed class GeminiOutcome {
  * だけの定型文）以外にAPIへ渡すものはない。
  */
 object GeminiSearchService {
-    // 2026年時点で現行のFlash系モデル。costとレイテンシのバランスを優先し、
-    // Google Search grounding(tools.google_search)に対応したモデルを選んでいる。
-    // 将来モデル名が変わった場合はこの定数だけを差し替えれば良い。
-    private const val MODEL = "gemini-2.5-flash"
+    // 実機デバッグで判明した実際のAPIエラー(HTTP 404)より: "models/gemini-2.5-flash
+    // is no longer available to new users. Please update your code to use
+    // models/gemini-3.6-flash" — Google側の案内に従い、推測ではなくこのエラー
+    // メッセージが直接指定したモデルIDへ切り替えた。将来また変わった場合は
+    // この定数だけを差し替えれば良い。
+    private const val MODEL = "gemini-3.6-flash"
     private const val API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
     private const val SYSTEM_INSTRUCTION =
         "あなたは「マリたん」という知的で好奇心旺盛なキジ猫です。ユーザーの質問について" +
