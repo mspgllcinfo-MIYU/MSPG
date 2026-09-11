@@ -12,6 +12,7 @@ import java.net.URL
 import java.net.URLEncoder
 
 data class DriveFolder(val id: String, val name: String)
+data class DriveUploadedFile(val id: String)
 
 /**
  * 「POI用」配下フォルダ（アルバム/ファイル）へのアクセス方式。
@@ -48,6 +49,56 @@ object DriveFolderRepository {
                 findFolder(accessToken, name, parentId) ?: createFolder(accessToken, name, parentId)
             }
         }
+
+    /**
+     * 指定フォルダへファイルを1つアップロードする（multipart/related、metadata+content
+     * を1リクエストで送る標準的なDrive v3アップロード方式）。ensureFolderで作成/取得
+     * した「POI用/アルバム」「POI用/ファイル」フォルダはアプリ自身が作成したものなので
+     * drive.fileスコープのまま子ファイルの作成が許可されている。
+     */
+    suspend fun uploadFile(
+        accessToken: String,
+        parentFolderId: String,
+        displayName: String,
+        mimeType: String,
+        bytes: ByteArray,
+    ): Result<DriveUploadedFile> = withContext(Dispatchers.IO) {
+        runCatching {
+            val boundary = "poicat-${System.currentTimeMillis()}"
+            val metadata = JSONObject().apply {
+                put("name", displayName)
+                put("parents", JSONArray().put(parentFolderId))
+            }
+            val url = "https://www.googleapis.com/upload/drive/v3/files" +
+                "?uploadType=multipart&fields=${URLEncoder.encode("id", "UTF-8")}"
+            val connection = URL(url).openConnection() as HttpURLConnection
+            try {
+                // アップロードはメタデータ取得系のAPIより時間がかかりうるため、少し長めに取る。
+                connection.connectTimeout = 20_000
+                connection.readTimeout = 30_000
+                connection.requestMethod = "POST"
+                connection.setRequestProperty("Authorization", "Bearer $accessToken")
+                connection.setRequestProperty("Content-Type", "multipart/related; boundary=$boundary")
+                connection.doOutput = true
+                connection.outputStream.use { out ->
+                    out.write("--$boundary\r\n".toByteArray(Charsets.UTF_8))
+                    out.write("Content-Type: application/json; charset=UTF-8\r\n\r\n".toByteArray(Charsets.UTF_8))
+                    out.write(metadata.toString().toByteArray(Charsets.UTF_8))
+                    out.write("\r\n--$boundary\r\n".toByteArray(Charsets.UTF_8))
+                    out.write("Content-Type: $mimeType\r\n\r\n".toByteArray(Charsets.UTF_8))
+                    out.write(bytes)
+                    out.write("\r\n--$boundary--".toByteArray(Charsets.UTF_8))
+                }
+                val ok = connection.responseCode in 200..299
+                val stream = if (ok) connection.inputStream else connection.errorStream
+                val text = BufferedReader(InputStreamReader(stream, Charsets.UTF_8)).use { it.readText() }
+                check(ok) { "Drive upload error ${connection.responseCode}: $text" }
+                DriveUploadedFile(id = JSONObject(text).getString("id"))
+            } finally {
+                connection.disconnect()
+            }
+        }
+    }
 
     private fun findFolder(accessToken: String, name: String, parentId: String?): DriveFolder? {
         val query = buildString {

@@ -63,6 +63,20 @@ class PhotoRepository(private val context: Context) {
         dao.update(photo.copy(caption = caption, albumName = albumName, linkedDate = linkedDate))
     }
 
+    /** Marks a photo's Drive sync state (PENDING/SYNCING/FAILED — see [markDriveSynced] for
+     * the success case). A no-op if the photo no longer exists (e.g. deleted mid-upload). */
+    suspend fun markDriveSyncStatus(photoId: Long, status: String) = withContext(Dispatchers.IO) {
+        val photo = dao.byIds(listOf(photoId)).firstOrNull() ?: return@withContext
+        dao.update(photo.copy(driveSyncStatus = status))
+    }
+
+    /** Records a successful Drive upload's file id, so a later sync attempt for the same
+     * photo can recognize it's already there instead of uploading a duplicate. */
+    suspend fun markDriveSynced(photoId: Long, driveFileId: String) = withContext(Dispatchers.IO) {
+        val photo = dao.byIds(listOf(photoId)).firstOrNull() ?: return@withContext
+        dao.update(photo.copy(driveSyncStatus = Photo.DRIVE_SYNC_SYNCED, driveFileId = driveFileId))
+    }
+
     /** Photos linked to a memo (any cat_events row), newest-added first — for the memo screen's photo strip. */
     suspend fun photosForMemo(eventId: Long): List<Photo> {
         val ids = linkDao.linksForEvent(eventId).map { it.photoId }

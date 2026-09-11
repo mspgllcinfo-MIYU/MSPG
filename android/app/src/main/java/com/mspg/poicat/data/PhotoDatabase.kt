@@ -13,7 +13,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * means adding or changing the photo schema can never require a migration
  * of — or risk any damage to — the data already stored in `cat_events`.
  */
-@Database(entities = [Photo::class, PhotoMemoLink::class], version = 3, exportSchema = true)
+@Database(entities = [Photo::class, PhotoMemoLink::class], version = 4, exportSchema = true)
 abstract class PhotoDatabase : RoomDatabase() {
     abstract fun photoDao(): PhotoDao
     abstract fun photoMemoLinkDao(): PhotoMemoLinkDao
@@ -38,6 +38,18 @@ abstract class PhotoDatabase : RoomDatabase() {
         // back to a destructive recreate for this one jump only resets the *photo*
         // database (photos/albums/calendar-links/memo-links) — cat_events (schedules,
         // memos, tasks) is a completely separate database untouched by this.
+
+        // v3 -> v4: added Photo.driveSyncStatus/driveFileId (Google Drive upload tracking).
+        // Two additive ADD COLUMNs, so every existing photo/album from v3 is kept exactly
+        // as-is — driveSyncStatus simply starts out "PENDING" (never auto-retried; only
+        // newly-added photos going forward trigger an upload attempt) and driveFileId NULL.
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE photos ADD COLUMN driveSyncStatus TEXT NOT NULL DEFAULT 'PENDING'")
+                db.execSQL("ALTER TABLE photos ADD COLUMN driveFileId TEXT")
+            }
+        }
+
         fun get(context: Context): PhotoDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -45,7 +57,7 @@ abstract class PhotoDatabase : RoomDatabase() {
                     PhotoDatabase::class.java,
                     "poicat_photos.db",
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_3_4)
                     .fallbackToDestructiveMigration()
                     .build().also { instance = it }
             }

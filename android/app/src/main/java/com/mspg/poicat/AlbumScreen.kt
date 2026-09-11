@@ -1,6 +1,7 @@
 package com.mspg.poicat
 
 import android.Manifest
+import android.app.Activity
 import android.app.DatePickerDialog
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
@@ -67,6 +68,7 @@ import com.mspg.poicat.brain.toEpochMilli
 import com.mspg.poicat.brain.toLocalDate
 import com.mspg.poicat.data.Photo
 import com.mspg.poicat.data.PhotoRepository
+import com.mspg.poicat.drive.PhotoDriveSync
 import java.io.File
 import java.time.LocalDate
 import kotlinx.coroutines.Dispatchers
@@ -102,6 +104,7 @@ fun AlbumScreen(
     embedded: Boolean = false,
 ) {
     val context = LocalContext.current
+    val activity = context as Activity
     val scope = rememberCoroutineScope()
     val repository = remember { PhotoRepository(context.applicationContext) }
 
@@ -120,8 +123,11 @@ fun AlbumScreen(
     val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
             scope.launch {
-                repository.importFromUri(uri, caption = null, albumName = selectedAlbum)
+                val photo = repository.importFromUri(uri, caption = null, albumName = selectedAlbum)
                 reload()
+                // ローカル保存は上の行で既に完了済み — この先のDriveアップロード試行が
+                // 何であれ、ここまでの結果（画面に表示済みの写真）には影響しない。
+                PhotoDriveSync.syncNewPhoto(activity, repository, photo)
             }
         }
     }
@@ -131,8 +137,9 @@ fun AlbumScreen(
         pendingCameraFile = null
         if (success && file != null) {
             scope.launch {
-                repository.registerCapturedFile(file, caption = null, albumName = selectedAlbum)
+                val photo = repository.registerCapturedFile(file, caption = null, albumName = selectedAlbum)
                 reload()
+                PhotoDriveSync.syncNewPhoto(activity, repository, photo)
             }
         }
     }
