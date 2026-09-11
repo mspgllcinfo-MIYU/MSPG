@@ -6,8 +6,10 @@ import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,11 +22,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -44,7 +48,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -54,8 +60,11 @@ import com.mspg.poicat.brain.toEpochMilli
 import com.mspg.poicat.data.CatEventRepository
 import com.mspg.poicat.data.Photo
 import com.mspg.poicat.data.PhotoRepository
+import com.mspg.poicat.gemini.GeminiOutcome
+import com.mspg.poicat.gemini.GeminiSearchService
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -184,6 +193,8 @@ private fun ChatView(modifier: Modifier = Modifier) {
     }
 
     Column(modifier = modifier.fillMaxWidth()) {
+        MariTanRow()
+
         LazyColumn(
             state = listState,
             modifier = Modifier.weight(1f),
@@ -359,6 +370,119 @@ private fun ChatView(modifier: Modifier = Modifier) {
                     detailPhoto = null
                 }
             },
+        )
+    }
+}
+
+private enum class MariTanState { IDLE, LISTENING, THINKING, SULKING, NOT_CONFIGURED, ERROR }
+
+/**
+ * マリたん：外部検索・最新情報担当のキジ猫。専用のチャット画面は作らず、この
+ * アバター行1つだけを既存の黒猫AI会話画面(ChatView)の先頭に追加する形で実装する。
+ *
+ * タップ→（権限が無ければ許可ダイアログ→）即マイク起動→音声認識→Gemini
+ * (Google Search grounding付き)へ質問文だけを送信→回答を黒猫AIの同じ会話画面
+ * (ChatRepository)へuser/assistantメッセージとして追加、という一直線の流れ。
+ * マリたん自身の文字入力欄は持たない。
+ *
+ * Geminiへ送るのは今回認識された音声テキストのみ — 黒猫AIの会話履歴やPOI内部の
+ * 他データ（仕事/プラベ/タスク/メモ/カレンダー/アルバム/ファイル/Drive/ルーム共有）
+ * は一切渡さない（[GeminiSearchService]のクラスコメント参照）。
+ *
+ * 無料枠を使い切った場合(HTTP 429)はSULKING状態にするだけで、課金機能への自動
+ * 移行は一切行わない。
+ */
+@Composable
+private fun MariTanRow() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var state by remember { mutableStateOf(MariTanState.IDLE) }
+
+    val speechLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val text = result.data
+            ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+            ?.firstOrNull()
+        if (text.isNullOrBlank()) {
+            state = MariTanState.IDLE
+        } else {
+            state = MariTanState.THINKING
+            scope.launch {
+                val outcome = GeminiSearchService.ask(text)
+                state = when (val answer = outcome.getOrNull()) {
+                    is GeminiOutcome.Answer -> {
+                        ChatRepository.addMessage(ChatMessage("user", "🎤 $text", System.currentTimeMillis()))
+                        ChatRepository.addMessage(
+                            ChatMessage("assistant", "🐈マリたん：${answer.text}", System.currentTimeMillis()),
+                        )
+                        MariTanState.IDLE
+                    }
+                    GeminiOutcome.QuotaExceeded -> MariTanState.SULKING
+                    GeminiOutcome.NotConfigured -> MariTanState.NOT_CONFIGURED
+                    null -> MariTanState.ERROR
+                }
+            }
+        }
+    }
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            state = MariTanState.LISTENING
+            speechLauncher.launch(buildSpeechIntent())
+        } else {
+            state = MariTanState.IDLE
+        }
+    }
+
+    // 一時的なエラー表示は少し経ったら自動でIDLEへ戻す — 「ふて寝(SULKING)」と
+    // 「未設定(NOT_CONFIGURED)」はタップし直すまで表示し続ける(状態として意味がある)。
+    LaunchedEffect(state) {
+        if (state == MariTanState.ERROR) {
+            delay(4000)
+            state = MariTanState.IDLE
+        }
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Image(
+            painter = painterResource(R.drawable.mari_tan),
+            contentDescription = "マリたん",
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .clickable(enabled = state != MariTanState.THINKING && state != MariTanState.LISTENING) {
+                    val granted = ContextCompat.checkSelfPermission(
+                        context,
+                        android.Manifest.permission.RECORD_AUDIO,
+                    ) == PackageManager.PERMISSION_GRANTED
+                    if (granted) {
+                        state = MariTanState.LISTENING
+                        speechLauncher.launch(buildSpeechIntent())
+                    } else {
+                        micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                    }
+                },
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            text = when (state) {
+                MariTanState.IDLE -> "マリたん：タップして話しかけてにゃ（外部を調べる担当）"
+                MariTanState.LISTENING -> "マリたん：聞いてるにゃ…"
+                MariTanState.THINKING -> "マリたん：調べてるにゃ…"
+                MariTanState.SULKING -> "マリたん：今日はもう調べられないにゃ…（ふて寝中）"
+                MariTanState.NOT_CONFIGURED -> "マリたん：まだ準備中にゃ"
+                MariTanState.ERROR -> "マリたん：うまく聞こえなかったにゃ"
+            },
+            fontSize = 12.sp,
+            color = AiInk.copy(alpha = 0.6f),
         )
     }
 }

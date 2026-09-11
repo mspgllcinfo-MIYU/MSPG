@@ -31,6 +31,13 @@ jobs:
         run: chmod +x ./gradlew
 
       - name: Build debug APK
+        env:
+          # マリたん用Gemini APIキー。リポジトリシークレットGEMINI_API_KEYが未設定の
+          # 場合は空文字列になり、ビルド自体は問題なく通る(アプリ側がキー未設定を
+          # 検出してマリたんを無効表示にするだけ)。ORG_GRADLE_PROJECT_接頭辞は
+          # Gradleがこの環境変数を自動的にプロジェクトプロパティGEMINI_API_KEYとして
+          # 読み込むための規約。
+          ORG_GRADLE_PROJECT_GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: ./gradlew assembleDebug --stacktrace
 
       - name: Upload debug APK

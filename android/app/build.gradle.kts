@@ -15,6 +15,17 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "0.2"
+
+        // マリたん(外部検索キャラクター)用のGemini APIキー。リポジトリには一切コミット
+        // しない — CI(GitHub Actions)がGEMINI_API_KEYというリポジトリシークレットを
+        // ORG_GRADLE_PROJECT_GEMINI_API_KEY環境変数として渡し、それをGradleが自動的に
+        // このプロジェクトプロパティとして読み込む。未設定の場合は空文字列のままビルドが
+        // 通り、アプリ側は空キーを「マリたん未設定」として扱う(クラッシュしない)。
+        buildConfigField(
+            "String",
+            "GEMINI_API_KEY",
+            "\"${project.findProperty("GEMINI_API_KEY") ?: ""}\"",
+        )
     }
 
     signingConfigs {
@@ -49,6 +60,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     composeOptions {
