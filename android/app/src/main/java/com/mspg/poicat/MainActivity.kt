@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.lifecycle.lifecycleScope
+import com.mspg.poicat.auth.FirebaseAnonymousAuth
 import com.mspg.poicat.notify.ReminderWorker
 import com.mspg.poicat.notify.ensureNotificationChannel
 import com.mspg.poicat.room.RoomEventSync
@@ -21,6 +22,10 @@ class MainActivity : ComponentActivity() {
         // 参加済みならFirestoreのリアルタイムリスナーを起動し、パートナー端末側の
         // 変更をローカルのcat_eventsへ反映する。
         RoomEventSync.startListening(applicationContext)
+        // マリたんのGemini中継(Cloudflare Worker)呼び出しに要るFirebase匿名認証を
+        // 前もって済ませておく(ユーザー操作不要・失敗しても無視してよい — 実際に
+        // マリたんを使う時点でGeminiSearchService側が再度試みる)。
+        lifecycleScope.launch { runCatching { FirebaseAnonymousAuth.ensureSignedIn() } }
         handleIncomingIntent(intent)
 
         setContent {

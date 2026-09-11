@@ -7,9 +7,16 @@ export interface Env {
   MAX_TOKENS_LIMIT: string;
   RATE_LIMIT_PER_MINUTE: string;
   RATE_LIMIT_KV: KVNamespace;
+  // マリたん(/v1/gemini/generate)用。GEMINI_API_KEYはコードにもGitにも含まれず、
+  // Workerのシークレット(wrangler secret put GEMINI_API_KEY)としてのみ保存される
+  // — Android側はこのWorkerを経由するだけで、Gemini APIキー自体を一切持たない。
+  GEMINI_API_KEY: string;
+  GEMINI_MODEL: string;
+  GEMINI_RATE_LIMIT_PER_MINUTE: string;
 }
 
 const OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions";
+const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
 interface ChatRequestBody {
   model?: string;
@@ -30,10 +37,16 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-async function checkRateLimit(env: Env, uid: string): Promise<boolean> {
-  const limit = Number.parseInt(env.RATE_LIMIT_PER_MINUTE, 10) || 20;
+// keyPrefixでOpenAI用("rl")とGemini用("gl")のカウンタを分離する — マリたんの
+// 利用量が黒猫AI側(将来OpenAI proxyを使う場合)の枠を食い潰さないようにするため。
+async function checkRateLimit(
+  env: Env,
+  uid: string,
+  keyPrefix: string,
+  limit: number,
+): Promise<boolean> {
   const windowStart = Math.floor(Date.now() / 60_000);
-  const key = `rl:${uid}:${windowStart}`;
+  const key = `${keyPrefix}:${uid}:${windowStart}`;
 
   const current = Number.parseInt((await env.RATE_LIMIT_KV.get(key)) ?? "0", 10);
   if (current >= limit) {
@@ -42,6 +55,71 @@ async function checkRateLimit(env: Env, uid: string): Promise<boolean> {
 
   await env.RATE_LIMIT_KV.put(key, String(current + 1), { expirationTtl: 90 });
   return true;
+}
+
+interface GeminiRequestBody {
+  system_instruction?: unknown;
+  contents?: unknown;
+}
+
+/**
+ * マリたん専用のGemini中継。クライアント(Android)が組み立てたsystem_instruction/
+ * contentsをほぼそのまま検証だけしてGeminiへ転送し、レスポンスをそのまま返す
+ * だけの薄いプロキシ。キャラクター設定・Memory注入等のプロンプト構築ロジックは
+ * 引き続きAndroidアプリ側(GeminiSearchService.kt)に置いたまま — Cloudflare側の
+ * 再デプロイ無しでマリたんの応答調整ができるようにするため。
+ * toolsフィールドは受け付けない(Google Search Grounding封じ — 過去のA/Bテストで
+ * 429の直接原因と確定済み。クライアント側も送らない設計だが、念のためサーバー側
+ * でも許可しない)。
+ */
+async function handleGeminiGenerate(request: Request, env: Env): Promise<Response> {
+  const authHeader = request.headers.get("authorization") ?? "";
+  const match = authHeader.match(/^Bearer (.+)$/);
+  if (!match) {
+    return jsonResponse({ error: "missing Authorization: Bearer <Firebase ID token>" }, 401);
+  }
+
+  let uid: string;
+  try {
+    uid = await verifyFirebaseIdToken(match[1], env.FIREBASE_PROJECT_ID);
+  } catch {
+    return jsonResponse({ error: "invalid or expired ID token" }, 401);
+  }
+
+  const limit = Number.parseInt(env.GEMINI_RATE_LIMIT_PER_MINUTE, 10) || 15;
+  if (!(await checkRateLimit(env, uid, "gl", limit))) {
+    return jsonResponse({ error: "rate limit exceeded, try again later" }, 429);
+  }
+
+  let input: GeminiRequestBody;
+  try {
+    input = await request.json();
+  } catch {
+    return jsonResponse({ error: "request body must be valid JSON" }, 400);
+  }
+
+  if (!Array.isArray(input.contents) || input.contents.length === 0) {
+    return jsonResponse({ error: "contents is required and must be a non-empty array" }, 400);
+  }
+
+  const upstreamBody: Record<string, unknown> = { contents: input.contents };
+  if (input.system_instruction !== undefined) {
+    upstreamBody.system_instruction = input.system_instruction;
+  }
+
+  const url = `${GEMINI_API_BASE}/${env.GEMINI_MODEL}:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`;
+  const upstreamResponse = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(upstreamBody),
+  });
+
+  return new Response(upstreamResponse.body, {
+    status: upstreamResponse.status,
+    headers: {
+      "content-type": upstreamResponse.headers.get("content-type") ?? "application/json",
+    },
+  });
 }
 
 function buildUpstreamBody(
@@ -92,6 +170,10 @@ export default {
       return jsonResponse({ status: "ok" });
     }
 
+    if (request.method === "POST" && url.pathname === "/v1/gemini/generate") {
+      return handleGeminiGenerate(request, env);
+    }
+
     if (request.method !== "POST" || url.pathname !== "/v1/chat/completions") {
       return jsonResponse({ error: "not found" }, 404);
     }
@@ -109,7 +191,8 @@ export default {
       return jsonResponse({ error: "invalid or expired ID token" }, 401);
     }
 
-    if (!(await checkRateLimit(env, uid))) {
+    const openAiLimit = Number.parseInt(env.RATE_LIMIT_PER_MINUTE, 10) || 20;
+    if (!(await checkRateLimit(env, uid, "rl", openAiLimit))) {
       return jsonResponse({ error: "rate limit exceeded, try again later" }, 429);
     }
 

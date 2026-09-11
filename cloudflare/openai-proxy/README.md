@@ -1,7 +1,12 @@
 # poicat-openai-proxy
 
-`com.mspg.poicat` Android アプリから OpenAI API を安全に呼び出すための
-Cloudflare Workers 製サーバーサイドプロキシです。
+`com.mspg.poicat` Android アプリから OpenAI API / Gemini API を安全に呼び出す
+ための Cloudflare Workers 製サーバーサイドプロキシです。
+
+このWorkerは元々OpenAI用でしたが、マリたん（音声AI）がGemini APIキーを
+APKへ一切埋め込まない構成にするため、`/v1/gemini/generate` エンドポイントを
+追加しました。新しい別のインフラは作らず、既存のFirebase IDトークン検証・
+KVレート制限の仕組みをそのまま両エンドポイントで共有しています。
 
 ## 仕組み
 
@@ -38,8 +43,18 @@ cp .dev.vars.example .dev.vars
 # .dev.vars 内の OPENAI_API_KEY をローカルテスト用のキーに書き換える（コミットしない）
 
 wrangler secret put OPENAI_API_KEY  # 本番用シークレットを対話入力で登録
+wrangler secret put GEMINI_API_KEY  # マリたん用。MIYUxAIプロジェクトで発行したキーを入力
 npm run deploy
 ```
+
+**重要:** `GEMINI_API_KEY` を設定しない限り、`/v1/gemini/generate` は
+Gemini側で認証エラーになります（マリたんの音声会話には必須）。
+
+デプロイ方式が「Cloudflare Workers Builds（Git連携）」の場合、Cloudflare
+ダッシュボード側の「プロダクションブランチ」設定がこのコードの存在する
+ブランチ（例: `claude/step-3-uouuf6`）を向いているか確認してください。
+向いていない場合は自動デプロイされないため、上記の `npm run deploy` を
+手動で実行してください。
 
 デプロイ後、以下で疎通確認できます。
 
@@ -70,6 +85,30 @@ val response = httpClient.post("https://poicat-openai-proxy.<あなたのサブ�
 
 `model` は省略可能（省略時は `ALLOWED_MODELS` の先頭が使われる）。
 OpenAI の API キーはアプリ側に一切含める必要はありません。
+
+## マリたん用: Gemini中継エンドポイント (`POST /v1/gemini/generate`)
+
+Android側（マリたん）はGeminiの`generateContent`とほぼ同じ形のリクエスト
+ボディ（`system_instruction` / `contents`）を、Firebase IDトークン付きで
+このエンドポイントへ送るだけです。モデル名はクライアントから指定できず、
+`wrangler.toml`の`GEMINI_MODEL`（現在: `gemini-3.5-flash-lite`）で固定されて
+います。レスポンスはGemini APIの応答をそのまま中継します（成功時のJSON形状も
+429等のエラーもGemini側のものがそのまま返る）。
+
+```kotlin
+val idToken = FirebaseAuth.getInstance().currentUser
+    ?.getIdToken(false)?.await()?.token
+    ?: error("not signed in")
+
+val response = httpClient.post("https://poicat-openai-proxy.<あなたのサブドメイン>.workers.dev/v1/gemini/generate") {
+    header("Authorization", "Bearer $idToken")
+    contentType(ContentType.Application.Json)
+    setBody(mapOf("system_instruction" to ..., "contents" to ...))
+}
+```
+
+Gemini APIキーは`wrangler secret put GEMINI_API_KEY`としてのみ保存され、
+Androidアプリ側のコード・APK・GitHubリポジトリのいずれにも一切含まれません。
 
 ## 設定値（`wrangler.toml` の `[vars]`）
 
