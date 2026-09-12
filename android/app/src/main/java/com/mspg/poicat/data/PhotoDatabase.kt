@@ -13,7 +13,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * means adding or changing the photo schema can never require a migration
  * of — or risk any damage to — the data already stored in `cat_events`.
  */
-@Database(entities = [Photo::class, PhotoMemoLink::class], version = 4, exportSchema = true)
+@Database(entities = [Photo::class, PhotoMemoLink::class], version = 5, exportSchema = true)
 abstract class PhotoDatabase : RoomDatabase() {
     abstract fun photoDao(): PhotoDao
     abstract fun photoMemoLinkDao(): PhotoMemoLinkDao
@@ -50,6 +50,15 @@ abstract class PhotoDatabase : RoomDatabase() {
             }
         }
 
+        // v4 -> v5: added Photo.deletedAt (論理削除/tombstone用タイムスタンプ)。1つの
+        // additive ADD COLUMNのみ、NOT NULL制約もDEFAULTも無いため既存の全ての写真は
+        // deletedAt=NULL(=未削除)としてそのまま残る — 物理削除は一切行わない。
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE photos ADD COLUMN deletedAt INTEGER")
+            }
+        }
+
         fun get(context: Context): PhotoDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -57,7 +66,7 @@ abstract class PhotoDatabase : RoomDatabase() {
                     PhotoDatabase::class.java,
                     "poicat_photos.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_3_4, MIGRATION_4_5)
                     .fallbackToDestructiveMigration()
                     .build().also { instance = it }
             }

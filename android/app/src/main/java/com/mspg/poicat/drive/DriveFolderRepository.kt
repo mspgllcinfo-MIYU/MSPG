@@ -14,9 +14,8 @@ import java.net.URLEncoder
 
 data class DriveFolder(val id: String, val name: String)
 data class DriveUploadedFile(val id: String)
-/** アップロード後にDrive側へ問い合わせて実際に保存された内容を検証するための情報。
- * [parents]は削除前の安全確認（対象が本当にPOI用フォルダの中にあるか）に使う。 */
-data class DriveFileInfo(val id: String, val size: Long?, val mimeType: String?, val parents: List<String>?)
+/** アップロード後にDrive側へ問い合わせて実際に保存された内容を検証するための情報。 */
+data class DriveFileInfo(val id: String, val size: Long?, val mimeType: String?)
 /** [listFiles]が返す、フォルダ内の1ファイルのメタデータ（バイナリ本体は含まない）。 */
 data class DriveListedFile(val id: String, val name: String, val mimeType: String?)
 
@@ -123,35 +122,14 @@ object DriveFolderRepository {
         withContext(Dispatchers.IO) {
             runCatching {
                 val url = "$API_BASE/${URLEncoder.encode(fileId, "UTF-8")}" +
-                    "?fields=${URLEncoder.encode("id,size,mimeType,parents", "UTF-8")}"
+                    "?fields=${URLEncoder.encode("id,size,mimeType", "UTF-8")}"
                 val response = request(url, "GET", accessToken, body = null)
                 val obj = JSONObject(response)
-                val parentsArray = obj.optJSONArray("parents")
                 DriveFileInfo(
                     id = obj.getString("id"),
                     size = if (obj.has("size")) obj.optString("size").toLongOrNull() else null,
                     mimeType = if (obj.has("mimeType")) obj.getString("mimeType") else null,
-                    parents = parentsArray?.let { arr -> (0 until arr.length()).map { arr.getString(it) } },
                 )
-            }
-        }
-
-    /**
-     * 指定[fileId]をDrive上から削除する。呼び出し側（PhotoDriveSync/FileDriveSync）が
-     * 事前に[getFileInfo]で[DriveFileInfo.parents]を確認し、POI用の子フォルダの中に
-     * あることを検証してから呼ぶ想定 — この関数自体は渡されたfileIdをそのまま削除する
-     * だけで、フォルダの検証は行わない（検証は呼び出し側の責務）。
-     */
-    suspend fun deleteFile(accessToken: String, fileId: String): Result<Unit> =
-        withContext(Dispatchers.IO) {
-            runCatching {
-                request(
-                    "$API_BASE/${URLEncoder.encode(fileId, "UTF-8")}",
-                    "DELETE",
-                    accessToken,
-                    body = null,
-                )
-                Unit
             }
         }
 

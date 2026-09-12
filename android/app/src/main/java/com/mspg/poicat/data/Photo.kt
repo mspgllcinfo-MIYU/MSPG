@@ -36,6 +36,11 @@ data class Photo(
     val driveSyncStatus: String = DRIVE_SYNC_PENDING,
     /** アップロード成功後のDrive側ファイルID。再アップロード防止に使う。 */
     val driveFileId: String? = null,
+    /** 論理削除(tombstone)のタイムスタンプ、未削除ならnull。「×」削除はこのフィールドを
+     * 立てるだけで、ローカルファイル・Google Drive原本のどちらも物理的には削除しない
+     * — 一覧系クエリはこれがnullの行だけを返す。夫婦2台間ではこの削除状態自体を
+     * [com.mspg.poicat.room.RoomDriveTombstoneSync]で共有する。 */
+    val deletedAt: Long? = null,
 ) {
     companion object {
         const val DRIVE_SYNC_PENDING = "PENDING"

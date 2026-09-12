@@ -29,6 +29,9 @@ data class StoredFile(
     val driveSyncStatus: String = DRIVE_SYNC_PENDING,
     /** アップロード成功後のDrive側ファイルID。再アップロード防止に使う。 */
     val driveFileId: String? = null,
+    /** 論理削除(tombstone)のタイムスタンプ、未削除ならnull。[Photo.deletedAt]と同じ
+     * 設計 — 「×」削除はこれを立てるだけで、ローカルファイル・Drive原本は物理削除しない。 */
+    val deletedAt: Long? = null,
 ) {
     companion object {
         const val DRIVE_SYNC_PENDING = "PENDING"

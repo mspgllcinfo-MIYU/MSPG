@@ -4,6 +4,7 @@ import android.app.Activity
 import com.mspg.poicat.auth.GoogleAuthManager
 import com.mspg.poicat.data.FileRepository
 import com.mspg.poicat.data.PhotoRepository
+import com.mspg.poicat.room.RoomDriveTombstoneSync
 import com.mspg.poicat.room.RoomStore
 
 /**
@@ -32,6 +33,10 @@ object RoomCatalogSync {
 
             DriveFolderRepository.listFiles(accessToken, folderId).getOrNull()?.forEach { remote ->
                 if (photoRepository.byDriveFileId(remote.id) != null) return@forEach
+                // POI上で(自端末かパートナー端末かを問わず)既に削除済みと記録されている
+                // 写真は、Drive原本がそのまま残っていても再取り込みしない — 削除した
+                // つもりのものが復活する問題(以前実機で報告)への対策。
+                if (RoomDriveTombstoneSync.isTombstoned(activity, remote.id)) return@forEach
                 val bytes = DriveFolderRepository.downloadFile(accessToken, remote.id).getOrNull() ?: return@forEach
                 photoRepository.importFromDrive(bytes, remote.id)
             }
@@ -46,6 +51,7 @@ object RoomCatalogSync {
 
             DriveFolderRepository.listFiles(accessToken, folderId).getOrNull()?.forEach { remote ->
                 if (fileRepository.byDriveFileId(remote.id) != null) return@forEach
+                if (RoomDriveTombstoneSync.isTombstoned(activity, remote.id)) return@forEach
                 val bytes = DriveFolderRepository.downloadFile(accessToken, remote.id).getOrNull() ?: return@forEach
                 fileRepository.importFromDrive(bytes, remote.id, remote.name, remote.mimeType ?: "application/octet-stream")
             }

@@ -4,10 +4,14 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.webkit.MimeTypeMap
+import com.mspg.poicat.room.RoomDriveTombstoneSync
 import java.io.File
 import java.io.IOException
 import java.util.UUID
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -22,6 +26,10 @@ import kotlinx.coroutines.withContext
  */
 class FileRepository(private val context: Context) {
     private val dao = FileDatabase.get(context).storedFileDao()
+
+    // ルーム共有(4桁PIN)用のfire-and-forgetなFirestoreプッシュだけに使う —
+    // PhotoRepository.syncScopeと同じ設計。
+    private val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val filesDirForShared: File by lazy {
         File(context.filesDir, "files").apply { mkdirs() }
@@ -90,11 +98,17 @@ class FileRepository(private val context: Context) {
         dao.update(file.copy(driveSyncStatus = StoredFile.DRIVE_SYNC_SYNCED, driveFileId = driveFileId))
     }
 
-    /** Deletes the row and its backing file — the file is only ever referenced by this
-     * one row, and no other data (photos, schedules, tasks, memos) references it. */
-    suspend fun delete(file: StoredFile) = withContext(Dispatchers.IO) {
-        dao.delete(file)
-        runCatching { File(file.filePath).delete() }
+    /**
+     * 「×」削除 — [com.mspg.poicat.data.PhotoRepository.softDelete]と同じ論理削除
+     * (tombstone)のみ。ローカルファイル・Google Drive原本のどちらも物理削除しない。
+     * driveFileIdが夫婦間で共有中だった場合は、その削除状態を[RoomDriveTombstoneSync]
+     * 経由でパートナー端末にも伝える(fire-and-forget)。
+     */
+    suspend fun softDelete(file: StoredFile) = withContext(Dispatchers.IO) {
+        dao.update(file.copy(deletedAt = System.currentTimeMillis()))
+        file.driveFileId?.let { driveFileId ->
+            syncScope.launch { RoomDriveTombstoneSync.pushTombstone(context.applicationContext, driveFileId) }
+        }
     }
 
     private fun queryDisplayName(uri: Uri): String? = runCatching {

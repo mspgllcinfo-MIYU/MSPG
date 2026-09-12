@@ -13,7 +13,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * changing this schema can never require a migration of, or risk any damage
  * to, the data already stored in either of those.
  */
-@Database(entities = [StoredFile::class], version = 2, exportSchema = true)
+@Database(entities = [StoredFile::class], version = 3, exportSchema = true)
 abstract class FileDatabase : RoomDatabase() {
     abstract fun storedFileDao(): StoredFileDao
 
@@ -32,6 +32,15 @@ abstract class FileDatabase : RoomDatabase() {
             }
         }
 
+        // v2 -> v3: added StoredFile.deletedAt (論理削除/tombstone用タイムスタンプ、
+        // PhotoDatabase.MIGRATION_4_5と同じ設計)。1つのadditive ADD COLUMNのみ、既存の
+        // 全ファイルはdeletedAt=NULL(=未削除)のまま — 物理削除は一切行わない。
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE stored_files ADD COLUMN deletedAt INTEGER")
+            }
+        }
+
         fun get(context: Context): FileDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -39,7 +48,7 @@ abstract class FileDatabase : RoomDatabase() {
                     FileDatabase::class.java,
                     "poicat_files.db",
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build().also { instance = it }
             }
     }

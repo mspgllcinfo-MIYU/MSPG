@@ -240,7 +240,7 @@ fun MemoScreen(embedded: Boolean = false) {
             },
             onDelete = {
                 scope.launch {
-                    photoRepository.delete(photo)
+                    photoRepository.softDelete(photo)
                     linkedPhotos = editingMemo?.let { photoRepository.photosForMemo(it.id) } ?: emptyList()
                     detailPhoto = null
                     showDialog = true

@@ -281,12 +281,12 @@ fun AlbumScreen(
             },
             onDelete = {
                 scope.launch {
-                    repository.delete(photo)
+                    // 論理削除(tombstone)のみ — ローカルファイル・Drive原本のどちらも
+                    // 物理削除しない(ユーザー指示)。夫婦間で共有中なら削除状態も
+                    // 同期される(PhotoRepository.softDelete参照)。
+                    repository.softDelete(photo)
                     reload()
                     detailPhoto = null
-                    // ローカル削除は上で既に完了済み — この先のDrive削除試行が何であれ、
-                    // ここまでの結果(画面から消えた写真)には影響しない。
-                    PhotoDriveSync.syncDeletedPhoto(activity, photo)
                 }
             },
         )

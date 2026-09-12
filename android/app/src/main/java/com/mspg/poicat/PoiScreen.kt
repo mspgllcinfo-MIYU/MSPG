@@ -426,7 +426,7 @@ fun PoiScreen(
             },
             onDelete = {
                 scope.launch {
-                    photoRepository.delete(photo)
+                    photoRepository.softDelete(photo)
                     linkedPhotos = editingTask?.let { photoRepository.photosForMemo(it.id) } ?: emptyList()
                     detailPhoto = null
                     showDialog = true

@@ -374,7 +374,7 @@ private fun ChatView(modifier: Modifier = Modifier) {
             },
             onDelete = {
                 scope.launch {
-                    photoRepository.delete(photo)
+                    photoRepository.softDelete(photo)
                     detailPhoto = null
                 }
             },

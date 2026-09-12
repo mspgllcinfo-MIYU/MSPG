@@ -252,7 +252,7 @@ fun CalendarScreen(
             },
             onDelete = {
                 scope.launch {
-                    photoRepository.delete(photo)
+                    photoRepository.softDelete(photo)
                     detailPhoto = null
                     refreshTick++
                 }

@@ -42,7 +42,6 @@ import androidx.core.content.FileProvider
 import com.mspg.poicat.brain.toLocalDateTime
 import com.mspg.poicat.data.FileRepository
 import com.mspg.poicat.data.StoredFile
-import com.mspg.poicat.drive.FileDriveSync
 import com.mspg.poicat.drive.RoomCatalogSync
 import java.io.File
 import kotlinx.coroutines.launch
@@ -151,12 +150,12 @@ fun FileScreen(embedded: Boolean = false) {
             confirmButton = {
                 TextButton(onClick = {
                     scope.launch {
-                        repository.delete(file)
+                        // 論理削除(tombstone)のみ — ローカルファイル・Drive原本のどちらも
+                        // 物理削除しない(ユーザー指示)。夫婦間で共有中なら削除状態も
+                        // 同期される(FileRepository.softDelete参照)。
+                        repository.softDelete(file)
                         pendingDelete = null
                         reload()
-                        // ローカル削除は上で既に完了済み — この先のDrive削除試行が何であれ、
-                        // ここまでの結果(画面から消えたファイル)には影響しない。
-                        FileDriveSync.syncDeletedFile(activity, file)
                     }
                 }) {
                     Text("削除", color = MaterialTheme.colorScheme.error)

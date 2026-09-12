@@ -1,6 +1,9 @@
 package com.mspg.poicat
 
 import android.app.Activity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -10,7 +13,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -18,6 +23,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,13 +39,24 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mspg.poicat.auth.GoogleAuthManager
+import com.mspg.poicat.data.FileRepository
+import com.mspg.poicat.data.PhotoRepository
+import com.mspg.poicat.drive.DriveConnectionStore
+import com.mspg.poicat.drive.DriveFolderRepository
+import com.mspg.poicat.drive.RoomCatalogSync
 import com.mspg.poicat.room.NotSignedInException
 import com.mspg.poicat.room.RoomBackfill
 import com.mspg.poicat.room.RoomEventSync
+import com.mspg.poicat.room.RoomDriveTombstoneSync
 import com.mspg.poicat.room.RoomFullException
 import com.mspg.poicat.room.RoomManager
 import com.mspg.poicat.room.RoomStore
 import kotlinx.coroutines.launch
+
+private enum class DriveFolderTarget(val label: String) {
+    ALBUM("アルバム"),
+    FILE("ファイル"),
+}
 
 // ConnectionScreen.kt と同じトーンをこのファイル内だけで再現(共有はしない、意図的な重複)。
 private val RoomInk = Color(0xFF201E1D)
@@ -83,6 +100,137 @@ fun RoomShareScreen(onBack: () -> Unit) {
     var roomStatusText by remember { mutableStateOf<String?>(null) }
     var roomBusy by remember { mutableStateOf(false) }
 
+    // 【Drive接続導線】ユーザーが毎回手動でフォルダを選ぶ設計にはしない — 既存の
+    // 「POI用/アルバム」「POI用/ファイル」フォルダをDriveFolderRepository.ensureFolder
+    // (findFolder-or-create、既存フォルダがあれば必ずそれを使い、重複作成しない)経由で
+    // 自動検出・接続する。albumFolderId/fileFolderIdが既に端末に保存済みの場合はその値を
+    // そのまま尊重し、何も変更しない。
+    val driveStore = remember { DriveConnectionStore(context) }
+    var albumFolderName by remember { mutableStateOf(driveStore.albumFolderName) }
+    var fileFolderName by remember { mutableStateOf(driveStore.fileFolderName) }
+    var driveBusy by remember { mutableStateOf(false) }
+    var driveStatusText by remember { mutableStateOf<String?>(null) }
+    var cachedDriveAccessToken by remember { mutableStateOf<String?>(null) }
+    var driveAuthorized by remember { mutableStateOf(driveStore.albumFolderId != null || driveStore.fileFolderId != null) }
+
+    suspend fun ensureDriveFolder(target: DriveFolderTarget, accessToken: String) {
+        val poiRoot = DriveFolderRepository.ensureFolder(accessToken, "POI用", null).getOrElse {
+            driveStatusText = "フォルダの確認に失敗したにゃ：${it.message ?: it.javaClass.simpleName}"
+            return
+        }
+        val folder = DriveFolderRepository.ensureFolder(accessToken, target.label, poiRoot.id).getOrElse {
+            driveStatusText = "フォルダの確認に失敗したにゃ：${it.message ?: it.javaClass.simpleName}"
+            return
+        }
+        val displayName = "POI用/${folder.name}"
+        when (target) {
+            DriveFolderTarget.ALBUM -> {
+                driveStore.albumFolderId = folder.id
+                driveStore.albumFolderName = displayName
+                albumFolderName = displayName
+            }
+            DriveFolderTarget.FILE -> {
+                driveStore.fileFolderId = folder.id
+                driveStore.fileFolderName = displayName
+                fileFolderName = displayName
+            }
+        }
+    }
+
+    // 未接続のフォルダだけを対象にする — 既に接続済み(albumFolderId/fileFolderIdが
+    // 保存済み)の側には一切触れない。接続できた分は、既存の共有アルバム/ファイルを
+    // すぐに取り込む(RoomCatalogSync)。取り込みに失敗してもここでのフォルダ接続自体は
+    // 成功したまま扱う — ローカルの利用を止めないため。
+    suspend fun ensureMissingDriveFolders(accessToken: String) {
+        driveAuthorized = true
+        if (driveStore.albumFolderId == null) ensureDriveFolder(DriveFolderTarget.ALBUM, accessToken)
+        if (driveStore.fileFolderId == null) ensureDriveFolder(DriveFolderTarget.FILE, accessToken)
+        runCatching { RoomCatalogSync.refreshAlbumCatalog(activity, PhotoRepository(context.applicationContext)) }
+        runCatching { RoomCatalogSync.refreshFileCatalog(activity, FileRepository(context.applicationContext)) }
+    }
+
+    val driveAuthResolutionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult(),
+    ) { result ->
+        val data = result.data
+        if (data != null) {
+            scope.launch {
+                try {
+                    GoogleAuthManager.resumeAfterResolution(activity, data)
+                        .onSuccess { token ->
+                            cachedDriveAccessToken = token
+                            ensureMissingDriveFolders(token)
+                        }
+                        .onFailure {
+                            driveStatusText = "Drive権限の取得に失敗したにゃ：${it.message ?: it.javaClass.simpleName}"
+                        }
+                } finally {
+                    driveBusy = false
+                }
+            }
+        } else {
+            driveBusy = false
+            driveStatusText = "同意画面から結果を受け取れなかったにゃ"
+        }
+    }
+
+    fun connectDrive() {
+        val cached = cachedDriveAccessToken
+        if (cached != null) {
+            driveBusy = true
+            scope.launch {
+                try { ensureMissingDriveFolders(cached) } finally { driveBusy = false }
+            }
+            return
+        }
+        driveBusy = true
+        scope.launch {
+            var awaitingConsent = false
+            try {
+                GoogleAuthManager.requestDriveAuthorization(activity)
+                    .onSuccess { outcome ->
+                        when (outcome) {
+                            is GoogleAuthManager.AuthorizationOutcome.Granted -> {
+                                cachedDriveAccessToken = outcome.accessToken
+                                ensureMissingDriveFolders(outcome.accessToken)
+                            }
+                            is GoogleAuthManager.AuthorizationOutcome.ResolutionNeeded -> {
+                                val pendingIntent = outcome.result.pendingIntent
+                                if (pendingIntent != null) {
+                                    awaitingConsent = true
+                                    driveAuthResolutionLauncher.launch(
+                                        IntentSenderRequest.Builder(pendingIntent.intentSender).build(),
+                                    )
+                                } else {
+                                    driveStatusText = "Drive権限リクエストに失敗したにゃ"
+                                }
+                            }
+                        }
+                    }
+                    .onFailure {
+                        driveStatusText = "Drive権限リクエストに失敗したにゃ：${it.message ?: it.javaClass.simpleName}"
+                    }
+            } finally {
+                if (!awaitingConsent) driveBusy = false
+            }
+        }
+    }
+
+    // サインイン済みで、まだ未接続のフォルダがある場合、まずはユーザー操作なしに
+    // "サイレントに"(=同意画面を割り込ませずに)自動検出だけ試みる。既にdrive.file
+    // 権限を許可済みであれば、ここで無操作のままアルバム/ファイル双方が自動的に
+    // 「接続済み」になる。許可がまだ(ResolutionNeeded)の場合はここでは何もせず、
+    // 「Driveを接続」ボタン経由のユーザー操作を待つ。
+    LaunchedEffect(signedInEmail) {
+        if (signedInEmail == null) return@LaunchedEffect
+        if (driveStore.albumFolderId != null && driveStore.fileFolderId != null) return@LaunchedEffect
+        val outcome = GoogleAuthManager.requestDriveAuthorization(activity).getOrNull()
+        if (outcome is GoogleAuthManager.AuthorizationOutcome.Granted) {
+            cachedDriveAccessToken = outcome.accessToken
+            ensureMissingDriveFolders(outcome.accessToken)
+        }
+    }
+
     fun joinRoom() {
         val pin = pinInput.trim()
         if (pin.length != 4 || pin.any { !it.isDigit() }) {
@@ -98,10 +246,17 @@ fun RoomShareScreen(onBack: () -> Unit) {
                         roomId = newRoomId
                         roomStatusText = "ルームに参加したにゃ"
                         RoomEventSync.startListening(context.applicationContext)
+                        RoomDriveTombstoneSync.startListening(context.applicationContext)
                         // 参加前からあった自分側の既存データ(まだ誰とも共有していない
                         // 予定/タスク/メモ/写真/ファイル)を一括で送る。ローカルの表示・
                         // データには一切影響しない、後追いのfire-and-forget処理。
                         scope.launch { RoomBackfill.pushUnsyncedToRoom(activity) }
+                        // Drive接続済みなら、参加直後にも一度カタログを取り込んでおく —
+                        // アルバム/ファイル画面を開くタイミングだけに頼らない。
+                        scope.launch {
+                            runCatching { RoomCatalogSync.refreshAlbumCatalog(activity, PhotoRepository(context.applicationContext)) }
+                            runCatching { RoomCatalogSync.refreshFileCatalog(activity, FileRepository(context.applicationContext)) }
+                        }
                     }
                     .onFailure {
                         roomStatusText = when (it) {
@@ -119,6 +274,11 @@ fun RoomShareScreen(onBack: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            // Drive連携カードが増え縦に長くなったため、ConnectionScreen.ktの
+            // 「夫婦でシェア」カードが画面下に見切れた問題と同じ対策(be741f1)を
+            // 最初から適用しておく — 機種の画面サイズ/文字サイズによらず末尾まで
+            // 到達できるようにする。
+            .verticalScroll(rememberScrollState())
             .padding(20.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -212,6 +372,50 @@ fun RoomShareScreen(onBack: () -> Unit) {
                 Text(text, color = RoomGold)
             }
         }
+
+        Spacer(Modifier.height(16.dp))
+
+        RoomCardBox(title = "Google Drive連携（アルバム/ファイルの共有に必要）") {
+            DriveStatusLine("Google Drive", connected = driveAuthorized)
+            DriveStatusLine("アルバム", connected = albumFolderName != null)
+            DriveStatusLine("ファイル", connected = fileFolderName != null)
+            if (albumFolderName == null || fileFolderName == null) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "既存の「POI用」フォルダがGoogle Driveにあれば自動的に見つけて使うにゃ" +
+                        "（新しく作り直したり、中身を消したりはしないにゃ）。",
+                    color = RoomInk.copy(alpha = 0.5f),
+                    fontSize = 12.sp,
+                )
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = { connectDrive() },
+                    enabled = !driveBusy && signedInEmail != null,
+                    colors = ButtonDefaults.buttonColors(containerColor = RoomPink.copy(alpha = 0.25f), contentColor = RoomInk),
+                    shape = RoundedCornerShape(percent = 50),
+                ) { Text("Driveを接続") }
+                if (signedInEmail == null) {
+                    Spacer(Modifier.height(4.dp))
+                    Text("先に上の「Googleでサインイン」が必要にゃ", color = RoomGold, fontSize = 12.sp)
+                }
+            }
+            driveStatusText?.let { text ->
+                Spacer(Modifier.height(8.dp))
+                Text(text, color = RoomGold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DriveStatusLine(label: String, connected: Boolean) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("$label：", color = RoomInk.copy(alpha = 0.7f))
+        Text(
+            if (connected) "接続済み" else "未接続",
+            color = if (connected) RoomInk.copy(alpha = 0.7f) else RoomGold,
+            fontWeight = FontWeight.Bold,
+        )
     }
 }
 

@@ -2,10 +2,14 @@ package com.mspg.poicat.data
 
 import android.content.Context
 import android.net.Uri
+import com.mspg.poicat.room.RoomDriveTombstoneSync
 import java.io.File
 import java.io.IOException
 import java.util.UUID
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -19,6 +23,10 @@ import kotlinx.coroutines.withContext
 class PhotoRepository(private val context: Context) {
     private val dao = PhotoDatabase.get(context).photoDao()
     private val linkDao = PhotoDatabase.get(context).photoMemoLinkDao()
+
+    // ルーム共有(4桁PIN)用のfire-and-forgetなFirestoreプッシュだけに使う —
+    // CatEventRepository.syncScopeと同じ設計(ローカルが主、共有は後追い)。
+    private val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val photoDir: File by lazy {
         File(context.filesDir, "photos").apply { mkdirs() }
@@ -119,12 +127,24 @@ class PhotoRepository(private val context: Context) {
         linkDao.deleteAllForEvent(eventId)
     }
 
-    /** Deletes the row and its backing file, plus any memo links pointing at it (so a memo
-     * never ends up referencing a photo that no longer exists). The file is only ever
-     * referenced by this one row, so there's no other place it needs cleaning up from. */
-    suspend fun delete(photo: Photo) = withContext(Dispatchers.IO) {
+    /**
+     * 「×」削除 — 論理削除(tombstone)のみ。ローカルファイル・Google Drive原本のどちらも
+     * 物理的には一切削除しない(ユーザー指示: Drive原本は絶対に削除しない)。deletedAtを
+     * 立てるだけなので、一覧系クエリ([PhotoDao.all]等)から見えなくなるだけで、行自体は
+     * 残る。あわせてこの写真を参照する既存のメモ紐付けも解除する(削除済み写真をメモの
+     * 写真欄に残さないため)。
+     *
+     * このdriveFileIdが夫婦間で共有中(既にDriveへアップロード済み)だった場合は、
+     * [RoomDriveTombstoneSync]経由でこの削除状態をパートナー端末にも伝える
+     * (fire-and-forget、失敗してもこのローカル削除自体には影響しない) — これにより
+     * パートナー端末側の同じ写真も非表示になり、かつ[RoomCatalogSync]によるDriveからの
+     * 再取り込みで復活しなくなる。
+     */
+    suspend fun softDelete(photo: Photo) = withContext(Dispatchers.IO) {
         linkDao.deleteAllForPhoto(photo.id)
-        dao.delete(photo)
-        runCatching { File(photo.filePath).delete() }
+        dao.update(photo.copy(deletedAt = System.currentTimeMillis()))
+        photo.driveFileId?.let { driveFileId ->
+            syncScope.launch { RoomDriveTombstoneSync.pushTombstone(context.applicationContext, driveFileId) }
+        }
     }
 }
