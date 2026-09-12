@@ -134,6 +134,13 @@ class PhotoRepository(private val context: Context) {
      * 残る。あわせてこの写真を参照する既存のメモ紐付けも解除する(削除済み写真をメモの
      * 写真欄に残さないため)。
      *
+     * [photo]はUI側が保持しているスナップショットで、バックグラウンドのDriveアップロード
+     * ([PhotoDriveSync.syncNewPhoto])がdriveFileIdを書き込むより前の古い状態の可能性が
+     * ある。そのため[PhotoDao.update]で[photo]全体を書き戻すことは絶対にしない —
+     * [PhotoDao.markDeleted]でdeletedAtカラムだけをピンポイントでUPDATEし、他の
+     * フィールド(driveFileId・driveSyncStatus・caption等)には一切触れない。
+     * driveFileIdの参照も、[photo]からではなく更新後にDBから読み直した最新の行から取る。
+     *
      * このdriveFileIdが夫婦間で共有中(既にDriveへアップロード済み)だった場合は、
      * [RoomDriveTombstoneSync]経由でこの削除状態をパートナー端末にも伝える
      * (fire-and-forget、失敗してもこのローカル削除自体には影響しない) — これにより
@@ -142,8 +149,9 @@ class PhotoRepository(private val context: Context) {
      */
     suspend fun softDelete(photo: Photo) = withContext(Dispatchers.IO) {
         linkDao.deleteAllForPhoto(photo.id)
-        dao.update(photo.copy(deletedAt = System.currentTimeMillis()))
-        photo.driveFileId?.let { driveFileId ->
+        dao.markDeleted(photo.id, System.currentTimeMillis())
+        val current = dao.byIds(listOf(photo.id)).firstOrNull()
+        current?.driveFileId?.let { driveFileId ->
             syncScope.launch { RoomDriveTombstoneSync.pushTombstone(context.applicationContext, driveFileId) }
         }
     }

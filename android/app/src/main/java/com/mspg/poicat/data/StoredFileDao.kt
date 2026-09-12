@@ -17,6 +17,12 @@ interface StoredFileDao {
     @Delete
     suspend fun delete(file: StoredFile)
 
+    /** 「×」削除(論理削除)専用 — idを条件にdeletedAtカラムだけをUPDATEする、ピンポイント
+     * な書き込み。[PhotoDao.markDeleted]と同じ理由: UI側が保持している古いStoredFile
+     * スナップショット経由でdriveFileId等を巻き戻さないため。 */
+    @Query("UPDATE stored_files SET deletedAt = :deletedAt WHERE id = :fileId")
+    suspend fun markDeleted(fileId: Long, deletedAt: Long)
+
     /** All files, newest-saved first. 論理削除済み(deletedAt != null)の行は除外する。 */
     @Query("SELECT * FROM stored_files WHERE deletedAt IS NULL ORDER BY savedAt DESC")
     suspend fun all(): List<StoredFile>

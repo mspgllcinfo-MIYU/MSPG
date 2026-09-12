@@ -17,6 +17,13 @@ interface PhotoDao {
     @Delete
     suspend fun delete(photo: Photo)
 
+    /** 「×」削除(論理削除)専用 — idを条件にdeletedAtカラムだけをUPDATEする、ピンポイント
+     * な書き込み。呼び出し元がUI側で保持している(バックグラウンドのDriveアップロード
+     * 完了より前の可能性がある)古いPhotoスナップショットを経由しないため、driveFileId
+     * やその他のフィールドを誤って古い値へ巻き戻すことがない。 */
+    @Query("UPDATE photos SET deletedAt = :deletedAt WHERE id = :photoId")
+    suspend fun markDeleted(photoId: Long, deletedAt: Long)
+
     /** All photos, newest-added first. 論理削除済み(deletedAt != null)の行は除外する —
      * 「×」削除はこのdeletedAtを立てるだけの論理削除なので、一覧系クエリは全て
      * deletedAt IS NULLで揃える。 */

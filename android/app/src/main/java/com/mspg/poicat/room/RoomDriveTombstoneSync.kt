@@ -87,18 +87,21 @@ object RoomDriveTombstoneSync {
     }
 
     /** パートナー端末発のtombstoneを、こちらのローカル行(存在すれば)へも反映する —
-     * ローカルファイル・Drive原本のどちらも物理削除しない、deletedAtを立てるだけ。 */
+     * ローカルファイル・Drive原本のどちらも物理削除しない、deletedAtを立てるだけ。
+     * [PhotoRepository.softDelete]/[FileRepository.softDelete]と同じ理由で、行全体を
+     * copy()して書き戻すことはせず、markDeleted(id, ...)でdeletedAtカラムだけを
+     * ピンポイントUPDATEする — driveFileId等の他フィールドを一切巻き戻さない。 */
     private suspend fun applyTombstoneLocally(context: Context, driveFileId: String) {
         val now = System.currentTimeMillis()
 
         val photoDao = PhotoDatabase.get(context).photoDao()
         photoDao.byDriveFileId(driveFileId)?.let { photo ->
-            if (photo.deletedAt == null) photoDao.update(photo.copy(deletedAt = now))
+            if (photo.deletedAt == null) photoDao.markDeleted(photo.id, now)
         }
 
         val fileDao = FileDatabase.get(context).storedFileDao()
         fileDao.byDriveFileId(driveFileId)?.let { file ->
-            if (file.deletedAt == null) fileDao.update(file.copy(deletedAt = now))
+            if (file.deletedAt == null) fileDao.markDeleted(file.id, now)
         }
     }
 }

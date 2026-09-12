@@ -101,12 +101,20 @@ class FileRepository(private val context: Context) {
     /**
      * 「×」削除 — [com.mspg.poicat.data.PhotoRepository.softDelete]と同じ論理削除
      * (tombstone)のみ。ローカルファイル・Google Drive原本のどちらも物理削除しない。
+     *
+     * [file]はUI側の古いスナップショットの可能性があるため、[StoredFileDao.update]で
+     * 丸ごと書き戻すことはしない — [StoredFileDao.markDeleted]でdeletedAtだけを
+     * ピンポイントUPDATEし、driveFileId等の他フィールドを巻き戻さない。driveFileIdの
+     * 参照も更新後にDBから読み直した最新の行から取る([PhotoRepository.softDelete]と
+     * 同じ考え方)。
+     *
      * driveFileIdが夫婦間で共有中だった場合は、その削除状態を[RoomDriveTombstoneSync]
      * 経由でパートナー端末にも伝える(fire-and-forget)。
      */
     suspend fun softDelete(file: StoredFile) = withContext(Dispatchers.IO) {
-        dao.update(file.copy(deletedAt = System.currentTimeMillis()))
-        file.driveFileId?.let { driveFileId ->
+        dao.markDeleted(file.id, System.currentTimeMillis())
+        val current = dao.byIds(listOf(file.id)).firstOrNull()
+        current?.driveFileId?.let { driveFileId ->
             syncScope.launch { RoomDriveTombstoneSync.pushTombstone(context.applicationContext, driveFileId) }
         }
     }
