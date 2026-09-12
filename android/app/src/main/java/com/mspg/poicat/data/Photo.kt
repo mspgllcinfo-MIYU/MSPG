@@ -41,6 +41,12 @@ data class Photo(
      * — 一覧系クエリはこれがnullの行だけを返す。夫婦2台間ではこの削除状態自体を
      * [com.mspg.poicat.room.RoomDriveTombstoneSync]で共有する。 */
     val deletedAt: Long? = null,
+    /** キャプション/アルバム名/カレンダー日付編集の競合解決用タイムスタンプ
+     * (CatEvent.updatedAtと同じ考え方のlast-write-wins)。夫婦間で共有中(driveFileId
+     * あり)の写真の編集内容を[com.mspg.poicat.room.RoomPhotoMetadataSync]で同期する
+     * ために使う。既存行はmigrationで0になる — 0はどんな実際の編集時刻よりも必ず
+     * 古い扱いになるだけで、実害はない。 */
+    val metadataUpdatedAt: Long = 0,
 ) {
     companion object {
         const val DRIVE_SYNC_PENDING = "PENDING"

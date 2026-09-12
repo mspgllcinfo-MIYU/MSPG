@@ -24,6 +24,16 @@ interface PhotoDao {
     @Query("UPDATE photos SET deletedAt = :deletedAt WHERE id = :photoId")
     suspend fun markDeleted(photoId: Long, deletedAt: Long)
 
+    /** キャプション/アルバム名/カレンダー日付編集専用 — idを条件にこの3つと
+     * metadataUpdatedAtだけをUPDATEする、ピンポイントな書き込み。[markDeleted]と同じ
+     * 理由で、UI側の古いPhotoスナップショット全体を書き戻すことはしない — driveFileId・
+     * driveSyncStatus・deletedAt等の他フィールドを一切巻き戻さない。 */
+    @Query(
+        "UPDATE photos SET caption = :caption, albumName = :albumName, linkedDate = :linkedDate, " +
+            "metadataUpdatedAt = :metadataUpdatedAt WHERE id = :photoId",
+    )
+    suspend fun updateMetadata(photoId: Long, caption: String?, albumName: String?, linkedDate: Long?, metadataUpdatedAt: Long)
+
     /** All photos, newest-added first. 論理削除済み(deletedAt != null)の行は除外する —
      * 「×」削除はこのdeletedAtを立てるだけの論理削除なので、一覧系クエリは全て
      * deletedAt IS NULLで揃える。 */

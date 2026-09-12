@@ -13,7 +13,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * means adding or changing the photo schema can never require a migration
  * of — or risk any damage to — the data already stored in `cat_events`.
  */
-@Database(entities = [Photo::class, PhotoMemoLink::class], version = 5, exportSchema = true)
+@Database(entities = [Photo::class, PhotoMemoLink::class], version = 6, exportSchema = true)
 abstract class PhotoDatabase : RoomDatabase() {
     abstract fun photoDao(): PhotoDao
     abstract fun photoMemoLinkDao(): PhotoMemoLinkDao
@@ -77,6 +77,17 @@ abstract class PhotoDatabase : RoomDatabase() {
             }
         }
 
+        // v5 -> v6: added Photo.metadataUpdatedAt (キャプション/アルバム名/カレンダー日付
+        // 編集の夫婦間同期用、last-write-wins比較タイムスタンプ)。MIGRATION_3_4の
+        // driveSyncStatus列と同じ形(NOT NULL + DEFAULT)の1つのadditive ADD COLUMNのみ。
+        // 既存の全ての写真はmetadataUpdatedAt=0になるだけで、caption/albumName/
+        // linkedDate等の既存の値には一切触れない。
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE photos ADD COLUMN metadataUpdatedAt INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun get(context: Context): PhotoDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -88,7 +99,7 @@ abstract class PhotoDatabase : RoomDatabase() {
                     // 開始してもv5まで非破壊で到達できる — fallbackToDestructiveMigration()
                     // は完全に不要になったため外した(既存のPhoto/PhotoMemoLinkデータを
                     // 初期化するリスクを持つ設定を残さない)。
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .build().also { instance = it }
             }
     }

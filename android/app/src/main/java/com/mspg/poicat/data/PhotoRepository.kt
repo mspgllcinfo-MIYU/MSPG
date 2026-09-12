@@ -3,6 +3,7 @@ package com.mspg.poicat.data
 import android.content.Context
 import android.net.Uri
 import com.mspg.poicat.room.RoomDriveTombstoneSync
+import com.mspg.poicat.room.RoomPhotoMetadataSync
 import java.io.File
 import java.io.IOException
 import java.util.UUID
@@ -85,8 +86,26 @@ class PhotoRepository(private val context: Context) {
     /** Photos linked to the calendar day starting at [startOfDay] (inclusive) through [endOfDay] (inclusive). */
     suspend fun byLinkedDate(startOfDay: Long, endOfDay: Long) = dao.byLinkedDate(startOfDay, endOfDay)
 
+    /**
+     * キャプション/アルバム名/カレンダー日付の編集。[photo]はUI側の古いスナップショットの
+     * 可能性がある([softDelete]と同じ理由)ため、[PhotoDao.updateMetadata]でこの3項目と
+     * metadataUpdatedAtだけをピンポイントUPDATEし、driveFileId等の他フィールドは
+     * 一切書き換えない。
+     *
+     * 更新後にDBから読み直した最新の行にdriveFileId(=夫婦間で共有中)があれば、この編集
+     * 内容を[RoomPhotoMetadataSync]経由でパートナー端末にも伝える(fire-and-forget、
+     * 失敗してもこのローカル編集自体には影響しない)。Drive上の写真本体は
+     * 一切再アップロードしない — 同期するのはメタデータのみ。
+     */
     suspend fun updateDetails(photo: Photo, caption: String?, albumName: String?, linkedDate: Long?) {
-        dao.update(photo.copy(caption = caption, albumName = albumName, linkedDate = linkedDate))
+        val now = System.currentTimeMillis()
+        dao.updateMetadata(photo.id, caption, albumName, linkedDate, now)
+        val current = dao.byIds(listOf(photo.id)).firstOrNull()
+        current?.driveFileId?.let { driveFileId ->
+            syncScope.launch {
+                RoomPhotoMetadataSync.pushMetadata(context.applicationContext, driveFileId, caption, albumName, linkedDate, now)
+            }
+        }
     }
 
     /** Marks a photo's Drive sync state (PENDING/SYNCING/FAILED — see [markDriveSynced] for
