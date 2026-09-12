@@ -1,12 +1,18 @@
 package com.mspg.poicat.room
 
+import android.util.Log
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import java.security.MessageDigest
 import java.util.UUID
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withTimeout
+
+/** 表示名設定処理の診断専用ログタグ。PIN/認証トークン/個人情報は一切出力しない —
+ * roomId/deviceIdもtake(8)で先頭のみに留める。原因特定後に削除予定の一時的なもの。 */
+private const val DISPLAY_NAME_DEBUG_TAG = "DisplayNameDebug"
 
 /** ルームが既に2台（他デバイス）で満室で、この端末がまだメンバーでない場合に投げる。 */
 class RoomFullException : Exception("このルームは既に2台で利用中にゃ")
@@ -105,20 +111,33 @@ object RoomManager {
      * ルームの作り直し・PINの変更・再参加は一切発生しない — 既存のroomId/members
      * ドキュメントへの追記のみ。
      */
-    suspend fun setDisplayName(roomId: String, deviceId: String, displayName: String): Result<Unit> = runCatching {
-        // [com.mspg.poicat.auth.GoogleAuthManager.GOOGLE_TASK_TIMEOUT_MS]と同じ値・同じ理由
-        // (実機で確認済み: Play Services/Firestoreのバックグラウンド実装が稀にTaskの
-        // コールバックを一切呼ばないまま止まることがある — サインイン/Drive認可ボタンで
-        // 「グレーアウトしたまま操作不能」として実際に発生し、このsetDisplayNameの表示名
-        // ボタンでも同じ症状が実機で再現した)。runCatching単体では真のハングを救えない
-        // (中の処理が完了しないとcatchにも到達しない)ため、明示的なタイムアウトで必ず
-        // 決着させる — タイムアウト時はTimeoutCancellationExceptionがrunCatchingに
-        // 捕捉され、Result.failureとして呼び出し元(RoomShareScreen)まで正しく伝わり、
-        // 「表示名の設定に失敗したにゃ」の表示とnameBusy解除(finallyブロック)につながる。
-        withTimeout(FIRESTORE_TASK_TIMEOUT_MS) {
-            db.collection(COLLECTION_ROOMS).document(roomId)
-                .update("members.$deviceId.displayName", displayName)
-                .await()
+    suspend fun setDisplayName(roomId: String, deviceId: String, displayName: String): Result<Unit> {
+        // D: この関数(RoomManager.setDisplayName)内部へ実際に到達したか。
+        Log.d(DISPLAY_NAME_DEBUG_TAG, "D: setDisplayName() entered")
+        return try {
+            // E: roomId/deviceIdを実際に受け取れているか(先頭8文字のみ、秘密情報ではない)。
+            Log.d(
+                DISPLAY_NAME_DEBUG_TAG,
+                "E: roomId=${roomId.take(8)}… deviceId=${deviceId.take(8)}…",
+            )
+            withTimeout(FIRESTORE_TASK_TIMEOUT_MS) {
+                // F: Firestoreのupdate()呼び出し直前。
+                Log.d(DISPLAY_NAME_DEBUG_TAG, "F: about to call Firestore update()")
+                db.collection(COLLECTION_ROOMS).document(roomId)
+                    .update("members.$deviceId.displayName", displayName)
+                    .await()
+                // G: update().await()が例外無く完了(=成功)。
+                Log.d(DISPLAY_NAME_DEBUG_TAG, "G: update().await() completed successfully")
+            }
+            Result.success(Unit)
+        } catch (e: TimeoutCancellationException) {
+            // H: 20秒のタイムアウトが実際に発火した(=ハングしていたことの証拠)。
+            Log.d(DISPLAY_NAME_DEBUG_TAG, "H: timed out after ${FIRESTORE_TASK_TIMEOUT_MS}ms")
+            Result.failure(e)
+        } catch (e: Throwable) {
+            // I: タイムアウト以外の例外(権限エラー・ネットワークエラー等)。
+            Log.d(DISPLAY_NAME_DEBUG_TAG, "I: failed with ${e.javaClass.simpleName}: ${e.message}")
+            Result.failure(e)
         }
     }
 

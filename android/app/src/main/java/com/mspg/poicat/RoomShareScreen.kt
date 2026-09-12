@@ -1,6 +1,7 @@
 package com.mspg.poicat
 
 import android.app.Activity
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -59,6 +60,11 @@ private enum class DriveFolderTarget(val label: String) {
     FILE("ファイル"),
 }
 
+/** 表示名設定処理の診断専用ログタグ。[com.mspg.poicat.room.RoomManager]側の同名タグと
+ * 揃えている(同じ操作の追跡を1つのタグでフィルタできるように)。PIN/認証トークン/
+ * 個人情報は一切出力しない。原因特定後に削除予定の一時的なもの。 */
+private const val DISPLAY_NAME_DEBUG_TAG = "DisplayNameDebug"
+
 // ConnectionScreen.kt と同じトーンをこのファイル内だけで再現(共有はしない、意図的な重複)。
 private val RoomInk = Color(0xFF201E1D)
 private val RoomCard = Color(0xFFEFE7DE)
@@ -111,14 +117,28 @@ fun RoomShareScreen(onBack: () -> Unit) {
     var nameStatusText by remember { mutableStateOf<String?>(null) }
 
     fun setDisplayName(name: String) {
-        val currentRoomId = roomId ?: return
+        // B: ボタンのonClickから呼ばれたこの関数自体に到達したか。
+        Log.d(DISPLAY_NAME_DEBUG_TAG, "B: RoomShareScreen.setDisplayName() called (name=$name)")
+        val currentRoomId = roomId ?: run {
+            Log.d(DISPLAY_NAME_DEBUG_TAG, "B: aborted — roomId is null")
+            return
+        }
         nameBusy = true
         scope.launch {
             try {
-                RoomManager.setDisplayName(currentRoomId, roomStore.deviceId, name)
+                // C: RoomManager.setDisplayNameを呼ぶ直前。
+                Log.d(DISPLAY_NAME_DEBUG_TAG, "C: about to call RoomManager.setDisplayName()")
+                val result = RoomManager.setDisplayName(currentRoomId, roomStore.deviceId, name)
+                // J: Resultがこのコルーチンへ戻ってきた。
+                Log.d(DISPLAY_NAME_DEBUG_TAG, "J: result received, isSuccess=${result.isSuccess}")
+                result
                     .onSuccess {
                         roomStore.displayName = name
+                        // K: ローカル(SharedPreferences)への保存完了。
+                        Log.d(DISPLAY_NAME_DEBUG_TAG, "K: RoomStore.displayName saved locally")
                         displayName = name
+                        // L: Compose state更新(画面再描画のトリガー)。
+                        Log.d(DISPLAY_NAME_DEBUG_TAG, "L: UI state displayName updated")
                         nameStatusText = "表示名を設定したにゃ"
                     }
                     .onFailure {
@@ -126,6 +146,8 @@ fun RoomShareScreen(onBack: () -> Unit) {
                     }
             } finally {
                 nameBusy = false
+                // M: finallyへ到達し、ボタンのグレーアウトが解除されるはず。
+                Log.d(DISPLAY_NAME_DEBUG_TAG, "M: finally reached, nameBusy=false")
             }
         }
     }
@@ -418,7 +440,11 @@ fun RoomShareScreen(onBack: () -> Unit) {
                     listOf("みゆたん", "かっちゃん").forEach { name ->
                         val selected = displayName == name
                         Button(
-                            onClick = { setDisplayName(name) },
+                            onClick = {
+                                // A: ボタンのonClickが実際に呼ばれたか(タップ自体が届いているか)。
+                                Log.d(DISPLAY_NAME_DEBUG_TAG, "A: button tapped (name=$name)")
+                                setDisplayName(name)
+                            },
                             enabled = !nameBusy,
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = if (selected) RoomPink else RoomPink.copy(alpha = 0.25f),
