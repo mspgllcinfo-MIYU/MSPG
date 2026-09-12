@@ -82,6 +82,18 @@ object RoomEventSync {
         val dao = AppDatabase.get(context).catEventDao()
         listenerRegistration = eventsRef(roomId).addSnapshotListener { snapshot, error ->
             if (error != null || snapshot == null) return@addSnapshotListener
+            // このスナップショットが「この端末自身がまだFirestoreへ書き込み中/サーバー
+            // 未確認の、自分自身の変更」を反映しただけのローカルエコーである場合は
+            // 無視する。理由: pushUpsertの書き込みが完了する前にこのローカルエコーが
+            // 先に届くと、その時点ではまだmarkRoomEventIdによるroomEventIdの記録が
+            // 終わっておらず、dao.byRoomEventIdが該当ローカル行を見つけられないため
+            // 「新規」として別行をinsertしてしまい、同じ内容が2行登録される(実機で
+            // 確認された二重登録の直接原因)。hasPendingWrites()==trueは「まだサーバー
+            // 未確認の、この端末自身の変更」だけを意味するため、他端末からの変更を
+            // 取りこぼすことはない — サーバー確認後(hasPendingWrites==false)に改めて
+            // 届いた時点では、markRoomEventIdは既に完了しているはずなので、正しく
+            // 「既存行の更新」として扱われる。
+            if (snapshot.metadata.hasPendingWrites()) return@addSnapshotListener
             for (change in snapshot.documentChanges) {
                 val roomEventId = change.document.id
                 scope.launch {
