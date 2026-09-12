@@ -31,13 +31,31 @@ abstract class PhotoDatabase : RoomDatabase() {
             }
         }
 
-        // v2 -> v3 (added the photo_memo_links join table) has no hand-written migration:
-        // a hand-rolled CREATE TABLE has to match Room's own compiled-in expectation of the
-        // schema byte-for-byte (column types/nullability/etc.), which isn't practical to
-        // verify without an Android toolchain, and got this wrong once already. Falling
-        // back to a destructive recreate for this one jump only resets the *photo*
-        // database (photos/albums/calendar-links/memo-links) — cat_events (schedules,
-        // memos, tasks) is a completely separate database untouched by this.
+        // v2 -> v3: added the photo_memo_links join table (PhotoMemoLink, phase 4). A previous
+        // attempt at this migration (commit c1430a6) was reverted (419af3a) after crashing on
+        // real devices, and the DB fell back to a destructive recreate for this one jump ever
+        // since. Root cause, found by comparing that reverted SQL against
+        // app/schemas/com.mspg.poicat.data.PhotoDatabase/3.json (the schema Room's own
+        // annotation processor actually compiled and exported for v3 — ground truth, not a
+        // guess): the old SQL wrote `id` INTEGER PRIMARY KEY AUTOINCREMENT without a trailing
+        // NOT NULL. SQLite's own `PRAGMA table_info` then reports that column as nullable,
+        // while Room's compiled expectation (and the CREATE TABLE Room itself would generate)
+        // has NOT NULL — a mismatch Room's migration validator rejects at runtime. The SQL
+        // below is copied verbatim from that v3 schema json's own "createSql" (only the
+        // `${TABLE_NAME}` placeholder replaced), so it is byte-for-byte what Room expects.
+        // A brand new table only — the existing `photos` table (and every row already in it)
+        // is completely untouched by this migration.
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `photo_memo_links` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`photoId` INTEGER NOT NULL, " +
+                        "`eventId` INTEGER NOT NULL, " +
+                        "`linkedAt` INTEGER NOT NULL)",
+                )
+            }
+        }
 
         // v3 -> v4: added Photo.driveSyncStatus/driveFileId (Google Drive upload tracking).
         // Two additive ADD COLUMNs, so every existing photo/album from v3 is kept exactly
@@ -66,8 +84,11 @@ abstract class PhotoDatabase : RoomDatabase() {
                     PhotoDatabase::class.java,
                     "poicat_photos.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_3_4, MIGRATION_4_5)
-                    .fallbackToDestructiveMigration()
+                    // v2->v3が正式なmigrationで埋まったため、v1〜v4のどのバージョンから
+                    // 開始してもv5まで非破壊で到達できる — fallbackToDestructiveMigration()
+                    // は完全に不要になったため外した(既存のPhoto/PhotoMemoLinkデータを
+                    // 初期化するリスクを持つ設定を残さない)。
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .build().also { instance = it }
             }
     }
