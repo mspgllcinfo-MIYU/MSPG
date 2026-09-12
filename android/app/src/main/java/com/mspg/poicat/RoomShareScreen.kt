@@ -101,6 +101,35 @@ fun RoomShareScreen(onBack: () -> Unit) {
     var roomStatusText by remember { mutableStateOf<String?>(null) }
     var roomBusy by remember { mutableStateOf(false) }
 
+    // 【ユーザー識別の基盤】どのdeviceIdが「みゆたん」「かっちゃん」かを推測して勝手に
+    // 割り当てることはしない — 本人がここで選んだ場合だけ設定する。既存のroomId/PIN/
+    // membersドキュメントは一切作り直さず、RoomManager.setDisplayNameが
+    // members.$deviceId.displayNameへ追記するだけ(既存のjoinedAtや相手の
+    // メンバーエントリには触れない)。
+    var displayName by remember { mutableStateOf(roomStore.displayName) }
+    var nameBusy by remember { mutableStateOf(false) }
+    var nameStatusText by remember { mutableStateOf<String?>(null) }
+
+    fun setDisplayName(name: String) {
+        val currentRoomId = roomId ?: return
+        nameBusy = true
+        scope.launch {
+            try {
+                RoomManager.setDisplayName(currentRoomId, roomStore.deviceId, name)
+                    .onSuccess {
+                        roomStore.displayName = name
+                        displayName = name
+                        nameStatusText = "表示名を設定したにゃ"
+                    }
+                    .onFailure {
+                        nameStatusText = "表示名の設定に失敗したにゃ：${it.message ?: it.javaClass.simpleName}"
+                    }
+            } finally {
+                nameBusy = false
+            }
+        }
+    }
+
     // 【Drive接続導線】ユーザーが毎回手動でフォルダを選ぶ設計にはしない — 既存の
     // 「POI用/アルバム」「POI用/ファイル」フォルダをDriveFolderRepository.ensureFolder
     // (findFolder-or-create、既存フォルダがあれば必ずそれを使い、重複作成しない)経由で
@@ -123,17 +152,17 @@ fun RoomShareScreen(onBack: () -> Unit) {
             driveStatusText = "フォルダの確認に失敗したにゃ：${it.message ?: it.javaClass.simpleName}"
             return
         }
-        val displayName = "POI用/${folder.name}"
+        val folderDisplayName = "POI用/${folder.name}"
         when (target) {
             DriveFolderTarget.ALBUM -> {
                 driveStore.albumFolderId = folder.id
-                driveStore.albumFolderName = displayName
-                albumFolderName = displayName
+                driveStore.albumFolderName = folderDisplayName
+                albumFolderName = folderDisplayName
             }
             DriveFolderTarget.FILE -> {
                 driveStore.fileFolderId = folder.id
-                driveStore.fileFolderName = displayName
-                fileFolderName = displayName
+                driveStore.fileFolderName = folderDisplayName
+                fileFolderName = folderDisplayName
             }
         }
     }
@@ -372,6 +401,41 @@ fun RoomShareScreen(onBack: () -> Unit) {
             roomStatusText?.let { text ->
                 Spacer(Modifier.height(8.dp))
                 Text(text, color = RoomGold)
+            }
+        }
+
+        if (roomId != null) {
+            Spacer(Modifier.height(16.dp))
+
+            RoomCardBox(title = "あなたの表示名") {
+                Text(
+                    "マリたんが「どちらの予定・メモか」を区別できるように、この端末の" +
+                        "利用者を選ぶにゃ。あとで変更もできるにゃ。",
+                    color = RoomInk.copy(alpha = 0.5f),
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("みゆたん", "かっちゃん").forEach { name ->
+                        val selected = displayName == name
+                        Button(
+                            onClick = { setDisplayName(name) },
+                            enabled = !nameBusy,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (selected) RoomPink else RoomPink.copy(alpha = 0.25f),
+                                contentColor = if (selected) Color.White else RoomInk,
+                            ),
+                            shape = RoundedCornerShape(percent = 50),
+                        ) { Text(name) }
+                    }
+                }
+                displayName?.let { name ->
+                    Spacer(Modifier.height(8.dp))
+                    Text("現在の設定：$name", color = RoomInk.copy(alpha = 0.7f))
+                }
+                nameStatusText?.let { text ->
+                    Spacer(Modifier.height(8.dp))
+                    Text(text, color = RoomGold)
+                }
             }
         }
 

@@ -87,6 +87,29 @@ object RoomManager {
         }.await()
     }
 
+    /**
+     * この端末(deviceId)の表示名(「みゆたん」「かっちゃん」)をルームへ登録する。
+     *
+     * 【後方互換性】`members`は元々`{deviceId: {joinedAt}}`という形(表示名を持たない)
+     * だった。ここではドット区切りのフィールドパス`members.$deviceId.displayName`
+     * だけをFirestoreの`update()`で書く — これは対象の1フィールドだけを追加/上書き
+     * するピンポイントな更新で、`members`ドキュメント全体や他デバイスのエントリ
+     * (`members.<相手のdeviceId>`)・既存の`joinedAt`には一切触れない。
+     *
+     * 旧バージョンの端末(この関数自体が無いバージョン)は、`members`をMapとして
+     * 読むだけで`displayName`という未知のキーの有無を一切気にしない(RoomManager.
+     * createOrJoinRoomの既存の読み取りコード参照)ため、このフィールドが増えても
+     * 旧バージョン側の参加/再参加処理には影響しない。
+     *
+     * ルームの作り直し・PINの変更・再参加は一切発生しない — 既存のroomId/members
+     * ドキュメントへの追記のみ。
+     */
+    suspend fun setDisplayName(roomId: String, deviceId: String, displayName: String): Result<Unit> = runCatching {
+        db.collection(COLLECTION_ROOMS).document(roomId)
+            .update("members.$deviceId.displayName", displayName)
+            .await()
+    }
+
     private const val COLLECTION_PIN_ROOMS = "pinRooms"
     private const val COLLECTION_ROOMS = "rooms"
     private const val MAX_MEMBERS = 2

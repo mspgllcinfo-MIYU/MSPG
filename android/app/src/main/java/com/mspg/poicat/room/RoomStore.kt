@@ -27,9 +27,18 @@ class RoomStore(context: Context) {
         get() = prefs.getString(KEY_ROOM_ID, null)
         set(value) { prefs.edit().putString(KEY_ROOM_ID, value).apply() }
 
+    /** この端末の利用者の表示名(「みゆたん」「かっちゃん」)。未設定ならnull —
+     * 誰かが自分で選ぶまでは推測・自動割り当てを一切行わない。ローカルの表示・
+     * 判定用のキャッシュで、正本は[RoomManager.setDisplayName]で書き込む
+     * Firestore側の`rooms/{roomId}`の`members.{deviceId}.displayName`。 */
+    var displayName: String?
+        get() = prefs.getString(KEY_DISPLAY_NAME, null)
+        set(value) { prefs.edit().putString(KEY_DISPLAY_NAME, value).apply() }
+
     companion object {
         private const val PREFS_NAME = "room_share"
         private const val KEY_DEVICE_ID = "device_id"
         private const val KEY_ROOM_ID = "room_id"
+        private const val KEY_DISPLAY_NAME = "display_name"
     }
 }
