@@ -111,11 +111,11 @@ object RoomManager {
      * ルームの作り直し・PINの変更・再参加は一切発生しない — 既存のroomId/members
      * ドキュメントへの追記のみ。
      *
-     * [onDiagnostic]は各チェックポイント(D〜I)に到達するたびに、そのラベル文字だけを
-     * 通知するオプションのコールバック(既定値は何もしない空ラムダ)。adb/Android Studio
-     * が使えない環境でも、呼び出し元(RoomShareScreen)がこれを画面表示に使えるように
-     * するための診断専用のフックで、動作そのものには一切影響しない。秘密情報は一切
-     * 渡さない(渡すのは"D"等の1文字のラベルのみ)。
+     * [onDiagnostic]は各チェックポイント(D, E, F1〜F6, G, H, I)に到達するたびに、その
+     * ラベル文字だけを通知するオプションのコールバック(既定値は何もしない空ラムダ)。
+     * adb/Android Studioが使えない環境でも、呼び出し元(RoomShareScreen)がこれを画面
+     * 表示に使えるようにするための診断専用のフックで、動作そのものには一切影響しない。
+     * 秘密情報は一切渡さない(渡すのは"D"等の1文字/短いラベルのみ)。
      */
     suspend fun setDisplayName(
         roomId: String,
@@ -134,12 +134,28 @@ object RoomManager {
             )
             onDiagnostic("E")
             withTimeout(FIRESTORE_TASK_TIMEOUT_MS) {
-                // F: Firestoreのupdate()呼び出し直前。
-                Log.d(DISPLAY_NAME_DEBUG_TAG, "F: about to call Firestore update()")
-                onDiagnostic("F")
-                db.collection(COLLECTION_ROOMS).document(roomId)
-                    .update("members.$deviceId.displayName", displayName)
-                    .await()
+                // F1〜F6: 元々1つだった"F"チェックポイントを、update()呼び出しの各段階
+                // (参照取得→update()呼び出し→Task取得→await()直前→await()完了)へ細分化。
+                // これによりFの内側の「どの同期/非同期ステップで止まっているか」を
+                // スマホの画面だけで切り分けられるようにする(診断専用、動作は変えない)。
+                Log.d(DISPLAY_NAME_DEBUG_TAG, "F1: about to get collection/document reference")
+                onDiagnostic("F1")
+                val docRef = db.collection(COLLECTION_ROOMS).document(roomId)
+                Log.d(DISPLAY_NAME_DEBUG_TAG, "F2: document reference obtained")
+                onDiagnostic("F2")
+
+                Log.d(DISPLAY_NAME_DEBUG_TAG, "F3: about to call update(...)")
+                onDiagnostic("F3")
+                val task = docRef.update("members.$deviceId.displayName", displayName)
+                Log.d(DISPLAY_NAME_DEBUG_TAG, "F4: update(...) returned a Task")
+                onDiagnostic("F4")
+
+                Log.d(DISPLAY_NAME_DEBUG_TAG, "F5: about to call Task.await()")
+                onDiagnostic("F5")
+                task.await()
+                Log.d(DISPLAY_NAME_DEBUG_TAG, "F6: Task.await() completed")
+                onDiagnostic("F6")
+
                 // G: update().await()が例外無く完了(=成功)。
                 Log.d(DISPLAY_NAME_DEBUG_TAG, "G: update().await() completed successfully")
                 onDiagnostic("G")
