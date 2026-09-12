@@ -110,33 +110,50 @@ object RoomManager {
      *
      * ルームの作り直し・PINの変更・再参加は一切発生しない — 既存のroomId/members
      * ドキュメントへの追記のみ。
+     *
+     * [onDiagnostic]は各チェックポイント(D〜I)に到達するたびに、そのラベル文字だけを
+     * 通知するオプションのコールバック(既定値は何もしない空ラムダ)。adb/Android Studio
+     * が使えない環境でも、呼び出し元(RoomShareScreen)がこれを画面表示に使えるように
+     * するための診断専用のフックで、動作そのものには一切影響しない。秘密情報は一切
+     * 渡さない(渡すのは"D"等の1文字のラベルのみ)。
      */
-    suspend fun setDisplayName(roomId: String, deviceId: String, displayName: String): Result<Unit> {
+    suspend fun setDisplayName(
+        roomId: String,
+        deviceId: String,
+        displayName: String,
+        onDiagnostic: (String) -> Unit = {},
+    ): Result<Unit> {
         // D: この関数(RoomManager.setDisplayName)内部へ実際に到達したか。
         Log.d(DISPLAY_NAME_DEBUG_TAG, "D: setDisplayName() entered")
+        onDiagnostic("D")
         return try {
             // E: roomId/deviceIdを実際に受け取れているか(先頭8文字のみ、秘密情報ではない)。
             Log.d(
                 DISPLAY_NAME_DEBUG_TAG,
                 "E: roomId=${roomId.take(8)}… deviceId=${deviceId.take(8)}…",
             )
+            onDiagnostic("E")
             withTimeout(FIRESTORE_TASK_TIMEOUT_MS) {
                 // F: Firestoreのupdate()呼び出し直前。
                 Log.d(DISPLAY_NAME_DEBUG_TAG, "F: about to call Firestore update()")
+                onDiagnostic("F")
                 db.collection(COLLECTION_ROOMS).document(roomId)
                     .update("members.$deviceId.displayName", displayName)
                     .await()
                 // G: update().await()が例外無く完了(=成功)。
                 Log.d(DISPLAY_NAME_DEBUG_TAG, "G: update().await() completed successfully")
+                onDiagnostic("G")
             }
             Result.success(Unit)
         } catch (e: TimeoutCancellationException) {
             // H: 20秒のタイムアウトが実際に発火した(=ハングしていたことの証拠)。
             Log.d(DISPLAY_NAME_DEBUG_TAG, "H: timed out after ${FIRESTORE_TASK_TIMEOUT_MS}ms")
+            onDiagnostic("H")
             Result.failure(e)
         } catch (e: Throwable) {
             // I: タイムアウト以外の例外(権限エラー・ネットワークエラー等)。
             Log.d(DISPLAY_NAME_DEBUG_TAG, "I: failed with ${e.javaClass.simpleName}: ${e.message}")
+            onDiagnostic("I: ${e.javaClass.simpleName}")
             Result.failure(e)
         }
     }

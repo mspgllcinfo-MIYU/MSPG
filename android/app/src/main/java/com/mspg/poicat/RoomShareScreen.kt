@@ -116,11 +116,18 @@ fun RoomShareScreen(onBack: () -> Unit) {
     var nameBusy by remember { mutableStateOf(false) }
     var nameStatusText by remember { mutableStateOf<String?>(null) }
 
+    // PC/ADB/Android Studioが無くても実機の画面だけで診断できるようにするための、
+    // A〜Mの到達ログ(#137で追加したLog.dと同じチェックポイント)を画面に積み上げて
+    // 表示するだけの一時的な状態。表示名設定以外の動作には一切影響しない。
+    var diagnosticTrail by remember { mutableStateOf(listOf<String>()) }
+
     fun setDisplayName(name: String) {
         // B: ボタンのonClickから呼ばれたこの関数自体に到達したか。
         Log.d(DISPLAY_NAME_DEBUG_TAG, "B: RoomShareScreen.setDisplayName() called (name=$name)")
+        diagnosticTrail = diagnosticTrail + "B"
         val currentRoomId = roomId ?: run {
             Log.d(DISPLAY_NAME_DEBUG_TAG, "B: aborted — roomId is null")
+            diagnosticTrail = diagnosticTrail + "B:roomId is null"
             return
         }
         nameBusy = true
@@ -128,17 +135,23 @@ fun RoomShareScreen(onBack: () -> Unit) {
             try {
                 // C: RoomManager.setDisplayNameを呼ぶ直前。
                 Log.d(DISPLAY_NAME_DEBUG_TAG, "C: about to call RoomManager.setDisplayName()")
-                val result = RoomManager.setDisplayName(currentRoomId, roomStore.deviceId, name)
+                diagnosticTrail = diagnosticTrail + "C"
+                val result = RoomManager.setDisplayName(currentRoomId, roomStore.deviceId, name) { step ->
+                    diagnosticTrail = diagnosticTrail + step
+                }
                 // J: Resultがこのコルーチンへ戻ってきた。
                 Log.d(DISPLAY_NAME_DEBUG_TAG, "J: result received, isSuccess=${result.isSuccess}")
+                diagnosticTrail = diagnosticTrail + "J"
                 result
                     .onSuccess {
                         roomStore.displayName = name
                         // K: ローカル(SharedPreferences)への保存完了。
                         Log.d(DISPLAY_NAME_DEBUG_TAG, "K: RoomStore.displayName saved locally")
+                        diagnosticTrail = diagnosticTrail + "K"
                         displayName = name
                         // L: Compose state更新(画面再描画のトリガー)。
                         Log.d(DISPLAY_NAME_DEBUG_TAG, "L: UI state displayName updated")
+                        diagnosticTrail = diagnosticTrail + "L"
                         nameStatusText = "表示名を設定したにゃ"
                     }
                     .onFailure {
@@ -148,6 +161,7 @@ fun RoomShareScreen(onBack: () -> Unit) {
                 nameBusy = false
                 // M: finallyへ到達し、ボタンのグレーアウトが解除されるはず。
                 Log.d(DISPLAY_NAME_DEBUG_TAG, "M: finally reached, nameBusy=false")
+                diagnosticTrail = diagnosticTrail + "M"
             }
         }
     }
@@ -442,7 +456,9 @@ fun RoomShareScreen(onBack: () -> Unit) {
                         Button(
                             onClick = {
                                 // A: ボタンのonClickが実際に呼ばれたか(タップ自体が届いているか)。
+                                // タップのたびに診断表示をリセットしてから積み上げていく。
                                 Log.d(DISPLAY_NAME_DEBUG_TAG, "A: button tapped (name=$name)")
+                                diagnosticTrail = listOf("A")
                                 setDisplayName(name)
                             },
                             enabled = !nameBusy,
@@ -461,6 +477,20 @@ fun RoomShareScreen(onBack: () -> Unit) {
                 nameStatusText?.let { text ->
                     Spacer(Modifier.height(8.dp))
                     Text(text, color = RoomGold)
+                }
+                if (diagnosticTrail.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "診断：${diagnosticTrail.joinToString(" → ")}",
+                        color = RoomInk.copy(alpha = 0.5f),
+                        fontSize = 12.sp,
+                    )
+                    Text(
+                        "停止地点：${diagnosticTrail.last()}",
+                        color = RoomGold,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
                 }
             }
         }
