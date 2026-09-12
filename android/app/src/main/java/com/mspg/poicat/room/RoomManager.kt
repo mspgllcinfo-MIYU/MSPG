@@ -6,6 +6,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import java.security.MessageDigest
 import java.util.UUID
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withTimeout
 
 /** ルームが既に2台（他デバイス）で満室で、この端末がまだメンバーでない場合に投げる。 */
 class RoomFullException : Exception("このルームは既に2台で利用中にゃ")
@@ -105,12 +106,24 @@ object RoomManager {
      * ドキュメントへの追記のみ。
      */
     suspend fun setDisplayName(roomId: String, deviceId: String, displayName: String): Result<Unit> = runCatching {
-        db.collection(COLLECTION_ROOMS).document(roomId)
-            .update("members.$deviceId.displayName", displayName)
-            .await()
+        // [com.mspg.poicat.auth.GoogleAuthManager.GOOGLE_TASK_TIMEOUT_MS]と同じ値・同じ理由
+        // (実機で確認済み: Play Services/Firestoreのバックグラウンド実装が稀にTaskの
+        // コールバックを一切呼ばないまま止まることがある — サインイン/Drive認可ボタンで
+        // 「グレーアウトしたまま操作不能」として実際に発生し、このsetDisplayNameの表示名
+        // ボタンでも同じ症状が実機で再現した)。runCatching単体では真のハングを救えない
+        // (中の処理が完了しないとcatchにも到達しない)ため、明示的なタイムアウトで必ず
+        // 決着させる — タイムアウト時はTimeoutCancellationExceptionがrunCatchingに
+        // 捕捉され、Result.failureとして呼び出し元(RoomShareScreen)まで正しく伝わり、
+        // 「表示名の設定に失敗したにゃ」の表示とnameBusy解除(finallyブロック)につながる。
+        withTimeout(FIRESTORE_TASK_TIMEOUT_MS) {
+            db.collection(COLLECTION_ROOMS).document(roomId)
+                .update("members.$deviceId.displayName", displayName)
+                .await()
+        }
     }
 
     private const val COLLECTION_PIN_ROOMS = "pinRooms"
     private const val COLLECTION_ROOMS = "rooms"
     private const val MAX_MEMBERS = 2
+    private const val FIRESTORE_TASK_TIMEOUT_MS = 20_000L
 }
