@@ -1,18 +1,12 @@
 package com.mspg.poicat.room
 
-import android.util.Log
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import java.security.MessageDigest
 import java.util.UUID
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withTimeout
-
-/** 表示名設定処理の診断専用ログタグ。PIN/認証トークン/個人情報は一切出力しない —
- * roomId/deviceIdもtake(8)で先頭のみに留める。原因特定後に削除予定の一時的なもの。 */
-private const val DISPLAY_NAME_DEBUG_TAG = "DisplayNameDebug"
 
 /** ルームが既に2台（他デバイス）で満室で、この端末がまだメンバーでない場合に投げる。 */
 class RoomFullException : Exception("このルームは既に2台で利用中にゃ")
@@ -111,66 +105,15 @@ object RoomManager {
      * ルームの作り直し・PINの変更・再参加は一切発生しない — 既存のroomId/members
      * ドキュメントへの追記のみ。
      *
-     * [onDiagnostic]は各チェックポイント(D, E, F1〜F6, G, H, I)に到達するたびに、その
-     * ラベル文字だけを通知するオプションのコールバック(既定値は何もしない空ラムダ)。
-     * adb/Android Studioが使えない環境でも、呼び出し元(RoomShareScreen)がこれを画面
-     * 表示に使えるようにするための診断専用のフックで、動作そのものには一切影響しない。
-     * 秘密情報は一切渡さない(渡すのは"D"等の1文字/短いラベルのみ)。
+     * Play Services側のTask.awaitが実機で完了コールバックを一切呼ばないまま
+     * 固まることがある既知の問題(GoogleAuthManagerの認証処理で先に確認済み、同じ
+     * 対策)への対応として、[FIRESTORE_TASK_TIMEOUT_MS]でタイムアウトさせる。
      */
-    suspend fun setDisplayName(
-        roomId: String,
-        deviceId: String,
-        displayName: String,
-        onDiagnostic: (String) -> Unit = {},
-    ): Result<Unit> {
-        // D: この関数(RoomManager.setDisplayName)内部へ実際に到達したか。
-        Log.d(DISPLAY_NAME_DEBUG_TAG, "D: setDisplayName() entered")
-        onDiagnostic("D")
-        return try {
-            // E: roomId/deviceIdを実際に受け取れているか(先頭8文字のみ、秘密情報ではない)。
-            Log.d(
-                DISPLAY_NAME_DEBUG_TAG,
-                "E: roomId=${roomId.take(8)}… deviceId=${deviceId.take(8)}…",
-            )
-            onDiagnostic("E")
-            withTimeout(FIRESTORE_TASK_TIMEOUT_MS) {
-                // F1〜F6: 元々1つだった"F"チェックポイントを、update()呼び出しの各段階
-                // (参照取得→update()呼び出し→Task取得→await()直前→await()完了)へ細分化。
-                // これによりFの内側の「どの同期/非同期ステップで止まっているか」を
-                // スマホの画面だけで切り分けられるようにする(診断専用、動作は変えない)。
-                Log.d(DISPLAY_NAME_DEBUG_TAG, "F1: about to get collection/document reference")
-                onDiagnostic("F1")
-                val docRef = db.collection(COLLECTION_ROOMS).document(roomId)
-                Log.d(DISPLAY_NAME_DEBUG_TAG, "F2: document reference obtained")
-                onDiagnostic("F2")
-
-                Log.d(DISPLAY_NAME_DEBUG_TAG, "F3: about to call update(...)")
-                onDiagnostic("F3")
-                val task = docRef.update("members.$deviceId.displayName", displayName)
-                Log.d(DISPLAY_NAME_DEBUG_TAG, "F4: update(...) returned a Task")
-                onDiagnostic("F4")
-
-                Log.d(DISPLAY_NAME_DEBUG_TAG, "F5: about to call Task.await()")
-                onDiagnostic("F5")
-                task.await()
-                Log.d(DISPLAY_NAME_DEBUG_TAG, "F6: Task.await() completed")
-                onDiagnostic("F6")
-
-                // G: update().await()が例外無く完了(=成功)。
-                Log.d(DISPLAY_NAME_DEBUG_TAG, "G: update().await() completed successfully")
-                onDiagnostic("G")
-            }
-            Result.success(Unit)
-        } catch (e: TimeoutCancellationException) {
-            // H: 20秒のタイムアウトが実際に発火した(=ハングしていたことの証拠)。
-            Log.d(DISPLAY_NAME_DEBUG_TAG, "H: timed out after ${FIRESTORE_TASK_TIMEOUT_MS}ms")
-            onDiagnostic("H")
-            Result.failure(e)
-        } catch (e: Throwable) {
-            // I: タイムアウト以外の例外(権限エラー・ネットワークエラー等)。
-            Log.d(DISPLAY_NAME_DEBUG_TAG, "I: failed with ${e.javaClass.simpleName}: ${e.message}")
-            onDiagnostic("I: ${e.javaClass.simpleName}")
-            Result.failure(e)
+    suspend fun setDisplayName(roomId: String, deviceId: String, displayName: String): Result<Unit> = runCatching {
+        withTimeout(FIRESTORE_TASK_TIMEOUT_MS) {
+            db.collection(COLLECTION_ROOMS).document(roomId)
+                .update("members.$deviceId.displayName", displayName)
+                .await()
         }
     }
 

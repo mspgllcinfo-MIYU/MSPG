@@ -1,7 +1,6 @@
 package com.mspg.poicat
 
 import android.app.Activity
-import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -60,11 +59,6 @@ private enum class DriveFolderTarget(val label: String) {
     FILE("ファイル"),
 }
 
-/** 表示名設定処理の診断専用ログタグ。[com.mspg.poicat.room.RoomManager]側の同名タグと
- * 揃えている(同じ操作の追跡を1つのタグでフィルタできるように)。PIN/認証トークン/
- * 個人情報は一切出力しない。原因特定後に削除予定の一時的なもの。 */
-private const val DISPLAY_NAME_DEBUG_TAG = "DisplayNameDebug"
-
 // ConnectionScreen.kt と同じトーンをこのファイル内だけで再現(共有はしない、意図的な重複)。
 private val RoomInk = Color(0xFF201E1D)
 private val RoomCard = Color(0xFFEFE7DE)
@@ -116,42 +110,15 @@ fun RoomShareScreen(onBack: () -> Unit) {
     var nameBusy by remember { mutableStateOf(false) }
     var nameStatusText by remember { mutableStateOf<String?>(null) }
 
-    // PC/ADB/Android Studioが無くても実機の画面だけで診断できるようにするための、
-    // A〜Mの到達ログ(#137で追加したLog.dと同じチェックポイント)を画面に積み上げて
-    // 表示するだけの一時的な状態。表示名設定以外の動作には一切影響しない。
-    var diagnosticTrail by remember { mutableStateOf(listOf<String>()) }
-
     fun setDisplayName(name: String) {
-        // B: ボタンのonClickから呼ばれたこの関数自体に到達したか。
-        Log.d(DISPLAY_NAME_DEBUG_TAG, "B: RoomShareScreen.setDisplayName() called (name=$name)")
-        diagnosticTrail = diagnosticTrail + "B"
-        val currentRoomId = roomId ?: run {
-            Log.d(DISPLAY_NAME_DEBUG_TAG, "B: aborted — roomId is null")
-            diagnosticTrail = diagnosticTrail + "B:roomId is null"
-            return
-        }
+        val currentRoomId = roomId ?: return
         nameBusy = true
         scope.launch {
             try {
-                // C: RoomManager.setDisplayNameを呼ぶ直前。
-                Log.d(DISPLAY_NAME_DEBUG_TAG, "C: about to call RoomManager.setDisplayName()")
-                diagnosticTrail = diagnosticTrail + "C"
-                val result = RoomManager.setDisplayName(currentRoomId, roomStore.deviceId, name) { step ->
-                    diagnosticTrail = diagnosticTrail + step
-                }
-                // J: Resultがこのコルーチンへ戻ってきた。
-                Log.d(DISPLAY_NAME_DEBUG_TAG, "J: result received, isSuccess=${result.isSuccess}")
-                diagnosticTrail = diagnosticTrail + "J"
-                result
+                RoomManager.setDisplayName(currentRoomId, roomStore.deviceId, name)
                     .onSuccess {
                         roomStore.displayName = name
-                        // K: ローカル(SharedPreferences)への保存完了。
-                        Log.d(DISPLAY_NAME_DEBUG_TAG, "K: RoomStore.displayName saved locally")
-                        diagnosticTrail = diagnosticTrail + "K"
                         displayName = name
-                        // L: Compose state更新(画面再描画のトリガー)。
-                        Log.d(DISPLAY_NAME_DEBUG_TAG, "L: UI state displayName updated")
-                        diagnosticTrail = diagnosticTrail + "L"
                         nameStatusText = "表示名を設定したにゃ"
                     }
                     .onFailure {
@@ -159,9 +126,6 @@ fun RoomShareScreen(onBack: () -> Unit) {
                     }
             } finally {
                 nameBusy = false
-                // M: finallyへ到達し、ボタンのグレーアウトが解除されるはず。
-                Log.d(DISPLAY_NAME_DEBUG_TAG, "M: finally reached, nameBusy=false")
-                diagnosticTrail = diagnosticTrail + "M"
             }
         }
     }
@@ -445,8 +409,8 @@ fun RoomShareScreen(onBack: () -> Unit) {
 
             RoomCardBox(title = "あなたの表示名") {
                 Text(
-                    "マリたんが「どちらの予定・メモか」を区別できるように、この端末の" +
-                        "利用者を選ぶにゃ。あとで変更もできるにゃ。",
+                    "マリたんが、今話しているのがみゆたん・かっちゃんのどちらか分かるように、" +
+                        "この端末を使う人を選ぶにゃ。予定やメモは今まで通り2人で共有するにゃ。",
                     color = RoomInk.copy(alpha = 0.5f),
                 )
                 Spacer(Modifier.height(8.dp))
@@ -454,13 +418,7 @@ fun RoomShareScreen(onBack: () -> Unit) {
                     listOf("みゆたん", "かっちゃん").forEach { name ->
                         val selected = displayName == name
                         Button(
-                            onClick = {
-                                // A: ボタンのonClickが実際に呼ばれたか(タップ自体が届いているか)。
-                                // タップのたびに診断表示をリセットしてから積み上げていく。
-                                Log.d(DISPLAY_NAME_DEBUG_TAG, "A: button tapped (name=$name)")
-                                diagnosticTrail = listOf("A")
-                                setDisplayName(name)
-                            },
+                            onClick = { setDisplayName(name) },
                             enabled = !nameBusy,
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = if (selected) RoomPink else RoomPink.copy(alpha = 0.25f),
@@ -477,20 +435,6 @@ fun RoomShareScreen(onBack: () -> Unit) {
                 nameStatusText?.let { text ->
                     Spacer(Modifier.height(8.dp))
                     Text(text, color = RoomGold)
-                }
-                if (diagnosticTrail.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "診断：${diagnosticTrail.joinToString(" → ")}",
-                        color = RoomInk.copy(alpha = 0.5f),
-                        fontSize = 12.sp,
-                    )
-                    Text(
-                        "停止地点：${diagnosticTrail.last()}",
-                        color = RoomGold,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
                 }
             }
         }
