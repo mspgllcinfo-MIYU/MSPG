@@ -4,15 +4,22 @@ import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
+import java.time.YearMonth
 import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
 
 /**
  * Very small rule-based parser for Japanese date/time phrases. It only
  * understands a fixed set of common expressions (relative days, "来週の水曜"
- * style weekdays, "N日後", explicit "M月D日", and a trailing "N時"). Anything
- * fancier is intentionally out of scope — this is a memory cat, not an NLU
- * model.
+ * style weekdays, "N日後", explicit "M月D日", "来月D日", a standalone "D日"
+ * (month omitted), and a trailing "N時"). Anything fancier is intentionally
+ * out of scope — this is a memory cat, not an NLU model. Notably, it does
+ * NOT resolve a time-of-day word ("午前"/"午後"/"朝"/"夜" etc.) into an actual
+ * clock time — only an explicit "N時" is ever used for the hour, so a
+ * schedule registered from a time-of-day-only phrase keeps the default
+ * (9:00) time. #148 Phase 3-2: callers that need to know "is this schedule-
+ * shaped at all" should treat a time-of-day word as a signal only, never as
+ * a substitute for an actual parsed hour.
  */
 object DateTimeParser {
 
@@ -66,10 +73,15 @@ object DateTimeParser {
         var remaining = text
         var date: LocalDate? = null
 
-        fun tryMatch(regex: Regex, resolve: (MatchResult) -> LocalDate): Boolean {
+        // #148 Phase 3-2: resolveがnullを返した場合はこのパターン自体が
+        // 不成立だったものとして扱う(remainingも変更しない) — 「2月31日」の
+        // ような、その月に実在しない日付を、月末へ丸めたり別の日へ勝手に
+        // 補正したりせず、単に「解析できなかった」として安全に扱うため。
+        fun tryMatch(regex: Regex, resolve: (MatchResult) -> LocalDate?): Boolean {
             if (date != null) return false
             val m = regex.find(remaining) ?: return false
-            date = resolve(m)
+            val resolved = resolve(m) ?: return false
+            date = resolved
             remaining = remaining.removeRange(m.range)
             return true
         }
@@ -92,17 +104,83 @@ object DateTimeParser {
         tryMatch(Regex("(\\d{1,3})日後")) { m -> now.toLocalDate().plusDays(m.groupValues[1].toLong()) }
         tryMatch(Regex("(\\d{1,2})週間?後")) { m -> now.toLocalDate().plusWeeks(m.groupValues[1].toLong()) }
         tryMatch(Regex("(\\d{1,2})月(\\d{1,2})日")) { m ->
-            val month = m.groupValues[1].toInt()
-            val day = m.groupValues[2].toInt()
-            var d = LocalDate.of(now.year, month, day)
-            if (d.isBefore(now.toLocalDate())) d = d.plusYears(1)
-            d
+            resolveMonthDay(m.groupValues[1].toInt(), m.groupValues[2].toInt(), now.toLocalDate())
+        }
+        // #148 Phase 3-2: "来月D日"は必ず翌月の日付として解決する(単独"D日"
+        // パターンより先に評価しないと、"来月"を無視して単に"D日"だけが
+        // 拾われてしまう)。
+        tryMatch(Regex("来月(\\d{1,2})日")) { m ->
+            resolveNextMonthDay(m.groupValues[1].toInt(), now.toLocalDate())
+        }
+        // #148 Phase 3-2: 月を省略した単独の"D日"("15日に打ち合わせ"等)。
+        // "(\\d{1,3})日後"は既にこれより前で評価済みのため、"15日後"のような
+        // 入力はそちらが先に消費しており、ここには来ない。念のため後読み
+        // 否定"(?!後)"でも二重に防いでいる。
+        //
+        // 直前が"月"の場合は絶対にマッチさせない(後読み否定"(?<!月)") ——
+        // これが無いと、"2月31日"のように[resolveMonthDay]が「実在しない
+        // 日付」としてnullを返し不成立になった直後、このパターンが同じ
+        // 文字列の中から"月"を無視して"31日"だけを拾い上げ、10月31日
+        // のような全く別の(ユーザーが言っていない)日付を誤って確定させて
+        // しまう。存在しない日付は「解析失敗」のまま留めるべきで、単独D日
+        // パターンで「救済」してはならない。
+        tryMatch(Regex("(?<!月)(\\d{1,2})日(?!後)")) { m ->
+            resolveStandaloneDay(m.groupValues[1].toInt(), now.toLocalDate())
         }
         tryMatch(Regex("([月火水木金土日])曜日?")) { m ->
             nearestWeekday(now.toLocalDate(), weekdayChar.getValue(m.groupValues[1][0]))
         }
 
         return date?.let { it to remaining }
+    }
+
+    /**
+     * #148 Phase 3-2: "M月D日"の年またぎ解決。今年のM月D日が実在し、かつ
+     * 今日以降ならそれを使う。実在しない(例: うるう年でない年の2月29日)、
+     * または既に過ぎている場合は来年のM月D日を試す。来年にも実在しない
+     * 場合はnullを返し解析失敗として扱う — 存在しない日付を月末や別の日へ
+     * 勝手に丸めることは一切しない。
+     */
+    private fun resolveMonthDay(month: Int, day: Int, today: LocalDate): LocalDate? {
+        if (month !in 1..12) return null
+        val thisYearMonth = YearMonth.of(today.year, month)
+        if (day in 1..thisYearMonth.lengthOfMonth()) {
+            val candidate = LocalDate.of(today.year, month, day)
+            if (!candidate.isBefore(today)) return candidate
+        }
+        val nextYearMonth = YearMonth.of(today.year + 1, month)
+        if (day !in 1..nextYearMonth.lengthOfMonth()) return null
+        return LocalDate.of(today.year + 1, month, day)
+    }
+
+    /**
+     * #148 Phase 3-2: "15日"のように月を省略した日付を、現在日付を基準に
+     * 安全に解決する。今月にその日が既に実在し、かつ今日以降ならその日、
+     * 実在しない、または既に過ぎていれば翌月の同じ日を返す。指定された日が
+     * 今月にも翌月にも実在しない場合(例: 31日で今月・翌月とも31日が無い)は
+     * nullを返し解析失敗として扱う — 日を繰り上げたり月末へ丸めたりはしない。
+     */
+    private fun resolveStandaloneDay(day: Int, today: LocalDate): LocalDate? {
+        val thisMonth = YearMonth.of(today.year, today.monthValue)
+        if (day in 1..thisMonth.lengthOfMonth()) {
+            val candidate = LocalDate.of(today.year, today.monthValue, day)
+            if (!candidate.isBefore(today)) return candidate
+        }
+        val nextMonth = thisMonth.plusMonths(1)
+        if (day !in 1..nextMonth.lengthOfMonth()) return null
+        return LocalDate.of(nextMonth.year, nextMonth.monthValue, day)
+    }
+
+    /**
+     * #148 Phase 3-2: "来月15日"のように、必ず翌月の日付として解決する
+     * (来月である時点で必ず未来なので、今日以降かどうかの判定は不要)。
+     * 翌月にその日が実在しない場合(例: 今が1月で「来月31日」→2月に31日が
+     * 無い)はnullを返し解析失敗として扱う(月末へ丸めない)。
+     */
+    private fun resolveNextMonthDay(day: Int, today: LocalDate): LocalDate? {
+        val nextMonth = YearMonth.of(today.year, today.monthValue).plusMonths(1)
+        if (day !in 1..nextMonth.lengthOfMonth()) return null
+        return LocalDate.of(nextMonth.year, nextMonth.monthValue, day)
     }
 
     fun parseRegistration(text: String, now: LocalDateTime = LocalDateTime.now()): ParsedRegistration? {

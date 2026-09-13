@@ -5,6 +5,7 @@ import com.mspg.poicat.data.CatEventRepository
 import com.mspg.poicat.data.Photo
 import com.mspg.poicat.data.PhotoRepository
 import com.mspg.poicat.gemini.GeminiOutcome
+import com.mspg.poicat.gemini.GeminiRegistrationIntent
 import com.mspg.poicat.gemini.GeminiWorkJudge
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -481,45 +482,119 @@ class CatBrain(
         return "${whenPrefix}『${event.title}』入れたにゃ。仕事にも出しとく。"
     }
 
-    // #148 Phase 3-1追加修正: registerScheduleIfRecognized専用の予定登録ガードが
-    // 「時間帯の言及」として認識する語。DateTimeParser自体には新しい語彙を
-    // 追加せず、この入口ガードだけで使う — 「今日は暑いね」「今日は疲れた」
-    // 「明日は雨かな」のように、日付語(今日/明日)を1つ含むだけの雑談文には
-    // これらの語もN時のような時刻表現も現れないため、下のガードで弾かれる。
+    // #148 Phase 3-2: registerScheduleIfRecognized専用のローカル一次判定が
+    // 「予定意図が高い」シグナルとして使う、時間帯を表す語。あくまで
+    // 「予定として登録してよいか」の判断材料であり、実際の保存時刻を
+    // ここから生成することはしない — CatEventのdateTimeは従来通り
+    // DateTimeParser側の明示的な"N時"抽出(無ければデフォルト9:00)のまま
+    // ([調査5]で確認済みの通り、CatEvent/DateTimeParserの現在の構造では
+    // 「午後」等の時間帯だけを正確な時刻として保存することはできない —
+    // 既知の制約として最終報告で明記する)。
     private val timeOfDaySignals = listOf(
         "午前", "午後", "朝", "早朝", "昼", "夕方", "夕", "夜", "深夜", "未明",
     )
 
     private val explicitClockTimePattern = Regex("""\d{1,2}時""")
 
-    /**
-     * #148 Phase 3-1追加修正: [registerScheduleIfRecognized]専用の予定登録
-     * ガード。[DateTimeParser.parseRegistration]は「今日/明日等の日付語が
-     * 1つ含まれている」というだけで解析に成功してしまうため(例:「今日は
-     * 暑いね」→ タイトル「暑い」で解析成功する)、マリたんではその結果だけで
-     * 書き込みを確定しない。
-     *
-     * 新しいキーワード分類器やDateTimeParser自体の変更は行わず、[input]の
-     * 元の文字列に(a)具体的な時刻(「15時」「10時半」等の"N時"パターン)、
-     * または(b)時間帯を表す語([timeOfDaySignals])のいずれかが含まれる場合
-     * だけ、「予定として登録する意図が十分ある」とみなしtrueを返す。
-     * どちらも無ければ安全側にfalseを返す — 「迷ったら登録しない」という
-     * 方針をそのまま反映している。
-     *
-     * この設計により、時刻・時間帯のどちらも言及しない、日付語だけの短い
-     * 感想文("今日は疲れた"等)は登録されない。一方で意図的な副作用として、
-     * 「明日、現地確認」のように時刻・時間帯を一切言わない予定文はこの入口
-     * では登録されず(nullとなりGemini雑談へ渡る)、黒猫AI側の[respond]で
-     * 改めて登録し直す必要がある — マリたんに書き込み権限を与えたことで
-     * 生じる誤登録を安全側に倒すためのトレードオフとして許容する。
-     */
-    private fun looksLikeIntentionalScheduleRegistration(input: String): Boolean =
-        explicitClockTimePattern.containsMatchIn(input) || timeOfDaySignals.any { input.contains(it) }
+    // #148 Phase 3-2: 明白な雑談の可能性が高い、文末の口語的表現だけを対象と
+    // する狭いリスト。「今日は暑いね」「明日は雨かな」「明日は寒そう」のように、
+    // 日付語を1つ含むだけの感想・推量文の多くがこれらのいずれかで終わる。
+    // 判定は[DateTimeParser.cleanTitle]が日付語や助詞を取り除く前の、発話
+    // そのものの末尾に対して行う — cleanTitle後のタイトルは既にこれらの語尾
+    // を削ってしまっていることが多く(例:「今日は暑いね」→タイトル「暑い」)、
+    // その残骸だけで判定しようとすると「い」「た」のような1文字の語尾に頼る
+    // ことになり、「明日、支払い」「明日、確認した」のような正常な予定表現
+    // まで誤って弾いてしまう危険があるため、あえて避けている。
+    private val chitchatEndingSignals = listOf(
+        "かな", "だろう", "でしょう", "かも", "らしい", "そう", "ね", "よ", "わ",
+    )
 
     /**
-     * #148 Phase 3-1: マリたん(Gemini経由の音声アシスタント)専用の、書き込みを
-     * 伴う唯一の安全な予定登録エントリポイント。[answerPoiQueryOrNull]とは
-     * 違い、ここでは実際にCatEventを1件保存する — しかし[respond]と違って
+     * #148 Phase 3-2: [registerScheduleIfRecognized]専用のローカル一次判定。
+     * 「明白なケースを安く処理する」ためだけに使い、大量のキーワード辞書で
+     * 日本語全体を判定しようとはしない — 判断できない場合は必ずUNKNOWNを
+     * 返し、呼び出し元([judgeRegistrationIntent])がGeminiへ委ねる。
+     *
+     * - 明示的な時刻または時間帯シグナルを含む → SCHEDULE
+     *   (「今日15時に打ち合わせ」「明日の午後、美容院」等)
+     * - [chitchatEndingSignals]のいずれかで終わる → NOT_SCHEDULE
+     *   (「今日は暑いね」「明日は雨かな」等)
+     * - どちらにも該当しない(「明日、銀行」のような体言止めの用件文を含む)
+     *   → UNKNOWN
+     */
+    private fun judgeRegistrationIntentByRule(rawInput: String): RegistrationIntent {
+        if (explicitClockTimePattern.containsMatchIn(rawInput) || timeOfDaySignals.any { rawInput.contains(it) }) {
+            return RegistrationIntent.SCHEDULE
+        }
+        if (chitchatEndingSignals.any { rawInput.endsWith(it) }) {
+            return RegistrationIntent.NOT_SCHEDULE
+        }
+        return RegistrationIntent.UNKNOWN
+    }
+
+    /**
+     * #148 Phase 3-2: マリたんの発話が「そもそも予定登録の意図を持つ発話か」
+     * どうかの判定結果。[CatEvent]のDBへ保存する値ではなく、
+     * [registerScheduleIfRecognized]内部だけで使う一時的な判定。予定として
+     * 登録することが確定した*後*にのみ意味を持つ[WorkJudgment](仕事かどうか)
+     * とは完全に独立した、別の問い — 1回のAI判定に混ぜない。
+     */
+    private enum class RegistrationIntent { SCHEDULE, NOT_SCHEDULE, UNKNOWN }
+
+    /**
+     * #148 Phase 3-2: 予定登録の意図があるかどうかを判定する、2段構成の入口。
+     * [WorkJudgment]用の[judgeWorkIntent]と全く同じパターン:
+     *
+     * 1. [judgeRegistrationIntentByRule](端末内・無料・即時)を必ず先に試す。
+     *    SCHEDULE/NOT_SCHEDULEのどちらかを確信を持って返した場合は、それを
+     *    そのまま採用しGeminiには一切問い合わせない。
+     * 2. ルールベースがUNKNOWNだった場合だけ、[GeminiRegistrationIntent]に
+     *    よる意味判定を二次判定として試す。[withTimeoutOrNull]で待ち時間の
+     *    上限を設け、通信失敗・timeout・quota超過・APIキー未設定・不正/空
+     *    応答・予期しない例外は全て素通りさせず、最終的に必ず
+     *    RegistrationIntentのいずれかの値へ落とし込む(誤登録防止を優先し、
+     *    判定できなければ必ずUNKNOWN＝未登録)。Geminiの自由な応答文字列を
+     *    直接ここでDB操作に使うことはせず、[parseAiRegistrationIntent]で
+     *    厳密に3値へ強制変換してから返す。
+     *
+     * [GeminiRegistrationIntent]へ送信するのは[rawInput](今回発話された
+     * 文章そのもの)だけ — POI内部の予定一覧/タスク一覧/メモ/アルバム/
+     * ファイル/Firestore/Room情報は一切含めない。
+     */
+    private suspend fun judgeRegistrationIntent(rawInput: String): RegistrationIntent {
+        val ruleResult = judgeRegistrationIntentByRule(rawInput)
+        if (ruleResult != RegistrationIntent.UNKNOWN) return ruleResult
+
+        val aiOutcome = runCatching {
+            withTimeoutOrNull(8_000) { GeminiRegistrationIntent.judge(rawInput).getOrNull() }
+        }.getOrNull()
+
+        val answer = aiOutcome as? GeminiOutcome.Answer ?: return RegistrationIntent.UNKNOWN
+        return parseAiRegistrationIntent(answer.text)
+    }
+
+    /**
+     * #148 Phase 3-2: [GeminiRegistrationIntent]の生テキスト応答を、判定に
+     * 使う前に必ずRegistrationIntentの3値のいずれかへ強制変換する —
+     * [parseAiWorkJudgment]と同じ考え方。"NOT_SCHEDULE"は"SCHEDULE"を部分
+     * 文字列として含むため、部分一致は必ずNOT_SCHEDULEを先に判定する。
+     * 判定できない応答は全て安全側のUNKNOWNに倒す。
+     */
+    private fun parseAiRegistrationIntent(raw: String): RegistrationIntent {
+        val normalized = raw.trim().uppercase()
+        return when {
+            normalized == "SCHEDULE" -> RegistrationIntent.SCHEDULE
+            normalized == "NOT_SCHEDULE" -> RegistrationIntent.NOT_SCHEDULE
+            normalized.contains("NOT_SCHEDULE") -> RegistrationIntent.NOT_SCHEDULE
+            normalized.contains("SCHEDULE") -> RegistrationIntent.SCHEDULE
+            else -> RegistrationIntent.UNKNOWN
+        }
+    }
+
+    /**
+     * #148 Phase 3-1/3-2: マリたん(Gemini経由の音声アシスタント)専用の、
+     * 書き込みを伴う唯一の安全な予定登録エントリポイント。[answerPoiQueryOrNull]
+     * とは違い、ここでは実際にCatEventを1件保存する — しかし[respond]と違って
      * 「解釈できなかった入力を何であれメモとして保存する」という最終
      * フォールバックは持たない。呼び出し元(MariTanRow)はnullの場合、これまで
      * 通り[answerPoiQueryOrNull]やGemini雑談へ進む。
@@ -531,11 +606,11 @@ class CatBrain(
      *    しないための、既存コードと同じ安全順序)。
      * 2. [DateTimeParser.parseRegistration]がnullならnull(日付語自体が
      *    見つからない)。
-     * 3. [looksLikeIntentionalScheduleRegistration]がfalseならnull —
-     *    日付語は見つかったが、時刻・時間帯の言及が無い(＝「今日は暑いね」
-     *    のような雑談の可能性が高い)場合はここで打ち切る。この関数を通過
-     *    しなかった入力について[GeminiWorkJudge]が呼ばれることは無い(3を
-     *    通過して初めて4のrememberScheduleWithWorkJudgmentへ進むため)。
+     * 3. [judgeRegistrationIntent]が[RegistrationIntent.SCHEDULE]以外を
+     *    返せばnull — ローカル一次判定・Gemini二次判定のどちらも通過
+     *    しなかった入力(NOT_SCHEDULE/UNKNOWN)について[GeminiWorkJudge]が
+     *    呼ばれることは無い(3を通過して初めて4のrememberScheduleWithWorkJudgment
+     *    へ進むため、登録意図判定と仕事判定は独立したまま)。
      * 4. 1〜3を全て通過した場合だけ[rememberScheduleWithWorkJudgment]を呼ぶ
      *    — 予定の保存([CatEventRepository.remember])自体は仕事判定(Gemini
      *    呼び出しを含み得る)より必ず先に完了しており、判定が失敗しても予定
@@ -550,7 +625,7 @@ class CatBrain(
 
         val now = LocalDateTime.now()
         val registration = DateTimeParser.parseRegistration(trimmed, now) ?: return null
-        if (!looksLikeIntentionalScheduleRegistration(trimmed)) return null
+        if (judgeRegistrationIntent(trimmed) != RegistrationIntent.SCHEDULE) return null
 
         val (saved, judgment) = rememberScheduleWithWorkJudgment(registration.title, registration.dateTime.toEpochMilli())
         return CatReply(scheduleRegisteredReply(saved, judgment, now))
