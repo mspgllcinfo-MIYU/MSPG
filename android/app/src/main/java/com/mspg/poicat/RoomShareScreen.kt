@@ -46,6 +46,7 @@ import com.mspg.poicat.drive.DriveFolderRepository
 import com.mspg.poicat.drive.RoomCatalogSync
 import com.mspg.poicat.room.NotSignedInException
 import com.mspg.poicat.room.RoomBackfill
+import com.mspg.poicat.room.RoomDriveFolderSync
 import com.mspg.poicat.room.RoomEventSync
 import com.mspg.poicat.room.RoomDriveTombstoneSync
 import com.mspg.poicat.room.RoomFullException
@@ -165,6 +166,10 @@ fun RoomShareScreen(onBack: () -> Unit) {
                 fileFolderName = folderDisplayName
             }
         }
+        // ルーム参加済みなら、このfolderIdをパートナー端末とも共有する
+        // (Firestore経由、fire-and-forget — 失敗してもこのフォルダ接続自体には
+        // 一切影響しない)。ルーム未参加なら即noop。
+        scope.launch { RoomDriveFolderSync.pushFolderInfo(context) }
     }
 
     // 未接続のフォルダだけを対象にする — 既に接続済み(albumFolderId/fileFolderIdが
@@ -282,6 +287,9 @@ fun RoomShareScreen(onBack: () -> Unit) {
                         // 予定/タスク/メモ/写真/ファイル)を一括で送る。ローカルの表示・
                         // データには一切影響しない、後追いのfire-and-forget処理。
                         scope.launch { RoomBackfill.pushUnsyncedToRoom(activity) }
+                        // 参加前からフォルダ接続済みだった場合に備え、この端末の
+                        // folderIdも今すぐ共有する(fire-and-forget)。
+                        scope.launch { RoomDriveFolderSync.pushFolderInfo(context) }
                         // Drive接続済みなら、参加直後にも一度カタログを取り込んでおく —
                         // アルバム/ファイル画面を開くタイミングだけに頼らない。
                         scope.launch {

@@ -41,6 +41,7 @@ import com.mspg.poicat.auth.GoogleAuthManager
 import com.mspg.poicat.drive.DriveConnectionStore
 import com.mspg.poicat.drive.DriveFolderRepository
 import com.mspg.poicat.room.NotSignedInException
+import com.mspg.poicat.room.RoomDriveFolderSync
 import com.mspg.poicat.room.RoomEventSync
 import com.mspg.poicat.room.RoomFullException
 import com.mspg.poicat.room.RoomManager
@@ -111,6 +112,10 @@ fun ConnectionScreen(onBack: () -> Unit) {
                         roomId = newRoomId
                         roomStatusText = "ルームに参加したにゃ"
                         RoomEventSync.startListening(context.applicationContext)
+                        // ルーム参加前にフォルダ接続済みだった場合に備え、この端末の
+                        // folderIdを今すぐ共有する(fire-and-forget、既存の
+                        // RoomBackfillと同じ「参加直後に共有」という考え方)。
+                        scope.launch { RoomDriveFolderSync.pushFolderInfo(context) }
                     }
                     .onFailure {
                         roomStatusText = when (it) {
@@ -138,6 +143,10 @@ fun ConnectionScreen(onBack: () -> Unit) {
                     FolderTarget.ALBUM -> { store.albumFolderId = folder.id; store.albumFolderName = displayName; albumFolderName = displayName }
                     FolderTarget.FILE -> { store.fileFolderId = folder.id; store.fileFolderName = displayName; fileFolderName = displayName }
                 }
+                // ルーム参加済みなら、このfolderIdをパートナー端末とも共有する
+                // (Firestore経由、fire-and-forget — 失敗してもこのフォルダ接続
+                // 自体には一切影響しない)。ルーム未参加なら即noop。
+                scope.launch { RoomDriveFolderSync.pushFolderInfo(context) }
                 statusText = "「$displayName」を接続したにゃ"
             } catch (e: Exception) {
                 statusText = "フォルダの準備に失敗したにゃ：${e.message ?: e.javaClass.simpleName}"

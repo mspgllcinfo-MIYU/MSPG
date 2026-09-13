@@ -11,6 +11,7 @@ import com.mspg.poicat.drive.RoomCatalogSync
 import com.mspg.poicat.notify.ReminderWorker
 import com.mspg.poicat.notify.ensureNotificationChannel
 import com.mspg.poicat.room.RoomBackfill
+import com.mspg.poicat.room.RoomDriveFolderSync
 import com.mspg.poicat.room.RoomDriveTombstoneSync
 import com.mspg.poicat.room.RoomEventSync
 import com.mspg.poicat.room.RoomPhotoMetadataSync
@@ -38,6 +39,11 @@ class MainActivity : ComponentActivity() {
         // 途中までしか終わらなかった場合の自然な再試行機会。ルーム未参加、または
         // 前回までに全て送信済みなら実質何もしない(RoomBackfill参照)。
         lifecycleScope.launch { RoomBackfill.pushUnsyncedToRoom(this@MainActivity) }
+        // この端末の現在のalbumFolderId/fileFolderIdをパートナー端末とも共有する
+        // (Firestore経由、fire-and-forget)。ルーム未参加、またはまだどちらの
+        // フォルダにも接続していない場合は即noop。失敗してもフォルダ接続状態
+        // 自体には一切影響しない。
+        lifecycleScope.launch { RoomDriveFolderSync.pushFolderInfo(applicationContext) }
         // アルバム/ファイル画面を開いたときだけに頼らず、アプリ起動のたびにも
         // Driveカタログの取り込みを試みる(ルーム未参加/Driveフォルダ未接続なら
         // 即noop)。失敗してもローカルデータには一切影響しない。

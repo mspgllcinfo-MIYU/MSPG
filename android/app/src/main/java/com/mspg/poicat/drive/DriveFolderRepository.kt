@@ -204,33 +204,27 @@ object DriveFolderRepository {
             }
         }
 
-    private fun findFolder(accessToken: String, name: String, parentId: String?): DriveFolder? =
-        listMatchingFolders(accessToken, name, parentId).firstOrNull()
-
     /**
-     * [findFolder]と同じ検索条件で該当する全フォルダを返す版。[ensureFolder]自体(create-
-     * if-absentの挙動、アップロード先の決定)は一切変更しない — 過去に別々のタイミングで
-     * 同名フォルダが複数作られてしまった場合(実機調査で判明: 夫婦2台がそれぞれ別々の
-     * タイミングで初回接続した際に「POI用」または子フォルダが端末ごとに重複作成される
-     * ケース)でも、フォルダ自体を削除・統合せずに、既存の全フォルダを「読み取り(発見)
-     * 対象」として広げるために[com.mspg.poicat.room.RoomCatalogSync]から使う。
+     * 名前による検索(発見)ベースの解決策(findAllFolders等)は、実機調査により
+     * drive.fileスコープの制約(別端末=別の認可イベントで作成されたフォルダは
+     * files.list検索に出てこない)で機能しないことが判明したため撤去した。
+     * 現在の[ensureFolder]のcreate-if-absent判定にのみ使う、1件だけを返す
+     * 従来通りの実装に戻している。パートナー端末のfolderId発見は、Drive検索では
+     * なく[com.mspg.poicat.room.RoomDriveFolderSync](Firestore経由で既知のIDを
+     * 直接共有する方式)が担う。
      */
-    suspend fun findAllFolders(accessToken: String, name: String, parentId: String?): Result<List<DriveFolder>> =
-        withContext(Dispatchers.IO) { runCatching { listMatchingFolders(accessToken, name, parentId) } }
-
-    private fun listMatchingFolders(accessToken: String, name: String, parentId: String?): List<DriveFolder> {
+    private fun findFolder(accessToken: String, name: String, parentId: String?): DriveFolder? {
         val query = buildString {
             append("mimeType='$FOLDER_MIME' and name='${escapeQueryValue(name)}' and trashed=false")
             if (parentId != null) append(" and '${escapeQueryValue(parentId)}' in parents")
         }
         val url = "$API_BASE?q=${URLEncoder.encode(query, "UTF-8")}" +
-            "&fields=${URLEncoder.encode("files(id,name)", "UTF-8")}&pageSize=1000"
+            "&fields=${URLEncoder.encode("files(id,name)", "UTF-8")}"
         val response = request(url, "GET", accessToken, body = null)
         val files = JSONObject(response).optJSONArray("files") ?: JSONArray()
-        return (0 until files.length()).map { i ->
-            val obj = files.getJSONObject(i)
-            DriveFolder(id = obj.getString("id"), name = obj.getString("name"))
-        }
+        if (files.length() == 0) return null
+        val first = files.getJSONObject(0)
+        return DriveFolder(id = first.getString("id"), name = first.getString("name"))
     }
 
     private fun createFolder(accessToken: String, name: String, parentId: String?): DriveFolder {

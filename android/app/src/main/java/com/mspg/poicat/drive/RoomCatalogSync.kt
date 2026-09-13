@@ -4,6 +4,7 @@ import android.app.Activity
 import com.mspg.poicat.auth.GoogleAuthManager
 import com.mspg.poicat.data.FileRepository
 import com.mspg.poicat.data.PhotoRepository
+import com.mspg.poicat.room.RoomDriveFolderSync
 import com.mspg.poicat.room.RoomDriveTombstoneSync
 import com.mspg.poicat.room.RoomStore
 
@@ -19,19 +20,18 @@ import com.mspg.poicat.room.RoomStore
  * フォルダの中身をDrive APIで一覧し、ローカルにまだ無い（driveFileIdで判定）ものだけを
  * ダウンロードしてローカル行として取り込む — 既にある分は何もしない。
  *
- * 実機調査で判明: 夫婦2台がそれぞれ別々のタイミングで初回のGoogle連携を行った場合、
- * [DriveFolderRepository.ensureFolder]の「名前で検索して無ければ作成」には排他制御が
- * 無いため、"POI用"や"アルバム"/"ファイル"という同名のフォルダが端末ごとに別IDで
- * 重複作成されてしまうことがある。この場合、各端末に保存されている
- * [DriveConnectionStore.albumFolderId]/[DriveConnectionStore.fileFolderId]（アップロード
- * 先として使う1つのID）だけを一覧しても、もう片方の端末が作った別IDのフォルダの中身は
- * 永久に見えない。
+ * 【重要・実機調査で判明した経緯】当初は「同名フォルダをDrive上で名前検索して全て
+ * 発見する」方式(findAllFolders)を試したが、drive.fileスコープの制約により、
+ * 同一Googleアカウント・同一アプリ・同一ルームであっても、別端末(別の認可イベント)
+ * で作成されたフォルダはfiles.list検索の結果に出てこないことが実機で確認された。
+ * そのため名前検索による発見には一切依存せず、[RoomDriveFolderSync](Firestore経由
+ * で各端末が自分のalbumFolderId/fileFolderIdを共有するだけの仕組み)から取得した
+ * パートナー端末の「既知のfolderId」に対して、既存の[DriveFolderRepository.listFiles]
+ * (既知IDへの直接アクセス、検索ではない)を呼ぶ方式に変更した。
  *
- * そのため、ここでの「発見（読み取り）対象」は自端末のキャッシュ済みIDだけに限定せず、
- * 同名の"POI用"フォルダ・その下の同名の対象フォルダ（アルバム/ファイル）をDrive上で
- * 全て検索し、見つかった全フォルダのlistFiles結果を合算する（[discoverFolderIds]）。
- * フォルダ自体の削除・統合・移動・再作成は一切行わない — アップロード先
- * （[PhotoDriveSync]/[FileDriveSync]が使う既存のキャッシュ済みfolderId）も変更しない。
+ * フォルダ自体の削除・統合・移動・再作成は一切行わない。アップロード先
+ * （[PhotoDriveSync]/[FileDriveSync]が使う既存のキャッシュ済みfolderId）も変更しない
+ * — [RoomDriveFolderSync]はfolderIdを読み取って共有するだけで、書き換えは行わない。
  * 同一driveFileIdは全フォルダ分を通じて一度しか取り込まない（[refreshAlbumCatalog]/
  * [refreshFileCatalog]内の`seen`集合、およびbyDriveFileIdの既存チェック）。
  *
@@ -39,21 +39,12 @@ import com.mspg.poicat.room.RoomStore
  * 即座に何もしない（[CatalogRefreshOutcome.SKIPPED]）。Google同意画面はここでは
  * インタラクティブに出さない（PhotoDriveSync/FileDriveSyncと同じ方針、勝手な再ログイン・
  * 認可解除は一切しない）— サイレントに認可が取れない場合は[CatalogRefreshOutcome.
- * AUTH_NOT_GRANTED]を返すだけで、以前のように完全に無言のまま終わらない（呼び出し元の
- * 画面がこれを見て「Drive連携の確認が必要かも」といった非侵襲的な表示を出せるようにする
- * ためのもので、認可を強制的に取り直す処理はここには一切無い）。
+ * AUTH_NOT_GRANTED]を返すだけで、以前のように完全に無言のまま終わらない。
  *
  * それ以外の失敗（一覧取得・ダウンロードの個別失敗等）は従来通りrunCatchingで囲み、
  * 既存のローカル一覧表示には一切影響しない。
  */
 object RoomCatalogSync {
-    // ConnectionScreenのFolderTarget/ensureFolderが実際に作成・検索する名前と完全に
-    // 一致させる必要がある（フォルダの作成・接続先決定自体はConnectionScreen/
-    // DriveConnectionStoreの既存ロジックのまま — ここでは名前検索のためだけに複製）。
-    private const val POI_ROOT_FOLDER_NAME = "POI用"
-    private const val ALBUM_FOLDER_NAME = "アルバム"
-    private const val FILE_FOLDER_NAME = "ファイル"
-
     enum class CatalogRefreshOutcome {
         /** ルーム未参加、またはこの端末がまだ対象フォルダに接続していない — 通常の
          * 状態で、UIに警告を出す必要はない。 */
@@ -75,7 +66,8 @@ object RoomCatalogSync {
         val accessToken = grantedAccessToken(activity) ?: return CatalogRefreshOutcome.AUTH_NOT_GRANTED
 
         runCatching {
-            val folderIds = discoverFolderIds(accessToken, ALBUM_FOLDER_NAME, cachedFolderId)
+            val partner = RoomDriveFolderSync.fetchPartnerFolderIds(activity)
+            val folderIds = partner.albumFolderIds + cachedFolderId
             val seen = mutableSetOf<String>()
             for (folderId in folderIds) {
                 DriveFolderRepository.listFiles(accessToken, folderId).getOrNull()?.forEach { remote ->
@@ -99,7 +91,8 @@ object RoomCatalogSync {
         val accessToken = grantedAccessToken(activity) ?: return CatalogRefreshOutcome.AUTH_NOT_GRANTED
 
         runCatching {
-            val folderIds = discoverFolderIds(accessToken, FILE_FOLDER_NAME, cachedFolderId)
+            val partner = RoomDriveFolderSync.fetchPartnerFolderIds(activity)
+            val folderIds = partner.fileFolderIds + cachedFolderId
             val seen = mutableSetOf<String>()
             for (folderId in folderIds) {
                 DriveFolderRepository.listFiles(accessToken, folderId).getOrNull()?.forEach { remote ->
@@ -112,23 +105,6 @@ object RoomCatalogSync {
             }
         }
         return CatalogRefreshOutcome.OK
-    }
-
-    /**
-     * [targetFolderName]という名前のフォルダを、"POI用"という名前のフォルダ(複数存在
-     * する場合は全て)の直下から全て発見し、そのIDの集合を返す。フォルダの削除・統合・
-     * 再作成は一切行わない — 発見(読み取り対象を広げる)だけ。[cachedFolderId]
-     * (この端末が実際にアップロード先として使っているフォルダID)は、名前検索で万一
-     * 見つからなかった場合でも読み取り対象から漏れないよう、常に結果に含める(既存の
-     * 動作を後退させないための保険)。
-     */
-    private suspend fun discoverFolderIds(accessToken: String, targetFolderName: String, cachedFolderId: String): Set<String> {
-        val ids = mutableSetOf(cachedFolderId)
-        val roots = DriveFolderRepository.findAllFolders(accessToken, POI_ROOT_FOLDER_NAME, null).getOrNull() ?: emptyList()
-        for (root in roots) {
-            DriveFolderRepository.findAllFolders(accessToken, targetFolderName, root.id).getOrNull()?.forEach { ids.add(it.id) }
-        }
-        return ids
     }
 
     /** Grantedの場合だけアクセストークンを返す — 同意画面が必要な場合(ResolutionNeeded)
