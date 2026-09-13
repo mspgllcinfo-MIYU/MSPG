@@ -47,6 +47,7 @@ object RoomEventSync {
         "completed" to event.completed,
         "category" to event.category,
         "updatedAt" to event.updatedAt,
+        "assignee" to event.assignee,
     )
 
     /**
@@ -129,6 +130,9 @@ object RoomEventSync {
                             category = data["category"] as? String,
                             roomEventId = roomEventId,
                             updatedAt = remoteUpdatedAt,
+                            // 旧版端末(assigneeをまだ知らないバージョン)が書いたドキュメントには
+                            // このキー自体が無い — その場合はnull(未設定)として扱う。
+                            assignee = data["assignee"] as? String,
                         )
                         if (local == null) dao.insert(merged) else dao.update(merged)
                     }

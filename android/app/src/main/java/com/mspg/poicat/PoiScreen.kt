@@ -253,6 +253,12 @@ fun PoiScreen(
                             refreshTick++
                         }
                     },
+                    onAssigneeChange = { task, assignee ->
+                        scope.launch {
+                            repository.setAssignee(task, assignee)
+                            refreshTick++
+                        }
+                    },
                 )
             }
             // 100点仕様: メモは独立タブをやめ、プラベの中のタスク/メモ切替に統合した。
@@ -308,6 +314,12 @@ fun PoiScreen(
                                     // photos/album are never touched by this.
                                     photoRepository.unlinkAllForMemo(task.id)
                                     repository.delete(task)
+                                    refreshTick++
+                                }
+                            },
+                            onAssigneeChange = { task, assignee ->
+                                scope.launch {
+                                    repository.setAssignee(task, assignee)
                                     refreshTick++
                                 }
                             },
@@ -446,6 +458,7 @@ private fun TaskList(
     onToggleCompleted: (CatEvent) -> Unit,
     onClick: (CatEvent) -> Unit,
     onDelete: (CatEvent) -> Unit,
+    onAssigneeChange: (CatEvent, String?) -> Unit,
 ) {
     LazyColumn(
         modifier = modifier,
@@ -465,6 +478,7 @@ private fun TaskList(
                 onToggleCompleted = { onToggleCompleted(task) },
                 onClick = { onClick(task) },
                 onDelete = { onDelete(task) },
+                onAssigneeChange = { assignee -> onAssigneeChange(task, assignee) },
             )
         }
     }
@@ -476,6 +490,7 @@ private fun TaskRow(
     onToggleCompleted: () -> Unit,
     onClick: () -> Unit,
     onDelete: () -> Unit,
+    onAssigneeChange: (String?) -> Unit,
 ) {
     // Step4-1: a completed row stays the same shape, just quieter — lighter
     // card, weaker ink — on top of the existing strike-through.
@@ -516,6 +531,32 @@ private fun TaskRow(
                     fontSize = 12.sp,
                     color = if (task.completed) PoiInk.copy(alpha = 0.35f) else PoiGold,
                 )
+            }
+            // #142: 担当ラベルは仕事タスク(category == CATEGORY_WORK)にのみ表示する
+            // — プラベタスク/予定/メモには一切出さない。担当は表示・同期を絞る
+            // ものではなく、誰であってもこのタスクは双方の端末に表示され続ける
+            // ラベルにすぎない。
+            if (task.category == CatEvent.CATEGORY_WORK) {
+                Spacer(Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(CatEvent.ASSIGNEE_MIYU, CatEvent.ASSIGNEE_KATCHAN, CatEvent.ASSIGNEE_BOTH).forEach { label ->
+                        val selected = task.assignee == label
+                        FilterChip(
+                            selected = selected,
+                            // 選択済みのラベルをもう一度タップすると「未設定」(null)に戻せる。
+                            onClick = { onAssigneeChange(if (selected) null else label) },
+                            label = { Text(label, fontSize = 11.sp) },
+                            shape = RoundedCornerShape(percent = 50),
+                            colors = FilterChipDefaults.filterChipColors(
+                                containerColor = Color.Transparent,
+                                labelColor = PoiInk.copy(alpha = 0.5f),
+                                selectedContainerColor = PoiGold.copy(alpha = 0.25f),
+                                selectedLabelColor = PoiInk,
+                            ),
+                            border = BorderStroke(0.dp, Color.Transparent),
+                        )
+                    }
+                }
             }
         }
         IconButton(onClick = onDelete) {

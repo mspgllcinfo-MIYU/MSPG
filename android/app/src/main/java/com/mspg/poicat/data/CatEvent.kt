@@ -42,9 +42,22 @@ data class CatEvent(
     /** この行が最後に変更された時刻（epoch millis）。ルーム共有時の
      * 「新しい方を勝たせる」競合解決にのみ使う — 通常のローカル専用動作には影響しない。 */
     val updatedAt: Long = System.currentTimeMillis(),
+    /**
+     * 仕事タスク（[isTask]かつ[category] == [CATEGORY_WORK]）だけに意味を持つ担当
+     * ラベル（[ASSIGNEE_MIYU]/[ASSIGNEE_KATCHAN]/[ASSIGNEE_BOTH]、または未設定の
+     * null）。表示や同期を担当別に絞るためのものではない — どの値でも、この
+     * タスクはみゆたん・かっちゃん双方の端末に同じ1件として表示・同期され続ける。
+     * nullは「未設定」という実在の状態であり、既存タスクを黙って「2人」等へ
+     * 書き換えることはしない。
+     */
+    val assignee: String? = null,
 ) {
     companion object {
         const val CATEGORY_WORK = "work"
         const val CATEGORY_PRIVATE = "private"
+
+        const val ASSIGNEE_MIYU = "みゆたん"
+        const val ASSIGNEE_KATCHAN = "かっちゃん"
+        const val ASSIGNEE_BOTH = "2人"
     }
 }
