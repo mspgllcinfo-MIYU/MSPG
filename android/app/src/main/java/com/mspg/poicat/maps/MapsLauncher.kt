@@ -37,6 +37,34 @@ object MapsLauncher {
     /** [destination]までのGoogle Mapsナビ(経路)を開く。開けた場合はtrue。 */
     fun openNavigation(context: Context, destination: String): Boolean = openMapsUrl(context, NAVIGATION_BASE, destination)
 
+    /**
+     * #148 Maps-1B: 共有(Android ACTION_SEND)経由で受け取った、既に
+     * [SharedLocationDetector]でGoogle Maps系のhostだと確認済みのURLを
+     * そのまま開く。[openSearch]/[openNavigation]のように新しくURLを組み立てる
+     * のではなく、共有された元のURL(短縮URLの場合はそのまま)を使う — 短縮URL
+     * の展開・解析はここでは一切行わず、Android/Google Maps自身の解決に
+     * 委ねる。
+     *
+     * 呼び出し元での検証漏れに対する保険として、ここでも改めてscheme が
+     * http/httpsであることを確認する — `intent://`/`file://`/`content://`/
+     * `javascript:`等の不正なschemeを持つ文字列が万一渡された場合でも、
+     * ここで必ず弾く(何もせずfalseを返すだけで、それらのスキームを
+     * ACTION_VIEWで直接起動することはない)。
+     */
+    fun openUrl(context: Context, url: String): Boolean {
+        val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return false
+        val scheme = uri.scheme?.lowercase()
+        if (scheme != "https" && scheme != "http") return false
+
+        return runCatching {
+            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+            true
+        }.getOrDefault(false)
+    }
+
     private fun openMapsUrl(context: Context, base: String, target: String): Boolean {
         val trimmed = target.trim()
         if (trimmed.isEmpty() || trimmed.length > MAX_DESTINATION_LENGTH) return false

@@ -19,14 +19,17 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -41,8 +44,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.mspg.poicat.data.CatEventRepository
+import com.mspg.poicat.maps.MapsLauncher
+import com.mspg.poicat.maps.SharedLocationDetector
 import java.time.LocalDate
 import java.time.YearMonth
+import kotlinx.coroutines.launch
 
 // Step2: bottom nav design tokens, matching HomeScreen's local palette by value
 // (HomeScreen.kt itself is not touched — these are duplicated on purpose until
@@ -84,6 +91,7 @@ private val LocalDateSaver = Saver<LocalDate, Long>(
 fun AppRoot() {
     var selectedTab by remember { mutableStateOf(AppTab.HOME) }
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     var calendarYearMonth by rememberSaveable(stateSaver = YearMonthSaver) { mutableStateOf(YearMonth.now()) }
     var calendarSelectedDate by rememberSaveable(stateSaver = LocalDateSaver) { mutableStateOf(LocalDate.now()) }
@@ -124,6 +132,35 @@ fun AppRoot() {
             selectedTab = tab
             PendingNavigation.requestedTab = null
         }
+    }
+
+    // #148 Maps-1B: ShareIntentHandlerが検出した「地図/場所の共有らしい
+    // テキスト」(PendingSharedLocation、PendingNavigationと同じ一度きりの
+    // stateパターン)をここで観測し、確認ダイアログを表示する。共有を受信
+    // しただけではCatEventもメモも一切作らない — 下のダイアログで
+    // ユーザーが「メモに保存」を明示的に選んだ場合だけ、既存の
+    // CatEventRepository.remember()経由で保存する。選択後・キャンセル後・
+    // ダイアログを閉じた場合のいずれも、この一度きりのstateは必ずnullへ
+    // 戻す(同じ共有を再度処理しないため)。
+    val sharedLocationText = PendingSharedLocation.pending
+    if (sharedLocationText != null) {
+        SharedLocationConfirmationDialog(
+            text = sharedLocationText,
+            onOpenMaps = {
+                val mapsUrl = SharedLocationDetector.extractMapsUrl(sharedLocationText)
+                if (mapsUrl != null) {
+                    MapsLauncher.openUrl(context, mapsUrl)
+                } else {
+                    MapsLauncher.openSearch(context, sharedLocationText)
+                }
+                PendingSharedLocation.pending = null
+            },
+            onSaveAsMemo = {
+                scope.launch { CatEventRepository(context).remember(sharedLocationText, null) }
+                PendingSharedLocation.pending = null
+            },
+            onDismiss = { PendingSharedLocation.pending = null },
+        )
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -265,4 +302,35 @@ private fun BottomTabBar(selectedTab: AppTab, onSelect: (AppTab) -> Unit) {
             )
         }
     }
+}
+
+/**
+ * #148 Maps-1B: Google Maps/Gemini等から共有された場所テキストを受け取った
+ * 直後に表示する、最小限の確認ダイアログ。[onOpenMaps]/[onSaveAsMemo]の
+ * どちらも呼び出し元(AppRoot)が明示的に選ばれた場合にだけ実行する —
+ * このComposable自身はCatEventもメモも一切作らない。[onDismiss]は
+ * ダイアログ外タップ・システムバックの両方から呼ばれ、[onSaveAsMemo]と
+ * 同様に何も保存しない。
+ */
+@Composable
+private fun SharedLocationConfirmationDialog(
+    text: String,
+    onOpenMaps: () -> Unit,
+    onSaveAsMemo: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("この場所どうする？ 📍") },
+        text = { Text(text) },
+        confirmButton = {
+            Column {
+                TextButton(onClick = onOpenMaps) { Text("Googleマップで開く") }
+                TextButton(onClick = onSaveAsMemo) { Text("メモに保存") }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("キャンセル") }
+        },
+    )
 }

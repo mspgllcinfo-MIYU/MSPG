@@ -10,6 +10,7 @@ import com.mspg.poicat.data.FileRepository
 import com.mspg.poicat.data.Photo
 import com.mspg.poicat.data.PhotoRepository
 import com.mspg.poicat.drive.FileDriveSync
+import com.mspg.poicat.maps.SharedLocationDetector
 import com.mspg.poicat.room.RoomStore
 
 /**
@@ -52,6 +53,26 @@ object ShareIntentHandler {
                 }
                 return
             }
+        }
+
+        // #148 Maps-1B: 地図/場所の共有(Google Maps/Gemini等からのURL共有)を、
+        // この先のcatBrain.respond()へ渡す前にここで検出して分岐する。respond()
+        // には「解釈できなかった入力を何であれメモとして保存する」という最終
+        // フォールバックがあるため、渡してしまうとGoogle Mapsのリンクが確認
+        // なしでそのままメモ化されてしまう(実際、この分岐を入れる前は起きて
+        // いた)。共有元がGoogle MapsかGeminiかを区別する必要はなく、共有された
+        // テキストにGoogle Maps系のURLが含まれているかどうかだけを見る
+        // ([SharedLocationDetector]参照)。
+        //
+        // ここではCatEvent/メモをまだ一切作らない — PendingSharedLocation
+        // (PendingNavigationと同じ一度きりのstateパターン)へ生のテキストを
+        // 渡すだけで、AppRootが表示する確認ダイアログでユーザーが選んだ結果
+        // としてのみ書き込みが発生する。ChatRepositoryへの記録やPendingNavigation
+        // による猫AIタブへの遷移も行わない — 地図共有はこれまでの黒猫AIチャット
+        // の会話履歴とは別扱いにする。
+        if (sharedText != null && SharedLocationDetector.looksLikeLocationShare(sharedText)) {
+            PendingSharedLocation.pending = sharedText
+            return
         }
 
         val sharedUri: Uri? = if (mimeType?.startsWith("image/") == true) {
