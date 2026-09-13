@@ -71,6 +71,9 @@ fun FileScreen(embedded: Boolean = false) {
 
     var files by remember { mutableStateOf<List<StoredFile>>(emptyList()) }
     var pendingDelete by remember { mutableStateOf<StoredFile?>(null) }
+    // Drive認可がサイレントに取れずカタログ同期を試せなかった場合だけ出す、
+    // 非侵襲的な案内（自動での再ログイン・同意画面表示は一切行わない）。
+    var driveSyncNotice by remember { mutableStateOf<String?>(null) }
 
     suspend fun reload() {
         files = repository.all()
@@ -79,7 +82,12 @@ fun FileScreen(embedded: Boolean = false) {
     LaunchedEffect(Unit) {
         // ルーム共有(4桁PIN)が有効な場合のみ、パートナー端末が共有Driveフォルダへ追加
         // したファイルをローカルへ取り込む（ルーム未参加なら即noop）。
-        runCatching { RoomCatalogSync.refreshFileCatalog(activity, repository) }
+        val outcome = runCatching { RoomCatalogSync.refreshFileCatalog(activity, repository) }.getOrNull()
+        driveSyncNotice = if (outcome == RoomCatalogSync.CatalogRefreshOutcome.AUTH_NOT_GRANTED) {
+            "Driveとの連携確認が必要かもにゃ(設定→Google連携)"
+        } else {
+            null
+        }
         reload()
     }
 
@@ -94,6 +102,11 @@ fun FileScreen(embedded: Boolean = false) {
         if (!embedded) {
             Text("ファイル", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = FileInk)
             Spacer(Modifier.height(16.dp))
+        }
+
+        driveSyncNotice?.let { notice ->
+            Text(notice, color = FileGold, fontSize = 12.sp)
+            Spacer(Modifier.height(8.dp))
         }
 
         if (files.isEmpty()) {

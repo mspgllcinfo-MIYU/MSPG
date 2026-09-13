@@ -113,6 +113,9 @@ fun AlbumScreen(
     var albums by remember { mutableStateOf<List<String>>(emptyList()) }
     var detailPhoto by remember { mutableStateOf<Photo?>(null) }
     var pendingCameraFile by remember { mutableStateOf<File?>(null) }
+    // Drive認可がサイレントに取れずカタログ同期を試せなかった場合だけ出す、
+    // 非侵襲的な案内（自動での再ログイン・同意画面表示は一切行わない）。
+    var driveSyncNotice by remember { mutableStateOf<String?>(null) }
 
     suspend fun reload() {
         photos = selectedAlbum?.let { repository.byAlbum(it) } ?: repository.all()
@@ -125,7 +128,12 @@ fun AlbumScreen(
     // 写真をローカルへ取り込む（ルーム未参加なら即noop）。画面を開いたときに一度だけ
     // 試すだけで、既存のreload()自体は変更しない。
     LaunchedEffect(Unit) {
-        runCatching { RoomCatalogSync.refreshAlbumCatalog(activity, repository) }
+        val outcome = runCatching { RoomCatalogSync.refreshAlbumCatalog(activity, repository) }.getOrNull()
+        driveSyncNotice = if (outcome == RoomCatalogSync.CatalogRefreshOutcome.AUTH_NOT_GRANTED) {
+            "Driveとの連携確認が必要かもにゃ(設定→Google連携)"
+        } else {
+            null
+        }
         reload()
     }
 
@@ -208,6 +216,11 @@ fun AlbumScreen(
                 colors = ButtonDefaults.buttonColors(containerColor = AlbumCard, contentColor = AlbumInk),
                 shape = RoundedCornerShape(percent = 50),
             ) { Text("撮影") }
+        }
+
+        driveSyncNotice?.let { notice ->
+            Spacer(Modifier.height(8.dp))
+            Text(notice, color = AlbumGold, fontSize = 12.sp)
         }
 
         Spacer(Modifier.height(12.dp))
