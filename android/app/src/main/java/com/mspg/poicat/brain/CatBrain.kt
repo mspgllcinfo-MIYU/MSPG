@@ -495,25 +495,37 @@ class CatBrain(
     }
 
     /**
+     * #146: [stripWorkQuestionTrailer]で末尾の疑問表現を1段階だけ剥がした残りが
+     * 「の仕事」で終わる(「私の仕事」「今日のみゆたんの仕事」等)か、「仕事」
+     * そのもの(「仕事は？」→「仕事」)か、「仕事全部」「全部の仕事」を含む、と
+     * いう形状だけで判定する厳格版。DateTimeParser.isQuery()による緩い
+     * フォールバックを含まないため、「仕事とは何？」「仕事について相談したい」
+     * のような一般的な質問には一致しない。[isWorkTaskQuestion](respond()向け)と
+     * #146のマリたん向けルーター([answerPoiQueryOrNull])の両方から共有される。
+     */
+    private fun workTaskQuestionCore(text: String): Boolean {
+        if (!text.contains("仕事")) return false
+        val core = stripWorkQuestionTrailer(text)
+        if (core.endsWith("の仕事") || core == "仕事") return true
+        return core.contains("仕事全部") || core.contains("全部の仕事")
+    }
+
+    /**
      * #144/#145: 「私の仕事」「今日の仕事」「仕事全部」等、仕事タスクの担当を
      * 尋ねる質問かどうかの判定。単に「仕事」という単語を含むだけでは判定しない
      * — 「明日仕事に行く」(予定登録)や「仕事は完了したよ」「見積書の仕事終わった」
      * (完了報告)のように、文中のどこかに「仕事」が出てくるだけの既存の登録/完了
      * フレーズを誤ってここで横取りしてしまわないようにするため。
      *
-     * [stripWorkQuestionTrailer]で末尾の疑問表現(「は」「何」「ある」「？」等、
-     * 音声認識で句読点が欠けた場合も含む)を1段階だけ剥がした残り([core])が
-     * 「の仕事」で終わる(「私の仕事」「今日のみゆたんの仕事」等)か、「仕事」
-     * そのもの(「仕事は？」→「仕事」)であれば質問とみなす。「仕事全部」
-     * 「全部の仕事」も別途対象にする。それ以外は既存のDateTimeParser.isQuery()
-     * による質問判定(「仕事について教えて」等)にだけ従う —
-     * DateTimeParser.kt自体は変更しない。
+     * [workTaskQuestionCore]の形状判定に加えて、それ以外は既存のDateTimeParser.
+     * isQuery()による質問判定(「仕事について教えて」等)にも従う —
+     * DateTimeParser.kt自体は変更しない。#146のマリたん向けルーターは、この
+     * 緩いisQuery()フォールバックを使わない[workTaskQuestionCore]の方を直接
+     * 利用する(「仕事とは何？」等の一般的な質問との誤判定を避けるため)。
      */
     private fun isWorkTaskQuestion(text: String): Boolean {
         if (!text.contains("仕事")) return false
-        val core = stripWorkQuestionTrailer(text)
-        if (core.endsWith("の仕事") || core == "仕事") return true
-        if (core.contains("仕事全部") || core.contains("全部の仕事")) return true
+        if (workTaskQuestionCore(text)) return true
         return DateTimeParser.isQuery(text)
     }
 
@@ -579,6 +591,143 @@ class CatBrain(
 
     /** RoomStore.displayNameが未設定のまま「私の仕事」を聞かれた場合の返答。 */
     private fun unknownSpeakerReply(): String = "今どっちが話してるか分からないにゃ。まず設定で名前を選んでにゃ"
+
+    // #146: メモの問い合わせ特有の末尾表現。workQuestionTrailersとは別に持つ —
+    // 「何」「何がある」はメモの問い合わせ例に含まれていないため、あえて含めず
+    // 判定をより厳格にしている。
+    private val memoQuestionTrailers = listOf(
+        "見せて",
+        "ある？", "ある",
+        "は？", "は",
+        "？", "?",
+    )
+
+    private fun stripMemoQuestionTrailer(text: String): String {
+        for (trailer in memoQuestionTrailers) {
+            if (text.endsWith(trailer) && text.length > trailer.length) {
+                return text.removeSuffix(trailer)
+            }
+        }
+        return text
+    }
+
+    /**
+     * #146: 「メモ」の表示・検索を求める、確信度の高い問い合わせだけを判定する。
+     * 単に「メモ」という単語を含むだけでは判定しない —「メモの取り方教えて」
+     * 「メモって何？」「おすすめのメモアプリは？」のような一般知識・相談は
+     * Geminiへ回すべきため。[stripMemoQuestionTrailer]で末尾の疑問表現を
+     * 剥がした残りが「のメモ」で終わる(「今日のメモ」「駐車場のメモ」等)か、
+     * 「メモ」そのもの(「メモ見せて」→「メモ」、「メモある?」→「メモ」)で
+     * ある場合だけ質問とみなす。「おすすめのメモアプリは？」は「のメモアプリ」
+     * であって「のメモ」そのもので終わらないため、正しく除外される。
+     * isWorkTaskQuestion()と異なり、DateTimeParser.isQuery()への緩い
+     * フォールバックは持たない — respond()からは呼ばれず、#146のマリたん向け
+     * ルーター([answerPoiQueryOrNull])専用の、より厳格な判定。
+     */
+    private fun isMemoQuery(text: String): Boolean {
+        if (!text.contains("メモ")) return false
+        val core = stripMemoQuestionTrailer(text)
+        return core.endsWith("のメモ") || core == "メモ"
+    }
+
+    /**
+     * #146: [isMemoQuery]が真の場合にのみ呼ばれる、メモの読み取り専用の回答。
+     * 新しいDB問い合わせは追加せず、既存の[CatEventRepository.memos]が返す
+     * 全件をKotlin側でfilterするだけ。「今日」「明日」は日付ワードとして扱い
+     * (メモ自体にdateTimeは無いため、createdAtの日付で絞り込む)、それ以外の
+     * 語は既存メモのタイトルに対するキーワード検索として扱う。
+     */
+    private suspend fun answerMemoQuery(text: String, now: LocalDateTime): String {
+        val today = now.toLocalDate()
+        val core = stripMemoQuestionTrailer(text)
+        val keyword = if (core == "メモ") null else core.removeSuffix("のメモ").trim().ifBlank { null }
+        val scopeDate = when (keyword) {
+            "今日" -> today
+            "明日" -> today.plusDays(1)
+            else -> null
+        }
+        val effectiveKeyword = if (scopeDate != null) null else keyword
+
+        val allMemos = repository.memos()
+        val filtered = when {
+            scopeDate != null -> allMemos.filter { it.createdAt.toLocalDate() == scopeDate }
+            effectiveKeyword != null -> allMemos.filter { it.title.contains(effectiveKeyword) }
+            else -> allMemos
+        }
+
+        if (filtered.isEmpty()) {
+            return when {
+                effectiveKeyword != null -> "${effectiveKeyword}のメモは無いにゃ"
+                scopeDate != null -> "${DateTimeParser.formatWhen(scopeDate, today)}のメモは無いにゃ"
+                else -> "メモはまだ無いにゃ"
+            }
+        }
+        val titles = filtered.joinToString("、") { it.title }
+        return when {
+            effectiveKeyword != null -> "${effectiveKeyword}のメモは${titles}だにゃ"
+            scopeDate != null -> "${DateTimeParser.formatWhen(scopeDate, today)}のメモは${titles}だにゃ"
+            else -> "メモは${titles}だにゃ"
+        }
+    }
+
+    /**
+     * #146: マリたん(Gemini経由の音声アシスタント)からPOI内部データへの読み取り
+     * 専用の問い合わせだけを、高い確信度で判定できる場合にのみ処理する。
+     * respond()とは完全に独立した新しいエントリポイントで、重要な違いがある:
+     *
+     * 1. 判定できなかった入力を新規メモ/タスク/予定として保存するrespond()の
+     *    最終フォールバックはここには存在しない — 一般会話がPOIデータとして
+     *    誤って書き込まれることは無い。予定登録・タスク登録・メモ登録・編集・
+     *    削除・完了処理は一切行わない、正真正銘の読み取り専用。
+     * 2. 判定に確信が持てない場合は必ずnullを返す。呼び出し元(MariTanRow)は
+     *    nullの場合、従来通りGeminiSearchService.ask()へフォールバックする。
+     * 3. 仕事タスクの判定は[workTaskQuestionCore](形状一致のみ)を使う —
+     *    respond()が使う[isWorkTaskQuestion]の緩いDateTimeParser.isQuery()
+     *    フォールバックは使わない。「仕事とは何？」等の一般的な質問を誤って
+     *    仕事タスク問い合わせと判定しない。
+     * 4. 予定問い合わせは今日/明日/明後日の日付が明確に取れた場合だけを対象にし
+     *    (dayFilter != null かつ keyword == null)、自由なキーワード検索
+     *    (answerQueryのkeyword分岐)は対象にしない — 「富士山の高さは？」の
+     *    ような一般トリビアがメモ/予定検索に化けてしまうことを避けるため。
+     * 5. メモ問い合わせは[isMemoQuery]による厳格な判定のみを使う。
+     *
+     * 予定の担当者(assignee)判定は今回未実装 — 「今日のみゆたんの予定は？」の
+     * ような人物指定の予定問い合わせは、query.keywordがnullにならないため
+     * この関数はnullを返し、安全にGeminiへフォールバックする。将来assignee
+     * 対応を追加する際は、ここへ仕事タスクと同様の分岐を1つ追加すればよい。
+     */
+    suspend fun answerPoiQueryOrNull(input: String): CatReply? {
+        val trimmed = input.trim().replace(Regex("[「」『』]"), "").trim()
+        if (trimmed.isEmpty()) return null
+        if (looksOutOfScope(trimmed)) return null
+
+        val now = LocalDateTime.now()
+
+        if (isPhotoQuery(trimmed)) {
+            return answerPhotoQuery(trimmed, now)
+        }
+
+        if (workTaskQuestionCore(trimmed)) {
+            return CatReply(answerWorkTaskQuery(trimmed, now, currentDisplayName()))
+        }
+
+        if (isTaskQuestion(trimmed) && DateTimeParser.isQuery(trimmed)) {
+            return CatReply(answerTaskQuery(trimmed, now))
+        }
+
+        if (isMemoQuery(trimmed)) {
+            return CatReply(answerMemoQuery(trimmed, now))
+        }
+
+        if (DateTimeParser.isQuery(trimmed)) {
+            val query = DateTimeParser.parseQuery(trimmed, now)
+            if (query.dayFilter != null && query.keyword == null) {
+                return CatReply(answerQuery(trimmed, now))
+            }
+        }
+
+        return null
+    }
 
     /** "今日の写真見せて"/"病院の写真見せて" style — requires the literal word "写真",
      * which never appears in a schedule/memo/task sentence, so this can't misfire on them. */

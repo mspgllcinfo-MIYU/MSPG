@@ -208,7 +208,10 @@ private fun ChatView(modifier: Modifier = Modifier) {
     }
 
     Column(modifier = modifier.fillMaxWidth()) {
-        MariTanRow()
+        // #146: ChatViewが既に持つcatBrain(#144でRoomStore.displayNameの
+        // ラムダを配線済み)をそのまま渡し、マリたん専用の別インスタンスを
+        // 新たに作らない。
+        MariTanRow(catBrain)
 
         LazyColumn(
             state = listState,
@@ -437,9 +440,19 @@ private enum class MariTanState { IDLE, LISTENING, THINKING, SPEAKING, SULKING, 
  * Gemini 3.1 Flash TTSは無料枠が3 RPMしかなく、マリたんの主要機能である会話の
  * たびに毎回消費するには不安定すぎる。安定運用・無料運用を優先し、TextToSpeech
  * を選んだ。
+ *
+ * #146: 上記3種類のローカル判定のいずれにも該当しなかった場合、Geminiへ送る
+ * 前にまず[CatBrain.answerPoiQueryOrNull]でPOI内部データ(予定/仕事タスク/
+ * 通常タスク/メモ)への読み取り専用の問い合わせとして高い確信度で判定できるか
+ * 試す。該当すればGeminiを一切呼ばずローカルDBの内容で答え、該当しない
+ * (null)場合のみ、これまで通りGeminiへ送る。[catBrain]はChatViewが#144で
+ * 既に生成している(RoomStore.displayNameのラムダ配線済み)インスタンスを
+ * そのまま受け取って再利用する — ここで新しいCatBrain/RoomStoreは作らない。
+ * answerPoiQueryOrNullは正真正銘の読み取り専用で、予定/タスク/メモの新規
+ * 登録・編集・削除・完了処理は一切行わない。
  */
 @Composable
-private fun MariTanRow() {
+private fun MariTanRow(catBrain: CatBrain) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var state by remember { mutableStateOf(MariTanState.IDLE) }
@@ -534,6 +547,18 @@ private fun MariTanRow() {
                 else -> {
                     state = MariTanState.THINKING
                     scope.launch {
+                        // #146: Gemini APIを呼ぶ前に、POI内部データ(予定/仕事タスク/
+                        // 通常タスク/メモ)への読み取り専用の問い合わせとして高い
+                        // 確信度で判定できる場合は、ローカルのCatBrainだけで答える —
+                        // POI内部データをGeminiへ送らない、という既存方針を維持した
+                        // まま、マリたんからもPOIの正確な回答を返せるようにする。
+                        // 判定できない場合は必ずnullが返り、これまで通りGeminiへ回す。
+                        val poiReply = catBrain.answerPoiQueryOrNull(text)
+                        if (poiReply != null) {
+                            state = MariTanState.SPEAKING
+                            speak(poiReply.text) { state = MariTanState.IDLE }
+                            return@launch
+                        }
                         val memories = MariTanMemoryStore.all(context.applicationContext).map { it.text }
                         val outcome = GeminiSearchService.ask(text, memories)
                         when (val answer = outcome.getOrNull()) {
