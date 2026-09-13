@@ -2,6 +2,7 @@ package com.mspg.poicat
 
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -26,6 +27,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -205,6 +208,12 @@ fun CalendarScreen(
                     onDelete = {
                         scope.launch {
                             repository.delete(event)
+                            refreshTick++
+                        }
+                    },
+                    onAssigneeChange = { assignee ->
+                        scope.launch {
+                            repository.setAssignee(event, assignee)
                             refreshTick++
                         }
                     },
@@ -412,7 +421,7 @@ private fun DayCell(
 }
 
 @Composable
-private fun EventRow(event: CatEvent, onClick: () -> Unit, onDelete: () -> Unit) {
+private fun EventRow(event: CatEvent, onClick: () -> Unit, onDelete: () -> Unit, onAssigneeChange: (String?) -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -431,6 +440,31 @@ private fun EventRow(event: CatEvent, onClick: () -> Unit, onDelete: () -> Unit)
                     fontSize = 12.sp,
                     color = CalendarGold,
                 )
+            }
+            // #147: 予定の担当(みゆたん/かっちゃん/2人/未設定)。PoiScreen.ktの
+            // 仕事タスク用チップ(#142)と同じパターン — 担当は表示・同期を絞る
+            // ものではなく、この予定はどの値でも双方の端末に同じ1件として
+            // 表示・同期され続ける。マリたん/黒猫AIが「誰の予定か」を答える
+            // ためのラベルにすぎない。
+            Spacer(Modifier.height(4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                listOf(CatEvent.ASSIGNEE_MIYU, CatEvent.ASSIGNEE_KATCHAN, CatEvent.ASSIGNEE_BOTH).forEach { label ->
+                    val selected = event.assignee == label
+                    FilterChip(
+                        selected = selected,
+                        // 選択済みのラベルをもう一度タップすると「未設定」(null)に戻せる。
+                        onClick = { onAssigneeChange(if (selected) null else label) },
+                        label = { Text(label, fontSize = 11.sp) },
+                        shape = RoundedCornerShape(percent = 50),
+                        colors = FilterChipDefaults.filterChipColors(
+                            containerColor = Color.Transparent,
+                            labelColor = CalendarInk.copy(alpha = 0.5f),
+                            selectedContainerColor = CalendarGold.copy(alpha = 0.25f),
+                            selectedLabelColor = CalendarInk,
+                        ),
+                        border = BorderStroke(0.dp, Color.Transparent),
+                    )
+                }
             }
         }
         IconButton(onClick = onDelete) {

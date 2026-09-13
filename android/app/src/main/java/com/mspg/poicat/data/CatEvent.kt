@@ -43,12 +43,14 @@ data class CatEvent(
      * 「新しい方を勝たせる」競合解決にのみ使う — 通常のローカル専用動作には影響しない。 */
     val updatedAt: Long = System.currentTimeMillis(),
     /**
-     * 仕事タスク（[isTask]かつ[category] == [CATEGORY_WORK]）だけに意味を持つ担当
-     * ラベル（[ASSIGNEE_MIYU]/[ASSIGNEE_KATCHAN]/[ASSIGNEE_BOTH]、または未設定の
-     * null）。表示や同期を担当別に絞るためのものではない — どの値でも、この
-     * タスクはみゆたん・かっちゃん双方の端末に同じ1件として表示・同期され続ける。
-     * nullは「未設定」という実在の状態であり、既存タスクを黙って「2人」等へ
-     * 書き換えることはしない。
+     * 担当ラベル（[ASSIGNEE_MIYU]/[ASSIGNEE_KATCHAN]/[ASSIGNEE_BOTH]、または
+     * 未設定のnull）。元々は仕事タスク（[isTask]かつ[category] ==
+     * [CATEGORY_WORK]）専用として追加したが（#142）、#147で予定（[isTask] ==
+     * false かつ[dateTime]あり）にもそのまま流用している — DBスキーマ・
+     * Firestore構造はどちらも変更していない。表示や同期を担当別に絞るための
+     * ものではない — どの値でも、この行はみゆたん・かっちゃん双方の端末に
+     * 同じ1件として表示・同期され続ける。nullは「未設定」という実在の状態
+     * であり、既存の行を黙って「2人」等へ書き換えることはしない。
      */
     val assignee: String? = null,
 ) {

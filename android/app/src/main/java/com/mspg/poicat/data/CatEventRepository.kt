@@ -109,11 +109,12 @@ class CatEventRepository(context: Context) {
         updateAndSync(task.copy(completed = completed))
     }
 
-    /** 仕事タスクの担当ラベルだけを変更する。表示・同期先を絞るものではない —
-     * どの値(またはnull)でも、このタスクはみゆたん・かっちゃん双方の端末に
-     * 同じ1件として表示・同期され続ける。 */
-    suspend fun setAssignee(task: CatEvent, assignee: String?) {
-        updateAndSync(task.copy(assignee = assignee))
+    /** タスク・予定どちらでも使える、担当ラベルだけを変更する汎用メソッド
+     * (#142で仕事タスク向けに追加、#147で予定にも流用)。表示・同期先を
+     * 絞るものではない — どの値(またはnull)でも、この行はみゆたん・かっちゃん
+     * 双方の端末に同じ1件として表示・同期され続ける。 */
+    suspend fun setAssignee(event: CatEvent, assignee: String?) {
+        updateAndSync(event.copy(assignee = assignee))
     }
 
     suspend fun dueFor1DayReminder(windowStart: Long, windowEnd: Long) =

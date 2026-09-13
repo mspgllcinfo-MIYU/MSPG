@@ -59,6 +59,16 @@ class CatBrain(
             return CatReply(answerWorkTaskQuery(trimmed, now, currentDisplayName()))
         }
 
+        // #147: 「私の予定」「みゆたんの予定」「かっちゃんの予定」「2人の予定」の
+        // ように、予定の担当を人物指定で尋ねる質問も、仕事タスクと同様に独立した
+        // 分岐として扱う。日付のみを指定した「今日の予定は？」等(人物指定なし)は
+        // 対象にせず、従来通り下のanswerQuery()がそのまま処理する — 既存の
+        // DateTimeParser.kt・answerQuery()は一切変更していない。
+        if (isScheduleQuestionWithPerson(trimmed)) {
+            if (looksOutOfScope(trimmed)) return CatReply(outOfScopeReply(trimmed))
+            return CatReply(answerScheduleQueryByPerson(trimmed, now, currentDisplayName()))
+        }
+
         if (DateTimeParser.isQuery(trimmed)) {
             // "今日の天気は？"/"日本の首都は？" would otherwise fall into answerQuery()
             // and get an answer built from a keyword that can never match anything in
@@ -589,8 +599,69 @@ class CatBrain(
         }
     }
 
-    /** RoomStore.displayNameが未設定のまま「私の仕事」を聞かれた場合の返答。 */
+    /** RoomStore.displayNameが未設定のまま「私の仕事」「私の予定」を聞かれた
+     * 場合の返答。 */
     private fun unknownSpeakerReply(): String = "今どっちが話してるか分からないにゃ。まず設定で名前を選んでにゃ"
+
+    /**
+     * #147: [stripWorkQuestionTrailer]で末尾の疑問表現を1段階だけ剥がした残りが
+     * 「の予定」で終わり、かつ「みゆたん」「かっちゃん」「2人」「私の予定」
+     * 「自分の予定」のいずれかを含む場合だけ、人物指定の予定問い合わせとみなす。
+     * (トレイラー除去のロジック自体は仕事タスク用と全く同じ末尾表現なので
+     * [stripWorkQuestionTrailer]をそのまま再利用している。) 日付のみを指定した
+     * 「今日の予定は？」等(人物指定なし)は対象外 — 既存のanswerQuery()が
+     * 担当未設定を含む全件を返す、これまで通りの動作のままにする。
+     */
+    private fun isScheduleQuestionWithPerson(text: String): Boolean {
+        if (!text.contains("予定")) return false
+        val core = stripWorkQuestionTrailer(text)
+        if (!core.endsWith("の予定")) return false
+        return core.contains("みゆたん") || core.contains("かっちゃん") ||
+            core.contains(CatEvent.ASSIGNEE_BOTH) || core.contains("私の予定") || core.contains("自分の予定")
+    }
+
+    /**
+     * #147: 予定(isTask=false かつdateTimeあり)を、誰の担当かで絞り込んで
+     * 答える。仕事タスクのanswerWorkTaskQuery()と同じ設計方針 — 担当は
+     * 「表示を絞る」ためのものではなく(予定自体はこれまで通りみゆたん・
+     * かっちゃん双方の端末に全件表示・同期される)、この質問への「答え方」
+     * だけを絞り込むためのもの。新しいDB問い合わせは追加せず、既存の
+     * [CatEventRepository.upcoming]（引数省略時は現在時刻以降の全予定を返す）
+     * が返す結果をこの関数の中でKotlin側でfilterするだけ。過去の予定を
+     * 際限なく積み上げて答えないよう、「今から先」の予定に絞っている
+     * （タスクにおける「未完了のみ」に相当する、予定側の自然な絞り込み）。
+     * 日付とのAND指定(「今日のみゆたんの予定」等)は今回未対応 — 該当すれば
+     * 日付を問わず担当者の予定を全て返す。
+     *
+     * 判定順序が重要: 「みゆたん」「かっちゃん」「2人」という明示的な指定を
+     * 必ず先に判定する。「私の予定」「自分の予定」はRoomStore.displayName
+     * (この端末の現在の利用者)を使い、assigneeがその名前、または「2人」と
+     * 一致するものを対象にする — #144の仕事タスクと同じ確定方針(「2人」は
+     * 「担当者不在」ではなく「両者が責任を持つ」予定なので、自分の予定として
+     * 一緒に見える方が聞き漏れがない)。個人名/「2人」を明示した質問では、
+     * その値だけに厳密に絞り込み、nullは一切含めない。
+     *
+     * 表示名が未設定(null)のまま「私の予定」を聞かれた場合は、DBには一切
+     * 問い合わせず、話者を特定できない旨だけを返す。
+     */
+    private suspend fun answerScheduleQueryByPerson(text: String, now: LocalDateTime, myDisplayName: String?): String {
+        val today = now.toLocalDate()
+        val schedules = repository.upcoming()
+
+        val matched = when {
+            text.contains("みゆたん") -> schedules.filter { it.assignee == CatEvent.ASSIGNEE_MIYU }
+            text.contains("かっちゃん") -> schedules.filter { it.assignee == CatEvent.ASSIGNEE_KATCHAN }
+            text.contains(CatEvent.ASSIGNEE_BOTH) -> schedules.filter { it.assignee == CatEvent.ASSIGNEE_BOTH }
+            else -> {
+                if (myDisplayName == null) return unknownSpeakerReply()
+                schedules.filter { it.assignee == myDisplayName || it.assignee == CatEvent.ASSIGNEE_BOTH }
+            }
+        }
+
+        if (matched.isEmpty()) return "予定はまだ無いにゃ"
+        val titles = matched.joinToString("、") { "${DateTimeParser.formatWhen(it.dateTime!!.toLocalDate(), today)}の${it.title}" }
+        return "予定は${titles}だにゃ"
+    }
 
     // #146: メモの問い合わせ特有の末尾表現。workQuestionTrailersとは別に持つ —
     // 「何」「何がある」はメモの問い合わせ例に含まれていないため、あえて含めず
@@ -690,11 +761,10 @@ class CatBrain(
      *    (answerQueryのkeyword分岐)は対象にしない — 「富士山の高さは？」の
      *    ような一般トリビアがメモ/予定検索に化けてしまうことを避けるため。
      * 5. メモ問い合わせは[isMemoQuery]による厳格な判定のみを使う。
-     *
-     * 予定の担当者(assignee)判定は今回未実装 — 「今日のみゆたんの予定は？」の
-     * ような人物指定の予定問い合わせは、query.keywordがnullにならないため
-     * この関数はnullを返し、安全にGeminiへフォールバックする。将来assignee
-     * 対応を追加する際は、ここへ仕事タスクと同様の分岐を1つ追加すればよい。
+     * 6. #147: 予定の担当者(assignee)判定は[isScheduleQuestionWithPerson]
+     *    (respond()と共通、形状一致のみ)を使う。人物指定の無い「今日の予定は？」
+     *    等はこれまで通り4番の日付限定answerQuery()側で処理する(query.keywordが
+     *    nullでない限りそちらもnullを返す点は変更していない)。
      */
     suspend fun answerPoiQueryOrNull(input: String): CatReply? {
         val trimmed = input.trim().replace(Regex("[「」『』]"), "").trim()
@@ -709,6 +779,10 @@ class CatBrain(
 
         if (workTaskQuestionCore(trimmed)) {
             return CatReply(answerWorkTaskQuery(trimmed, now, currentDisplayName()))
+        }
+
+        if (isScheduleQuestionWithPerson(trimmed)) {
+            return CatReply(answerScheduleQueryByPerson(trimmed, now, currentDisplayName()))
         }
 
         if (isTaskQuestion(trimmed) && DateTimeParser.isQuery(trimmed)) {
