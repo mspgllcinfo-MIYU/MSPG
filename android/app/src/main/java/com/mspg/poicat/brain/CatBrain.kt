@@ -469,21 +469,51 @@ class CatBrain(
         }
     }
 
+    // #145: 音声認識では「？」等の句読点が付かないことが多い(「私の仕事は？」が
+    // 「私の仕事は」として届く等)。ここで剥がすのは仕事の問い合わせ特有の
+    // 末尾表現だけ — taskCompletionSuffixes(「終わった」「完了」等)や
+    // taskTriggerSuffixes/memoVerbs(「追加して」「登録して」等)とは重ならない
+    // ものだけを選んでおり、既存の完了報告・登録指示を誤って奪わないようにする。
+    // 長い表現ほど先に判定する(「何がある」を「ある」より先に見て、余分な文字を
+    // 残さない)。
+    private val workQuestionTrailers = listOf(
+        "何がある？", "何がある", "何ある？", "何ある",
+        "何？", "何",
+        "ある？", "ある",
+        "は？", "は",
+        "？", "?",
+    )
+
+    /** 上記の末尾表現を(一致した最初の1つだけ)取り除いた残りの文字列。 */
+    private fun stripWorkQuestionTrailer(text: String): String {
+        for (trailer in workQuestionTrailers) {
+            if (text.endsWith(trailer) && text.length > trailer.length) {
+                return text.removeSuffix(trailer)
+            }
+        }
+        return text
+    }
+
     /**
-     * #144: 「私の仕事」「今日の仕事」「仕事全部」等、仕事タスクの担当を尋ねる
-     * 質問かどうかの判定。単に「仕事」という単語を含むだけでは判定しない —
-     * 「明日仕事に行く」(予定登録)や「仕事は完了したよ」「見積書の仕事終わった」
+     * #144/#145: 「私の仕事」「今日の仕事」「仕事全部」等、仕事タスクの担当を
+     * 尋ねる質問かどうかの判定。単に「仕事」という単語を含むだけでは判定しない
+     * — 「明日仕事に行く」(予定登録)や「仕事は完了したよ」「見積書の仕事終わった」
      * (完了報告)のように、文中のどこかに「仕事」が出てくるだけの既存の登録/完了
-     * フレーズを誤ってここで横取りしてしまわないようにするため。代わりに、
-     * 「の仕事」で終わる(「私の仕事」「今日のみゆたんの仕事」等)か、「仕事全部」
-     * を含む、体言止め・話題提示の形に絞る。それ以外は既存のDateTimeParser.
-     * isQuery()による質問判定(「仕事ある?」「仕事について教えて」等)にだけ従う
-     * — DateTimeParser.kt自体は変更しない。
+     * フレーズを誤ってここで横取りしてしまわないようにするため。
+     *
+     * [stripWorkQuestionTrailer]で末尾の疑問表現(「は」「何」「ある」「？」等、
+     * 音声認識で句読点が欠けた場合も含む)を1段階だけ剥がした残り([core])が
+     * 「の仕事」で終わる(「私の仕事」「今日のみゆたんの仕事」等)か、「仕事」
+     * そのもの(「仕事は？」→「仕事」)であれば質問とみなす。「仕事全部」
+     * 「全部の仕事」も別途対象にする。それ以外は既存のDateTimeParser.isQuery()
+     * による質問判定(「仕事について教えて」等)にだけ従う —
+     * DateTimeParser.kt自体は変更しない。
      */
     private fun isWorkTaskQuestion(text: String): Boolean {
         if (!text.contains("仕事")) return false
-        if (text.endsWith("の仕事")) return true
-        if (text.contains("仕事全部")) return true
+        val core = stripWorkQuestionTrailer(text)
+        if (core.endsWith("の仕事") || core == "仕事") return true
+        if (core.contains("仕事全部") || core.contains("全部の仕事")) return true
         return DateTimeParser.isQuery(text)
     }
 
