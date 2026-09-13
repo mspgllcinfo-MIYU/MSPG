@@ -1,0 +1,17 @@
+*.iml
+.gradle/
+/local.properties
+.idea/
+.DS_Store
+/build/
+/captures/
+.externalNativeBuild/
+.cxx/
+local.properties
+
+app/build/
+# google-services.json is intentionally committed (not gitignored): this is a
+# private repo, and the file itself isn't a true secret per Google's own
+# guidance — real access control is enforced by Firestore Security Rules,
+# not by keeping this file out of version control. It's needed here so
+# GitHub Actions CI (a fresh checkout on every run) can build the app.

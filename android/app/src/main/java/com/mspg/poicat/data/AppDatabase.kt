@@ -1,0 +1,83 @@
+package com.mspg.poicat.data
+
+import android.content.Context
+import androidx.room.Database
+import androidx.room.Room
+import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
+
+/**
+ * Schema history:
+ *  - v1: title, dateTime, createdAt, reminded1Day, reminded1Hour
+ *  - v2: added isTask, completed (Poi tasks) — see MIGRATION_1_2
+ *  - v3: added category (Poi work/private classification) — see MIGRATION_2_3
+ *  - v4: added roomEventId, updatedAt (4桁PINルーム共有) — see MIGRATION_3_4
+ *  - v5: added assignee (仕事タスクの担当ラベル、みゆたん/かっちゃん/2人/未設定) — see MIGRATION_4_5
+ *
+ * Real schedules/memos/tasks now live in this database on-device, so any
+ * future version bump must ship its own explicit Migration here (following
+ * MIGRATION_1_2's pattern, same as PhotoDatabase.MIGRATION_1_2) instead of
+ * falling back to a destructive recreate, which would silently wipe them.
+ */
+@Database(entities = [CatEvent::class], version = 5, exportSchema = true)
+abstract class AppDatabase : RoomDatabase() {
+    abstract fun catEventDao(): CatEventDao
+
+    companion object {
+        // v1 -> v2: added isTask/completed for the Poi tab. Both are NOT NULL
+        // with a default, so every pre-existing schedule/memo row keeps its
+        // data as-is and simply gains isTask=0 (not a task), completed=0.
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE cat_events ADD COLUMN isTask INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE cat_events ADD COLUMN completed INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        // v2 -> v3: added category (Poi work/private classification). No NOT
+        // NULL constraint and no DEFAULT, so every existing row (and every
+        // non-task row) simply gains category=NULL — a real "unclassified"
+        // state, not a guessed-at "private".
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE cat_events ADD COLUMN category TEXT")
+            }
+        }
+
+        // v3 -> v4: added roomEventId (Firestoreルーム共有ドキュメントID)とupdatedAt
+        // (競合解決用タイムスタンプ)。どちらも既存行を壊さない — roomEventIdはNULL
+        // (ルーム未参加/未プッシュ)、updatedAtは現在時刻がデフォルトで入る。
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE cat_events ADD COLUMN roomEventId TEXT")
+                db.execSQL("ALTER TABLE cat_events ADD COLUMN updatedAt INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        // v4 -> v5: added assignee (仕事タスクの担当ラベル)。categoryを追加した
+        // MIGRATION_2_3と同じ形の、NOT NULL制約もDEFAULTも無いnullable TEXTの
+        // ADD COLUMNのみ。既存の全ての行(タスクに限らず予定/メモも含む)は
+        // assignee=NULLのまま残り、これは「未設定」という実在の状態であって、
+        // 「2人」等への自動変換は一切行わない。
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE cat_events ADD COLUMN assignee TEXT")
+            }
+        }
+
+        @Volatile
+        private var instance: AppDatabase? = null
+
+        fun get(context: Context): AppDatabase =
+            instance ?: synchronized(this) {
+                instance ?: Room.databaseBuilder(
+                    context.applicationContext,
+                    AppDatabase::class.java,
+                    "poicat.db",
+                )
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .build().also { instance = it }
+            }
+    }
+}
