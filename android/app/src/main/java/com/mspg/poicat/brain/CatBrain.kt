@@ -4,8 +4,11 @@ import com.mspg.poicat.data.CatEvent
 import com.mspg.poicat.data.CatEventRepository
 import com.mspg.poicat.data.Photo
 import com.mspg.poicat.data.PhotoRepository
+import com.mspg.poicat.gemini.GeminiOutcome
+import com.mspg.poicat.gemini.GeminiWorkJudge
 import java.time.LocalDate
 import java.time.LocalDateTime
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** A cat AI reply: the にゃ-voiced text, plus any photos found for a photo-search question
  * (empty for every other kind of reply). */
@@ -369,9 +372,11 @@ class CatBrain(
     )
 
     /**
-     * #148 フェーズ3a: 予定のタイトルから仕事判定を行う。既存の[classifyTaskCategory]
-     * (仕事タスク登録時の判定)が使う[workSignals]をそのまま再利用し、新しい
-     * 重複リストは作らない。
+     * #148 フェーズ3a: 予定のタイトルから、端末内ルールだけで仕事判定を行う。
+     * 既存の[classifyTaskCategory](仕事タスク登録時の判定)が使う[workSignals]
+     * をそのまま再利用し、新しい重複リストは作らない。ネットワーク・外部AIは
+     * 一切使わない、常に即時・無料の一次判定 — [judgeWorkIntent]から見た
+     * 「まず試す、確実な場合だけ採用する」判定はこちら。
      *
      * 単一キーワード1個だけでWORKと判定しない — [workSignals]に**2つ以上**
      * 一致した場合だけWORKとする。「確認」のような弱い単語や、「打ち合わせ」
@@ -381,11 +386,63 @@ class CatBrain(
      * 安全側のUNKNOWNとする — 「仕事か私用か安全に判断できない場合は無理に
      * WORKへ分類しない」という方針をそのまま反映している。
      */
-    private fun judgeWorkIntent(title: String): WorkJudgment {
+    private fun judgeWorkIntentByRule(title: String): WorkJudgment {
         val workMatches = workSignals.count { title.contains(it) }
         if (workMatches >= 2) return WorkJudgment.WORK
         if (privateSignals.any { title.contains(it) }) return WorkJudgment.NOT_WORK
         return WorkJudgment.UNKNOWN
+    }
+
+    /**
+     * #148 Phase 3-1: 予定のタイトルから仕事判定を行う、2段構成の入口。
+     *
+     * 1. [judgeWorkIntentByRule](端末内・無料・即時)を必ず先に試す。WORK/
+     *    NOT_WORKのどちらかを確信を持って返した場合は、それをそのまま採用し
+     *    Geminiには一切問い合わせない — フェーズ3aで既に実機検証済みの安全な
+     *    一次判定を、Phase 3-1でも置き換えずそのまま活かすための構成。
+     * 2. ルールベースがUNKNOWN(＝「仕事か私用か安全に判断できない」)だった
+     *    場合だけ、[GeminiWorkJudge]による意味判定を二次判定として試す。
+     *    [withTimeoutOrNull]で待ち時間の上限を設け、通信失敗・timeout・
+     *    quota超過・APIキー未設定・不正/空応答・予期しない例外は
+     *    [runCatching]と合わせて全て素通りさせず、最終的に必ずWorkJudgmentの
+     *    いずれかの値へ落とし込む(何が起きてもこの関数自体が例外で落ちることは
+     *    ない)。Geminiの自由な応答文字列を直接ここでDB操作に使うことはせず、
+     *    [parseAiWorkJudgment]で厳密に3値へ強制変換してから返す。
+     * 3. 呼び出し元の[rememberScheduleWithWorkJudgment]は、この関数が何を
+     *    返しても既に予定の保存(`repository.remember`)を完了させた後に呼ぶ
+     *    ため、AI判定がどう失敗しても予定登録そのものには一切影響しない。
+     */
+    private suspend fun judgeWorkIntent(title: String): WorkJudgment {
+        val ruleResult = judgeWorkIntentByRule(title)
+        if (ruleResult != WorkJudgment.UNKNOWN) return ruleResult
+
+        val aiOutcome = runCatching {
+            withTimeoutOrNull(8_000) { GeminiWorkJudge.judge(title).getOrNull() }
+        }.getOrNull()
+
+        val answer = aiOutcome as? GeminiOutcome.Answer ?: return WorkJudgment.UNKNOWN
+        return parseAiWorkJudgment(answer.text)
+    }
+
+    /**
+     * #148 Phase 3-1: [GeminiWorkJudge]の生テキスト応答を、DB操作に使う前に
+     * 必ずWorkJudgmentの3値のいずれかへ強制変換する — Geminiの自由な出力を
+     * そのまま`alsoShowAsTask`等のDB操作へ使わないための唯一の変換経路。
+     * 完全一致を優先し、それ以外は部分一致にフォールバックする(system_
+     * instructionで1語だけ返すよう指示済みだが、余分な語が混ざった応答にも
+     * 耐えるため)。"NOT_WORK"は"WORK"を部分文字列として含むため、部分一致は
+     * 必ずNOT_WORKを先に判定する。判定できない応答は全て安全側のUNKNOWNに
+     * 倒す。
+     */
+    private fun parseAiWorkJudgment(raw: String): WorkJudgment {
+        val normalized = raw.trim().uppercase()
+        return when {
+            normalized == "WORK" -> WorkJudgment.WORK
+            normalized == "NOT_WORK" -> WorkJudgment.NOT_WORK
+            normalized.contains("NOT_WORK") -> WorkJudgment.NOT_WORK
+            normalized.contains("WORK") -> WorkJudgment.WORK
+            else -> WorkJudgment.UNKNOWN
+        }
     }
 
     /**
@@ -422,6 +479,51 @@ class CatBrain(
             ""
         }
         return "${whenPrefix}『${event.title}』入れたにゃ。仕事にも出しとく。"
+    }
+
+    /**
+     * #148 Phase 3-1: マリたん(Gemini経由の音声アシスタント)専用の、書き込みを
+     * 伴う唯一の安全な予定登録エントリポイント。[answerPoiQueryOrNull]とは
+     * 違い、ここでは実際にCatEventを1件保存する — しかし[respond]と違って
+     * 「解釈できなかった入力を何であれメモとして保存する」という最終
+     * フォールバックは持たない。[DateTimeParser.parseRegistration]が明確な
+     * 予定(日付を含む)として解析できた場合だけ登録し、それ以外は必ずnullを
+     * 返す。呼び出し元(MariTanRow)はnullの場合、これまで通り
+     * [answerPoiQueryOrNull]やGemini雑談へ進む — 日付語を含まない普通の会話
+     * ("今日どうだった？"等、質問でも日付語でもない一般的な発言)が誤って
+     * 予定として保存されることはない。
+     *
+     * [DateTimeParser.isQuery]が真の場合は判定を打ち切ってnullを返す —
+     * [respond]自身も、質問判定(isQuery)を予定登録(parseRegistration)より
+     * 必ず先に行っている(「今日の予定は？」のような質問文の中に偶然
+     * "今日"という日付語が含まれていても、それを予定として誤登録しないため
+     * の、既存コードと同じ安全順序をここでも踏襲する)。
+     *
+     * 既知の限界(DateTimeParser自体の挙動、今回変更していない): 「今日は
+     * 暑いね」のように、日付語("今日")を含みつつ疑問形でも無い雑談文は、
+     * この関数だけでなく既存の[respond]（黒猫AIの既存チャット、フェーズ1/2で
+     * 実機検証済み）でも同様に予定として解析されてしまう可能性があり、
+     * Phase 3-1で新たに生じた問題ではない。DateTimeParserの語彙・ヒューリス
+     * ティック自体を変更する対応は本チケットの範囲外とし、必要であれば
+     * 別チケットで検討する。
+     *
+     * 予定の保存([CatEventRepository.remember]、[rememberScheduleWithWorkJudgment]
+     * が内部で呼ぶ)自体は仕事判定(Gemini呼び出しを含み得る)より必ず先に完了
+     * しており、判定が失敗しても予定登録は既に成功済みで影響しない。新しい
+     * CatEventのinsertは1件だけ、既存の[rememberScheduleWithWorkJudgment]と
+     * 全く同じ経路をそのまま再利用する — マリたん専用の別の保存ロジックは
+     * 作らない。
+     */
+    suspend fun registerScheduleIfRecognized(input: String): CatReply? {
+        val trimmed = input.trim().replace(Regex("[「」『』]"), "").trim()
+        if (trimmed.isEmpty()) return null
+        if (DateTimeParser.isQuery(trimmed)) return null
+
+        val now = LocalDateTime.now()
+        val registration = DateTimeParser.parseRegistration(trimmed, now) ?: return null
+
+        val (saved, judgment) = rememberScheduleWithWorkJudgment(registration.title, registration.dateTime.toEpochMilli())
+        return CatReply(scheduleRegisteredReply(saved, judgment, now))
     }
 
     private val taskCompletionSuffixes = listOf(

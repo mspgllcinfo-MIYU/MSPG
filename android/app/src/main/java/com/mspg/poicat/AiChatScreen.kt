@@ -450,6 +450,17 @@ private enum class MariTanState { IDLE, LISTENING, THINKING, SPEAKING, SULKING, 
  * そのまま受け取って再利用する — ここで新しいCatBrain/RoomStoreは作らない。
  * answerPoiQueryOrNullは正真正銘の読み取り専用で、予定/タスク/メモの新規
  * 登録・編集・削除・完了処理は一切行わない。
+ *
+ * #148 Phase 3-1: answerPoiQueryOrNullも該当しなかった場合、Geminiへ送る前に
+ * さらに[CatBrain.registerScheduleIfRecognized]で「明日10時、現地確認」の
+ * ような、日付を含む明確な予定登録の発話として解析できるかを試す。該当すれば
+ * 予定を1件だけ登録し(仕事判定はCatBrain内でルールベース→必要な場合のみ
+ * Gemini意味判定の順に行われ、WORKならCatEventRepository.setAlsoShowAsTaskで
+ * 同じ行を仕事タブにも表示する)、登録結果をマリたんがそのまま声で返す。
+ * 予定として解析できない(null)場合のみ、これまで通りGeminiへ送る —
+ * catBrain.respond()をここから無条件に呼ぶことは絶対にしない(respond()の
+ * 最終フォールバックは未解釈の入力を何であれメモとして保存するため、普通の
+ * 雑談がPOIへ誤って書き込まれる危険がある)。
  */
 @Composable
 private fun MariTanRow(catBrain: CatBrain) {
@@ -557,6 +568,20 @@ private fun MariTanRow(catBrain: CatBrain) {
                         if (poiReply != null) {
                             state = MariTanState.SPEAKING
                             speak(poiReply.text) { state = MariTanState.IDLE }
+                            return@launch
+                        }
+                        // #148 Phase 3-1: answerPoiQueryOrNull(読み取り専用)が該当しな
+                        // かった場合だけ、予定登録として明確に解析できるかを試す。
+                        // registerScheduleIfRecognizedは「明日10時、現地確認」のような
+                        // 日付を含む明確な予定文にしか反応せず、それ以外(質問/雑談)は
+                        // 必ずnullを返す — 普通の会話が誤って予定として保存されること
+                        // はない。ここでanswerPoiQueryOrNullより先に予定登録判定を試すと
+                        // 「今日の予定は？」のような質問が誤登録されるリスクがあるため、
+                        // 順序は変えない。
+                        val scheduleReply = catBrain.registerScheduleIfRecognized(text)
+                        if (scheduleReply != null) {
+                            state = MariTanState.SPEAKING
+                            speak(scheduleReply.text) { state = MariTanState.IDLE }
                             return@launch
                         }
                         val memories = MariTanMemoryStore.all(context.applicationContext).map { it.text }
