@@ -524,6 +524,16 @@ private fun TaskRow(
                 textDecoration = if (task.completed) TextDecoration.LineThrough else null,
                 color = titleColor,
             )
+            // #148 フェーズ2: このタスク行がカレンダーの予定と同じCatEvent
+            // (正本は予定側)であることを示す短いラベル。複製された別データ
+            // ではなく、同じ行がカレンダーにも表示されている。
+            if (task.alsoShowAsTask) {
+                Text(
+                    text = "予定連動",
+                    fontSize = 10.sp,
+                    color = if (task.completed) PoiInk.copy(alpha = 0.35f) else PoiGold,
+                )
+            }
             task.dateTime?.let {
                 val due = it.toLocalDate()
                 Text(

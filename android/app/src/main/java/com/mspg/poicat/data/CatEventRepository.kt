@@ -117,14 +117,27 @@ class CatEventRepository(context: Context) {
         updateAndSync(event.copy(assignee = assignee))
     }
 
-    /** #148 フェーズ1: 予定(isTask=false)を、正本は予定のまま仕事/プラベ
+    /**
+     * #148 フェーズ1/2: 予定(isTask=false)を、正本は予定のまま仕事/プラベ
      * タスク画面にも同時表示する(またはやめる)ための専用更新経路。
      * updateAndSync()を経由するため、#143の「呼び出し元の古いスナップショット
      * が持つroomEventIdでDB側の値を巻き戻さない」保護をそのまま受け継ぐ —
      * ここで独自にdao.update()を呼んだり[event]を丸ごと上書きしたりしない。
-     * isTask自体は変更しない。 */
+     * isTask自体は変更しない。
+     *
+     * フェーズ2: ONにする瞬間、categoryが未設定(null)なら[CatEvent.CATEGORY_WORK]
+     * を自動設定する — 「仕事としてやる予定を仕事タスクにも表示する」という
+     * 今回の目的に沿った、null時だけの一度きりの推定。既にWORK/PRIVATEの
+     * どちらかに分類済みなら絶対に上書きしない。OFFにしても、この時に設定
+     * されたcategoryを勝手に消したりnullへ戻したりはしない(既存の分類を
+     * 破壊しない方針を優先)。categoryの判定は[event]の値ではなく、書き込み
+     * 直前に再取得した現在のDB行の値を使う — roomEventIdと同じ理由で、
+     * 呼び出し元の古いスナップショットに基づいて誤った推定をしないため。
+     */
     suspend fun setAlsoShowAsTask(event: CatEvent, enabled: Boolean) {
-        updateAndSync(event.copy(alsoShowAsTask = enabled))
+        val currentCategory = dao.byId(event.id)?.category ?: event.category
+        val category = if (enabled && currentCategory == null) CatEvent.CATEGORY_WORK else currentCategory
+        updateAndSync(event.copy(alsoShowAsTask = enabled, category = category))
     }
 
     suspend fun dueFor1DayReminder(windowStart: Long, windowEnd: Long) =

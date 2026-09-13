@@ -217,6 +217,12 @@ fun CalendarScreen(
                             refreshTick++
                         }
                     },
+                    onAlsoShowAsTaskChange = { enabled ->
+                        scope.launch {
+                            repository.setAlsoShowAsTask(event, enabled)
+                            refreshTick++
+                        }
+                    },
                 )
                 Spacer(Modifier.height(8.dp))
             }
@@ -421,7 +427,13 @@ private fun DayCell(
 }
 
 @Composable
-private fun EventRow(event: CatEvent, onClick: () -> Unit, onDelete: () -> Unit, onAssigneeChange: (String?) -> Unit) {
+private fun EventRow(
+    event: CatEvent,
+    onClick: () -> Unit,
+    onDelete: () -> Unit,
+    onAssigneeChange: (String?) -> Unit,
+    onAlsoShowAsTaskChange: (Boolean) -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -465,6 +477,26 @@ private fun EventRow(event: CatEvent, onClick: () -> Unit, onDelete: () -> Unit,
                         border = BorderStroke(0.dp, Color.Transparent),
                     )
                 }
+            }
+            // #148 フェーズ2: 予定を正本のまま仕事/プラベタスク画面にも同時
+            // 表示するかどうかの切替。ONにすると同じCatEventがそのまま
+            // PoiScreenのタスク一覧にも現れる(新しい行は複製しない)。OFFに
+            // 戻すとタスク一覧からだけ消え、この予定自体はカレンダーに残る。
+            Spacer(Modifier.height(4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                FilterChip(
+                    selected = event.alsoShowAsTask,
+                    onClick = { onAlsoShowAsTaskChange(!event.alsoShowAsTask) },
+                    label = { Text("タスクにも表示", fontSize = 11.sp) },
+                    shape = RoundedCornerShape(percent = 50),
+                    colors = FilterChipDefaults.filterChipColors(
+                        containerColor = Color.Transparent,
+                        labelColor = CalendarInk.copy(alpha = 0.5f),
+                        selectedContainerColor = CalendarPink.copy(alpha = 0.25f),
+                        selectedLabelColor = CalendarInk,
+                    ),
+                    border = BorderStroke(0.dp, Color.Transparent),
+                )
             }
         }
         IconButton(onClick = onDelete) {
