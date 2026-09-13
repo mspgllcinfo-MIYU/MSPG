@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.mspg.poicat.brain.CatBrain
+import com.mspg.poicat.brain.MapCommandMode
 import com.mspg.poicat.brain.toEpochMilli
 import com.mspg.poicat.data.CatEventRepository
 import com.mspg.poicat.data.Photo
@@ -70,6 +71,7 @@ import com.mspg.poicat.gemini.GeminiSearchService
 import com.mspg.poicat.gemini.MariTanMemoryStore
 import com.mspg.poicat.gemini.extractForgetQuery
 import com.mspg.poicat.gemini.extractRememberContent
+import com.mspg.poicat.maps.MapsLauncher
 import com.mspg.poicat.room.RoomStore
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
@@ -451,8 +453,20 @@ private enum class MariTanState { IDLE, LISTENING, THINKING, SPEAKING, SULKING, 
  * answerPoiQueryOrNullは正真正銘の読み取り専用で、予定/タスク/メモの新規
  * 登録・編集・削除・完了処理は一切行わない。
  *
- * #148 Phase 3-1: answerPoiQueryOrNullも該当しなかった場合、Geminiへ送る前に
- * さらに[CatBrain.registerScheduleIfRecognized]で「明日10時、現地確認」の
+ * #148 Maps-1A: answerPoiQueryOrNullも該当しなかった場合、予定登録判定
+ * ([CatBrain.registerScheduleIfRecognized])より先に、[CatBrain.detectMapCommand]
+ * で「福岡市役所まで案内して」「○○病院を地図で見せて」のような地図/ナビ
+ * 命令として解析できるかを試す。該当すれば[com.mspg.poicat.maps.MapsLauncher]
+ * でGoogle Mapsを開くだけで、CatEventは一切作らない。地図命令の判定を予定
+ * 登録より先に行うのは、「明日、銀行まで案内して」のように日付語を含む発話が
+ * 「明日、銀行」という予定登録と誤認されないようにするため。POI自身は位置
+ * 検索・経路計算を一切行わず(Places/Geocoding/Directions API等は不使用)、
+ * Google MapsのURL形式(`https://www.google.com/maps/...`)へ目的地文字列を
+ * 渡すだけで、解決はGoogle Maps側に委ねる。
+ *
+ * #148 Phase 3-1: answerPoiQueryOrNull・地図命令のどちらも該当しなかった
+ * 場合、Geminiへ送る前にさらに[CatBrain.registerScheduleIfRecognized]で
+ * 「明日10時、現地確認」の
  * ような、日付を含む明確な予定登録の発話として解析できるかを試す。該当すれば
  * 予定を1件だけ登録し(仕事判定はCatBrain内でルールベース→必要な場合のみ
  * Gemini意味判定の順に行われ、WORKならCatEventRepository.setAlsoShowAsTaskで
@@ -570,14 +584,34 @@ private fun MariTanRow(catBrain: CatBrain) {
                             speak(poiReply.text) { state = MariTanState.IDLE }
                             return@launch
                         }
-                        // #148 Phase 3-1: answerPoiQueryOrNull(読み取り専用)が該当しな
-                        // かった場合だけ、予定登録として明確に解析できるかを試す。
-                        // registerScheduleIfRecognizedは「明日10時、現地確認」のような
-                        // 日付を含む明確な予定文にしか反応せず、それ以外(質問/雑談)は
-                        // 必ずnullを返す — 普通の会話が誤って予定として保存されること
-                        // はない。ここでanswerPoiQueryOrNullより先に予定登録判定を試すと
-                        // 「今日の予定は？」のような質問が誤登録されるリスクがあるため、
-                        // 順序は変えない。
+                        // #148 Maps-1A: 予定登録の判定より先に、地図/ナビ命令として
+                        // 明確に解析できるかを試す。「明日、銀行まで案内して」のように
+                        // 日付語を含んでいても、末尾が「まで案内して」等の地図命令
+                        // トリガーで終わっていればここで先に確定させ、
+                        // registerScheduleIfRecognizedには渡さない(「明日、銀行」との
+                        // 誤認防止)。該当しない場合(「明日、銀行」等)は必ずnullが返り、
+                        // 下の予定登録判定へそのまま進む。CatBrain.detectMapCommandは
+                        // 純粋な文字列判定だけを行い、Intentの起動自体は
+                        // MapsLauncher(この関数の外、Android Contextを持つ側)の責務。
+                        val mapCommand = catBrain.detectMapCommand(text)
+                        if (mapCommand != null) {
+                            val opened = when (mapCommand.mode) {
+                                MapCommandMode.NAVIGATION ->
+                                    MapsLauncher.openNavigation(context.applicationContext, mapCommand.destination)
+                                MapCommandMode.SEARCH ->
+                                    MapsLauncher.openSearch(context.applicationContext, mapCommand.destination)
+                            }
+                            val reply = if (opened) "地図を開くにゃ" else "地図を開けなかったにゃ"
+                            state = MariTanState.SPEAKING
+                            speak(reply) { state = MariTanState.IDLE }
+                            return@launch
+                        }
+                        // #148 Phase 3-1: answerPoiQueryOrNull(読み取り専用)・地図命令
+                        // のどちらにも該当しなかった場合だけ、予定登録として明確に解析
+                        // できるかを試す。registerScheduleIfRecognizedは「明日10時、
+                        // 現地確認」のような日付を含む明確な予定文にしか反応せず、
+                        // それ以外(質問/雑談)は必ずnullを返す — 普通の会話が誤って予定
+                        // として保存されることはない。
                         val scheduleReply = catBrain.registerScheduleIfRecognized(text)
                         if (scheduleReply != null) {
                             state = MariTanState.SPEAKING

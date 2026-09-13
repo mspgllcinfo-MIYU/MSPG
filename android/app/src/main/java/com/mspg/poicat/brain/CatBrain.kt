@@ -15,6 +15,16 @@ import kotlinx.coroutines.withTimeoutOrNull
  * (empty for every other kind of reply). */
 data class CatReply(val text: String, val photoIds: List<Long> = emptyList())
 
+/** #148 Maps-1A: a Google Maps request recognized from user input — either
+ * a plain place search or turn-by-turn navigation to it. Carries only the
+ * free-text [destination] the user said and which of the two Google Maps
+ * intents to launch; no Android [android.content.Intent]/Context involved
+ * here, since [CatBrain] never launches Intents itself — see
+ * [com.mspg.poicat.maps.MapsLauncher] for that. */
+data class MapCommand(val destination: String, val mode: MapCommandMode)
+
+enum class MapCommandMode { SEARCH, NAVIGATION }
+
 /**
  * The "memory cat" brain: everything is on-device pattern matching against
  * the Room database. No AI model, no network call. Given a line of chat
@@ -589,6 +599,52 @@ class CatBrain(
             normalized.contains("SCHEDULE") -> RegistrationIntent.SCHEDULE
             else -> RegistrationIntent.UNKNOWN
         }
+    }
+
+    // #148 Maps-1A: マリたん専用の地図/ナビ命令を検出するための末尾トリガー。
+    // 大量の場所キーワード辞書は作らない — 目的地(場所名)自体は判定せず
+    // そのまま抽出するだけで、判定するのは「案内して」「ナビして」「地図で
+    // 見せて」等の命令表現(動詞側)だけに絞る。ナビと検索で語彙が重ならない
+    // よう別リストにしておく。
+    private val mapNavigationSuffixes = listOf(
+        "まで案内して", "までナビして", "への道を案内して", "へ案内して", "へナビして",
+    )
+    private val mapSearchSuffixes = listOf(
+        "をGoogleマップで開いて", "を地図で見せて", "を地図で開いて", "をマップで見せて", "をマップで開いて",
+    )
+
+    /**
+     * #148 Maps-1A: マリたん専用の、地図/ナビ命令の検出。AI・DB・ネットワーク
+     * はいずれも使わない純粋な文字列判定で、[CatBrain]自身はAndroid Intentを
+     * 一切起動しない — 判定結果の[MapCommand]を呼び出し元(MariTanRow)へ返す
+     * だけで、実際に地図を開くのは[com.mspg.poicat.maps.MapsLauncher]の責務。
+     *
+     * 「明日、銀行まで案内して」のように日付語を含む発話でも、この関数が
+     * [mapNavigationSuffixes]/[mapSearchSuffixes]の末尾一致で高確信度に判定
+     * するため、呼び出し元がこの関数を[registerScheduleIfRecognized]より
+     * *先に*試す限り、「明日、銀行」(予定登録)との誤認は起きない — 地図命令の
+     * 末尾表現と予定登録・雑談の既存トリガーは語彙が重ならないため。
+     *
+     * 目的地が空/空白だけの場合は[MapCommand]を返さない(呼び出し元が
+     * [com.mspg.poicat.maps.MapsLauncher]を呼ばずに済む)。
+     */
+    fun detectMapCommand(input: String): MapCommand? {
+        val trimmed = input.trim().replace(Regex("[「」『』]"), "").trim()
+        if (trimmed.isEmpty()) return null
+
+        for (suffix in mapNavigationSuffixes) {
+            if (trimmed.endsWith(suffix) && trimmed.length > suffix.length) {
+                val destination = trimmed.removeSuffix(suffix).trim()
+                if (destination.isNotBlank()) return MapCommand(destination, MapCommandMode.NAVIGATION)
+            }
+        }
+        for (suffix in mapSearchSuffixes) {
+            if (trimmed.endsWith(suffix) && trimmed.length > suffix.length) {
+                val destination = trimmed.removeSuffix(suffix).trim()
+                if (destination.isNotBlank()) return MapCommand(destination, MapCommandMode.SEARCH)
+            }
+        }
+        return null
     }
 
     /**
