@@ -4,6 +4,7 @@ import android.content.Context
 import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.SetOptions
 import com.mspg.poicat.data.AppDatabase
 import com.mspg.poicat.data.CatEvent
 import java.util.UUID
@@ -54,12 +55,18 @@ object RoomEventSync {
      * 成功した後にだけ[onRoomEventIdAssigned]で呼び出し元へ知らせる（＝ローカルの
      * 行へ保存するのは呼び出し元＝CatEventRepositoryの責務。書き込み失敗時は
      * roomEventIdを持たないままなので、次のpush機会に再度新規プッシュとして扱われる）。
+     *
+     * [SetOptions.merge]を使い、[toMap]に載っていないフィールドはFirestore側の
+     * 既存の値をそのまま残す（＝完全上書きしない）。これにより、将来この端末より
+     * 新しいバージョンが追加した未知のフィールド（例: 担当者）を、まだ更新していない
+     * 端末がこのイベントを編集・完了操作しても消してしまわないようにする。[toMap]が
+     * 送る各フィールド自体は常にこのイベントの最新値で上書きされる点は従来と変わらない。
      */
     suspend fun pushUpsert(context: Context, event: CatEvent, onRoomEventIdAssigned: suspend (String) -> Unit) {
         runCatching {
             val roomId = RoomStore(context).roomId ?: return
             val roomEventId = event.roomEventId ?: UUID.randomUUID().toString()
-            eventsRef(roomId).document(roomEventId).set(toMap(event)).await()
+            eventsRef(roomId).document(roomEventId).set(toMap(event), SetOptions.merge()).await()
             if (event.roomEventId == null) onRoomEventIdAssigned(roomEventId)
         }
     }
