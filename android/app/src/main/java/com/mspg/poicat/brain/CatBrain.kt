@@ -481,38 +481,67 @@ class CatBrain(
         return "${whenPrefix}『${event.title}』入れたにゃ。仕事にも出しとく。"
     }
 
+    // #148 Phase 3-1追加修正: registerScheduleIfRecognized専用の予定登録ガードが
+    // 「時間帯の言及」として認識する語。DateTimeParser自体には新しい語彙を
+    // 追加せず、この入口ガードだけで使う — 「今日は暑いね」「今日は疲れた」
+    // 「明日は雨かな」のように、日付語(今日/明日)を1つ含むだけの雑談文には
+    // これらの語もN時のような時刻表現も現れないため、下のガードで弾かれる。
+    private val timeOfDaySignals = listOf(
+        "午前", "午後", "朝", "早朝", "昼", "夕方", "夕", "夜", "深夜", "未明",
+    )
+
+    private val explicitClockTimePattern = Regex("""\d{1,2}時""")
+
+    /**
+     * #148 Phase 3-1追加修正: [registerScheduleIfRecognized]専用の予定登録
+     * ガード。[DateTimeParser.parseRegistration]は「今日/明日等の日付語が
+     * 1つ含まれている」というだけで解析に成功してしまうため(例:「今日は
+     * 暑いね」→ タイトル「暑い」で解析成功する)、マリたんではその結果だけで
+     * 書き込みを確定しない。
+     *
+     * 新しいキーワード分類器やDateTimeParser自体の変更は行わず、[input]の
+     * 元の文字列に(a)具体的な時刻(「15時」「10時半」等の"N時"パターン)、
+     * または(b)時間帯を表す語([timeOfDaySignals])のいずれかが含まれる場合
+     * だけ、「予定として登録する意図が十分ある」とみなしtrueを返す。
+     * どちらも無ければ安全側にfalseを返す — 「迷ったら登録しない」という
+     * 方針をそのまま反映している。
+     *
+     * この設計により、時刻・時間帯のどちらも言及しない、日付語だけの短い
+     * 感想文("今日は疲れた"等)は登録されない。一方で意図的な副作用として、
+     * 「明日、現地確認」のように時刻・時間帯を一切言わない予定文はこの入口
+     * では登録されず(nullとなりGemini雑談へ渡る)、黒猫AI側の[respond]で
+     * 改めて登録し直す必要がある — マリたんに書き込み権限を与えたことで
+     * 生じる誤登録を安全側に倒すためのトレードオフとして許容する。
+     */
+    private fun looksLikeIntentionalScheduleRegistration(input: String): Boolean =
+        explicitClockTimePattern.containsMatchIn(input) || timeOfDaySignals.any { input.contains(it) }
+
     /**
      * #148 Phase 3-1: マリたん(Gemini経由の音声アシスタント)専用の、書き込みを
      * 伴う唯一の安全な予定登録エントリポイント。[answerPoiQueryOrNull]とは
      * 違い、ここでは実際にCatEventを1件保存する — しかし[respond]と違って
      * 「解釈できなかった入力を何であれメモとして保存する」という最終
-     * フォールバックは持たない。[DateTimeParser.parseRegistration]が明確な
-     * 予定(日付を含む)として解析できた場合だけ登録し、それ以外は必ずnullを
-     * 返す。呼び出し元(MariTanRow)はnullの場合、これまで通り
-     * [answerPoiQueryOrNull]やGemini雑談へ進む — 日付語を含まない普通の会話
-     * ("今日どうだった？"等、質問でも日付語でもない一般的な発言)が誤って
-     * 予定として保存されることはない。
+     * フォールバックは持たない。呼び出し元(MariTanRow)はnullの場合、これまで
+     * 通り[answerPoiQueryOrNull]やGemini雑談へ進む。
      *
-     * [DateTimeParser.isQuery]が真の場合は判定を打ち切ってnullを返す —
-     * [respond]自身も、質問判定(isQuery)を予定登録(parseRegistration)より
-     * 必ず先に行っている(「今日の予定は？」のような質問文の中に偶然
-     * "今日"という日付語が含まれていても、それを予定として誤登録しないため
-     * の、既存コードと同じ安全順序をここでも踏襲する)。
-     *
-     * 既知の限界(DateTimeParser自体の挙動、今回変更していない): 「今日は
-     * 暑いね」のように、日付語("今日")を含みつつ疑問形でも無い雑談文は、
-     * この関数だけでなく既存の[respond]（黒猫AIの既存チャット、フェーズ1/2で
-     * 実機検証済み）でも同様に予定として解析されてしまう可能性があり、
-     * Phase 3-1で新たに生じた問題ではない。DateTimeParserの語彙・ヒューリス
-     * ティック自体を変更する対応は本チケットの範囲外とし、必要であれば
-     * 別チケットで検討する。
-     *
-     * 予定の保存([CatEventRepository.remember]、[rememberScheduleWithWorkJudgment]
-     * が内部で呼ぶ)自体は仕事判定(Gemini呼び出しを含み得る)より必ず先に完了
-     * しており、判定が失敗しても予定登録は既に成功済みで影響しない。新しい
-     * CatEventのinsertは1件だけ、既存の[rememberScheduleWithWorkJudgment]と
-     * 全く同じ経路をそのまま再利用する — マリたん専用の別の保存ロジックは
-     * 作らない。
+     * 4段階の判定:
+     * 1. [DateTimeParser.isQuery]が真ならnull — [respond]自身も、質問判定を
+     *    予定登録より必ず先に行っている(「今日の予定は？」のような質問文の
+     *    中に偶然"今日"という日付語が含まれていても、それを予定として誤登録
+     *    しないための、既存コードと同じ安全順序)。
+     * 2. [DateTimeParser.parseRegistration]がnullならnull(日付語自体が
+     *    見つからない)。
+     * 3. [looksLikeIntentionalScheduleRegistration]がfalseならnull —
+     *    日付語は見つかったが、時刻・時間帯の言及が無い(＝「今日は暑いね」
+     *    のような雑談の可能性が高い)場合はここで打ち切る。この関数を通過
+     *    しなかった入力について[GeminiWorkJudge]が呼ばれることは無い(3を
+     *    通過して初めて4のrememberScheduleWithWorkJudgmentへ進むため)。
+     * 4. 1〜3を全て通過した場合だけ[rememberScheduleWithWorkJudgment]を呼ぶ
+     *    — 予定の保存([CatEventRepository.remember])自体は仕事判定(Gemini
+     *    呼び出しを含み得る)より必ず先に完了しており、判定が失敗しても予定
+     *    登録は既に成功済みで影響しない。新しいCatEventのinsertは1件だけ、
+     *    既存の[rememberScheduleWithWorkJudgment]と全く同じ経路をそのまま
+     *    再利用する — マリたん専用の別の保存ロジックは作らない。
      */
     suspend fun registerScheduleIfRecognized(input: String): CatReply? {
         val trimmed = input.trim().replace(Regex("[「」『』]"), "").trim()
@@ -521,6 +550,7 @@ class CatBrain(
 
         val now = LocalDateTime.now()
         val registration = DateTimeParser.parseRegistration(trimmed, now) ?: return null
+        if (!looksLikeIntentionalScheduleRegistration(trimmed)) return null
 
         val (saved, judgment) = rememberScheduleWithWorkJudgment(registration.title, registration.dateTime.toEpochMilli())
         return CatReply(scheduleRegisteredReply(saved, judgment, now))
