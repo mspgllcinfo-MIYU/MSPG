@@ -92,10 +92,6 @@ class CatEventRepository(context: Context) {
 
     suspend fun allMatching(keyword: String) = dao.allMatching(keyword)
 
-    /** #148 Maps-2D: 保存済みの場所(locationText)を持つ全ての行。読み取り専用 —
-     * CatBrainの保存済み場所検索が使うだけで、ここでの書き込みは一切発生しない。 */
-    suspend fun eventsWithLocation() = dao.withLocation()
-
     suspend fun addTask(title: String, dueDateTime: Long?, category: String? = null): CatEvent =
         insertAndSync(CatEvent(title = title, dateTime = dueDateTime, isTask = true, category = category))
 

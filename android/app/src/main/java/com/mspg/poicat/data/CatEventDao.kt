@@ -119,12 +119,6 @@ interface CatEventDao {
     @Query("SELECT * FROM cat_events WHERE title LIKE '%' || :keyword || '%'")
     suspend fun allMatching(keyword: String): List<CatEvent>
 
-    /** Every row (schedule, task, or memo alike) that has a saved location — used by
-     * #148 Maps-2D's read-only lookup of a saved place by its exact display name. This is
-     * a plain read query, not a schema change: no new column, no Migration required. */
-    @Query("SELECT * FROM cat_events WHERE locationText IS NOT NULL AND locationText != ''")
-    suspend fun withLocation(): List<CatEvent>
-
     /** Dated, unfired schedule events whose reminder window has arrived — used by the periodic worker. */
     @Query(
         "SELECT * FROM cat_events WHERE isTask = 0 AND dateTime IS NOT NULL AND reminded1Day = 0 " +
