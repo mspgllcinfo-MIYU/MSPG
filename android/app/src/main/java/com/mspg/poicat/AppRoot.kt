@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -44,9 +45,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.mspg.poicat.brain.CatBrain
 import com.mspg.poicat.data.CatEventRepository
+import com.mspg.poicat.data.PhotoRepository
+import com.mspg.poicat.maps.LocationDisplayName
 import com.mspg.poicat.maps.MapsLauncher
 import com.mspg.poicat.maps.SharedLocationDetector
+import com.mspg.poicat.room.RoomStore
 import java.time.LocalDate
 import java.time.YearMonth
 import kotlinx.coroutines.launch
@@ -105,6 +110,14 @@ fun AppRoot() {
     // 「夫婦でシェア」(4桁PINルーム共有)専用入口 — showConnectionSettingsと同じ
     // 「Homeからの一時的な全画面遷移」パターン。AppTab/BottomTabBarには触れない。
     var showRoomShare by remember { mutableStateOf(false) }
+    // #148 Maps-2C: 共有場所の確認ダイアログで「予定に追加」が押された後、
+    // 代わりに予定入力ダイアログを表示するためのローカル切替。
+    // PendingSharedLocation.pending自体はこの間も保持し続け(場所テキストの
+    // 保管場所は変えない)、この変数は「今どちらのダイアログを見せるか」
+    // だけを覚える。ここでキャンセルしても、成功しても、どちらの経路でも
+    // 最終的にPendingSharedLocation.pendingをnullへ戻すため、次に何か別の
+    // 場所が共有されるまでこのダイアログ自体は二度と現れない。
+    var showScheduleInputForLocation by remember { mutableStateOf(false) }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -144,23 +157,52 @@ fun AppRoot() {
     // 戻す(同じ共有を再度処理しないため)。
     val sharedLocationText = PendingSharedLocation.pending
     if (sharedLocationText != null) {
-        SharedLocationConfirmationDialog(
-            text = sharedLocationText,
-            onOpenMaps = {
-                val mapsUrl = SharedLocationDetector.extractMapsUrl(sharedLocationText)
-                if (mapsUrl != null) {
-                    MapsLauncher.openUrl(context, mapsUrl)
-                } else {
-                    MapsLauncher.openSearch(context, sharedLocationText)
-                }
-                PendingSharedLocation.pending = null
-            },
-            onSaveAsMemo = {
-                scope.launch { CatEventRepository(context).remember(sharedLocationText, null) }
-                PendingSharedLocation.pending = null
-            },
-            onDismiss = { PendingSharedLocation.pending = null },
-        )
+        if (showScheduleInputForLocation) {
+            // #148 Maps-2C: 「予定に追加」の入力ダイアログ。ここではまだ何も
+            // 保存しない — ユーザーが実際に予定内容を入力し、下の
+            // onSubmitScheduleがCatBrain.registerScheduleAndReturnEventで
+            // 本当に予定登録に成功した場合にだけ、その返り値のCatEventへ
+            // repository.setLocationで場所を紐付ける。失敗時はfalseを返す
+            // だけで、pendingは保持されたまま(ユーザーが再入力できる)。
+            AddLocationToScheduleDialog(
+                locationText = sharedLocationText,
+                onCancel = {
+                    showScheduleInputForLocation = false
+                    PendingSharedLocation.pending = null
+                },
+                onSubmitSchedule = { scheduleInput ->
+                    val catBrain = CatBrain(CatEventRepository(context), PhotoRepository(context)) { RoomStore(context).displayName }
+                    val created = catBrain.registerScheduleAndReturnEvent(scheduleInput)
+                    if (created != null) {
+                        CatEventRepository(context).setLocation(created, sharedLocationText)
+                        showScheduleInputForLocation = false
+                        PendingSharedLocation.pending = null
+                        true
+                    } else {
+                        false
+                    }
+                },
+            )
+        } else {
+            SharedLocationConfirmationDialog(
+                text = sharedLocationText,
+                onOpenMaps = {
+                    val mapsUrl = SharedLocationDetector.extractMapsUrl(sharedLocationText)
+                    if (mapsUrl != null) {
+                        MapsLauncher.openUrl(context, mapsUrl)
+                    } else {
+                        MapsLauncher.openSearch(context, sharedLocationText)
+                    }
+                    PendingSharedLocation.pending = null
+                },
+                onSaveAsMemo = {
+                    scope.launch { CatEventRepository(context).remember(sharedLocationText, null) }
+                    PendingSharedLocation.pending = null
+                },
+                onAddToSchedule = { showScheduleInputForLocation = true },
+                onDismiss = { PendingSharedLocation.pending = null },
+            )
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -305,18 +347,21 @@ private fun BottomTabBar(selectedTab: AppTab, onSelect: (AppTab) -> Unit) {
 }
 
 /**
- * #148 Maps-1B: Google Maps/Gemini等から共有された場所テキストを受け取った
- * 直後に表示する、最小限の確認ダイアログ。[onOpenMaps]/[onSaveAsMemo]の
- * どちらも呼び出し元(AppRoot)が明示的に選ばれた場合にだけ実行する —
- * このComposable自身はCatEventもメモも一切作らない。[onDismiss]は
- * ダイアログ外タップ・システムバックの両方から呼ばれ、[onSaveAsMemo]と
- * 同様に何も保存しない。
+ * #148 Maps-1B/Maps-2C: Google Maps/Gemini等から共有された場所テキストを
+ * 受け取った直後に表示する、最小限の確認ダイアログ。[onOpenMaps]/
+ * [onSaveAsMemo]/[onAddToSchedule]のいずれも呼び出し元(AppRoot)が明示的に
+ * 選ばれた場合にだけ実行する — このComposable自身はCatEventもメモも一切
+ * 作らない([onAddToSchedule]がタップされた時点でもまだ何も保存しない、
+ * 実際の予定作成は[AddLocationToScheduleDialog]でユーザーが入力を完了して
+ * 初めて行われる)。[onDismiss]はダイアログ外タップ・システムバックの
+ * 両方から呼ばれ、[onSaveAsMemo]と同様に何も保存しない。
  */
 @Composable
 private fun SharedLocationConfirmationDialog(
     text: String,
     onOpenMaps: () -> Unit,
     onSaveAsMemo: () -> Unit,
+    onAddToSchedule: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
@@ -327,10 +372,81 @@ private fun SharedLocationConfirmationDialog(
             Column {
                 TextButton(onClick = onOpenMaps) { Text("Googleマップで開く") }
                 TextButton(onClick = onSaveAsMemo) { Text("メモに保存") }
+                TextButton(onClick = onAddToSchedule) { Text("予定に追加") }
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("キャンセル") }
+        },
+    )
+}
+
+/**
+ * #148 Maps-2C: 共有された場所を予定に紐付けるための、予定内容の入力
+ * ダイアログ。[onSubmitSchedule]が呼ばれた時点ではまだ何も保存しない —
+ * [onSubmitSchedule]自身が[com.mspg.poicat.brain.CatBrain.
+ * registerScheduleAndReturnEvent]で実際に予定登録に成功した場合にだけ
+ * [com.mspg.poicat.data.CatEventRepository.setLocation]を呼び、その結果
+ * (true/false)を返す。falseが返った場合はこのダイアログを閉じずエラー
+ * 表示に留め、ユーザーが日時の分かる言い方で入力し直せるようにする —
+ * 予定登録に失敗した場合に別の予定へ場所を付けてしまうことは無い(そもそも
+ * 何も作られていないため付けようがない)。
+ */
+@Composable
+private fun AddLocationToScheduleDialog(
+    locationText: String,
+    onCancel: () -> Unit,
+    onSubmitSchedule: suspend (String) -> Boolean,
+) {
+    var input by remember { mutableStateOf("") }
+    var isSubmitting by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("予定に追加 📍") },
+        text = {
+            Column {
+                Text(
+                    "この場所: ${LocationDisplayName.extractDisplayName(locationText) ?: locationText}",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text("いつ・何の予定か入力してにゃ（例: 15日14時、打ち合わせ）")
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it; errorMessage = null },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !isSubmitting,
+                )
+                val error = errorMessage
+                if (error != null) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = input.isNotBlank() && !isSubmitting,
+                onClick = {
+                    val submitted = input
+                    isSubmitting = true
+                    scope.launch {
+                        val success = onSubmitSchedule(submitted)
+                        isSubmitting = false
+                        if (!success) {
+                            errorMessage = "予定として登録できなかったにゃ。日時が分かる言い方でもう一度入力してにゃ"
+                        }
+                    }
+                },
+            ) { Text("登録") }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel, enabled = !isSubmitting) { Text("キャンセル") }
         },
     )
 }

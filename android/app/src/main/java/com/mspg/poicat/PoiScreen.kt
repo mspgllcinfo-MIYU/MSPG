@@ -59,6 +59,7 @@ import com.mspg.poicat.data.CatEvent
 import com.mspg.poicat.data.CatEventRepository
 import com.mspg.poicat.data.Photo
 import com.mspg.poicat.data.PhotoRepository
+import com.mspg.poicat.maps.LocationDisplayName
 import com.mspg.poicat.maps.MapsLauncher
 import com.mspg.poicat.maps.SharedLocationDetector
 import java.time.LocalDate
@@ -571,12 +572,15 @@ private fun TaskRow(
                     }
                 }
             }
-            // #148 Maps-2B: 予定連動タスク(alsoShowAsTask)が場所(locationText)を
-            // 持つ場合、CalendarScreenのEventRowと同じ「Googleマップで開く」
-            // 導線を出す — 同じCatEventの同じフィールドを見ているだけで、
-            // 別データを新設するものではない。読み取り専用、タップしても
-            // CatEventRepositoryへの書き込みは発生しない。無理な共通化は
-            // 避け、EventRow側と同じロジックをこの関数内にそのまま置く。
+            // #148 Maps-2B/2C: 予定連動タスク(alsoShowAsTask)が場所(locationText)
+            // を持つ場合、CalendarScreenのEventRowと同じ場所導線を出す —
+            // 同じCatEventの同じフィールドを見ているだけで、別データを新設
+            // するものではない。読み取り専用、タップしてもCatEventRepository
+            // への書き込みは発生しない。表示名はLocationDisplayName.
+            // extractDisplayNameで、共有テキストにURLと一緒に含まれていた
+            // 施設名部分だけを抽出する(施設名の推測・捏造はしない、URLのみ
+            // ならフォールバック表示)。無理な共通化は避け、EventRow側と
+            // 同じロジックをこの関数内にそのまま置く。
             val locationText = task.locationText
             if (!locationText.isNullOrBlank()) {
                 Spacer(Modifier.height(4.dp))
@@ -594,7 +598,7 @@ private fun TaskRow(
                 ) {
                     Text("📍", fontSize = 12.sp)
                     Text(
-                        "Googleマップで開く",
+                        LocationDisplayName.extractDisplayName(locationText) ?: "Googleマップで開く",
                         fontSize = 11.sp,
                         color = if (task.completed) PoiInk.copy(alpha = 0.35f) else PoiGold,
                     )

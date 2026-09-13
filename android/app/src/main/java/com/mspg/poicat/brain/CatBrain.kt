@@ -675,16 +675,53 @@ class CatBrain(
      *    再利用する — マリたん専用の別の保存ロジックは作らない。
      */
     suspend fun registerScheduleIfRecognized(input: String): CatReply? {
+        val now = LocalDateTime.now()
+        val (saved, judgment) = registerScheduleCore(input, now) ?: return null
+        return CatReply(scheduleRegisteredReply(saved, judgment, now))
+    }
+
+    /**
+     * #148 Maps-2C: [registerScheduleIfRecognized]の1〜4の判定・保存経路を
+     * そのまま抽出した共有コア。[CatReply](マリたんの音声応答用テキスト)を
+     * 組み立てる責務は呼び出し元に残し、ここでは実際に作成/特定された
+     * [CatEvent]と[WorkJudgment]の組だけを返す — 動作は元の
+     * [registerScheduleIfRecognized]と完全に同一(単純な抽出のみ、判定順序・
+     * 条件は一切変更していない)。
+     */
+    private suspend fun registerScheduleCore(input: String, now: LocalDateTime): Pair<CatEvent, WorkJudgment>? {
         val trimmed = input.trim().replace(Regex("[「」『』]"), "").trim()
         if (trimmed.isEmpty()) return null
         if (DateTimeParser.isQuery(trimmed)) return null
 
-        val now = LocalDateTime.now()
         val registration = DateTimeParser.parseRegistration(trimmed, now) ?: return null
         if (judgeRegistrationIntent(trimmed) != RegistrationIntent.SCHEDULE) return null
 
-        val (saved, judgment) = rememberScheduleWithWorkJudgment(registration.title, registration.dateTime.toEpochMilli())
-        return CatReply(scheduleRegisteredReply(saved, judgment, now))
+        return rememberScheduleWithWorkJudgment(registration.title, registration.dateTime.toEpochMilli())
+    }
+
+    /**
+     * #148 Maps-2C: Google Maps/Gemini等から共有された場所を予定に紐付ける
+     * 「予定に追加」フロー専用のエントリポイント。[registerScheduleIfRecognized]
+     * と全く同じ判定・保存経路([registerScheduleCore])を再利用するが、
+     * マリたんの音声応答用[CatReply]の代わりに、実際に作成/特定された
+     * [CatEvent]そのものを返す。
+     *
+     * 呼び出し元(Maps-2Cの「予定に追加」ダイアログ)は、これが非nullを返した
+     * 場合にだけ — つまり[DateTimeParser.parseRegistration]が明確な予定として
+     * 解析でき、[RegistrationIntent.SCHEDULE]と判定され、実際に
+     * [CatEventRepository.remember]でCatEventの保存(または既存の重複行の
+     * 再利用)が完了した場合にだけ — その返り値のCatEventへ
+     * [CatEventRepository.setLocation]で場所を紐付ける。「最新の予定を検索
+     * して推測する」「タイトル・時刻の一致で後から推測する」といった曖昧な
+     * 特定方法は一切使わない(この関数の戻り値自体が、登録処理が直接返した
+     * 正確な参照そのもの)。
+     *
+     * 予定として解析できない、または雑談/曖昧と判定された場合は
+     * [registerScheduleIfRecognized]と同じくnullを返す — この場合、呼び出し元は
+     * 何も保存せず、ユーザーに再入力を促す。
+     */
+    suspend fun registerScheduleAndReturnEvent(input: String): CatEvent? {
+        return registerScheduleCore(input, LocalDateTime.now())?.first
     }
 
     private val taskCompletionSuffixes = listOf(

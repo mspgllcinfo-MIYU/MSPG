@@ -59,6 +59,7 @@ import com.mspg.poicat.data.CatEvent
 import com.mspg.poicat.data.CatEventRepository
 import com.mspg.poicat.data.Photo
 import com.mspg.poicat.data.PhotoRepository
+import com.mspg.poicat.maps.LocationDisplayName
 import com.mspg.poicat.maps.MapsLauncher
 import com.mspg.poicat.maps.SharedLocationDetector
 import java.time.LocalDate
@@ -501,15 +502,19 @@ private fun EventRow(
                     border = BorderStroke(0.dp, Color.Transparent),
                 )
             }
-            // #148 Maps-2B: 場所(event.locationText)が設定されている予定にだけ、
-            // 「Googleマップで開く」導線を追加する。読み取り専用 — タップしても
+            // #148 Maps-2B/2C: 場所(event.locationText)が設定されている予定に
+            // だけ、場所の導線を追加する。読み取り専用 — タップしても
             // CatEventRepositoryへの書き込みは一切発生しない。長いURLをそのまま
-            // 表示すると予定一覧が読みにくくなるため、生のlocationText文字列
-            // 自体は表示せず、固定のラベルだけを見せる。Maps-1Bの確認ダイアログ
-            // と全く同じ安全な起動経路(SharedLocationDetector.extractMapsUrlで
-            // URLを検出できればMapsLauncher.openUrl、できなければ
-            // MapsLauncher.openSearchへフォールバック)をそのまま再利用する —
-            // 新しいURL解析・Intent起動ロジックはここで重複実装しない。
+            // 表示すると予定一覧が読みにくくなるため、生のURL文字列自体は
+            // 表示しない — 共有テキストに施設名がURLと一緒に含まれていた場合
+            // だけ、LocationDisplayName.extractDisplayNameがその施設名部分を
+            // 抽出して表示する(URLのみが共有された場合は施設名を推測・捏造
+            // せずnullを返し、固定の「Googleマップで開く」ラベルへ
+            // フォールバックする)。Maps-1Bの確認ダイアログと全く同じ安全な
+            // 起動経路(SharedLocationDetector.extractMapsUrlでURLを検出
+            // できればMapsLauncher.openUrl、できなければMapsLauncher.
+            // openSearchへフォールバック)をそのまま再利用する — 新しいURL
+            // 解析・Intent起動ロジックはここで重複実装しない。
             val locationText = event.locationText
             if (!locationText.isNullOrBlank()) {
                 Spacer(Modifier.height(4.dp))
@@ -526,7 +531,11 @@ private fun EventRow(
                     },
                 ) {
                     Text("📍", fontSize = 12.sp)
-                    Text("Googleマップで開く", fontSize = 11.sp, color = CalendarGold)
+                    Text(
+                        LocationDisplayName.extractDisplayName(locationText) ?: "Googleマップで開く",
+                        fontSize = 11.sp,
+                        color = CalendarGold,
+                    )
                 }
             }
         }
