@@ -196,7 +196,20 @@ fun AppRoot() {
                     PendingSharedLocation.pending = null
                 },
                 onSaveAsMemo = {
-                    scope.launch { CatEventRepository(context).remember(sharedLocationText, null) }
+                    // #148 Maps場所メモ統一: 予定に追加と同じ「title/locationTextを
+                    // 分離して保存する」形に統一する。生の共有テキスト(URL込み)を
+                    // そのままメモのtitleにはしない — LocationDisplayName.
+                    // extractDisplayNameで施設名が取れればそれをtitleにし、取れなけ
+                    // れば(URLのみの共有)施設名を推測・捏造せず固定文言「共有された
+                    // 場所」をtitleにする。共有された生テキスト自体は、既存の
+                    // setLocation()経由でCatEvent.locationTextへそのまま保存する
+                    // (予定に追加と全く同じ2段階の保存経路を再利用)。
+                    scope.launch {
+                        val title = LocationDisplayName.extractDisplayName(sharedLocationText) ?: "共有された場所"
+                        val repository = CatEventRepository(context)
+                        val createdMemo = repository.remember(title, null)
+                        repository.setLocation(createdMemo, sharedLocationText)
+                    }
                     PendingSharedLocation.pending = null
                 },
                 onAddToSchedule = { showScheduleInputForLocation = true },

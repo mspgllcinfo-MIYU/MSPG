@@ -48,6 +48,9 @@ import com.mspg.poicat.data.CatEvent
 import com.mspg.poicat.data.CatEventRepository
 import com.mspg.poicat.data.Photo
 import com.mspg.poicat.data.PhotoRepository
+import com.mspg.poicat.maps.LocationDisplayName
+import com.mspg.poicat.maps.MapsLauncher
+import com.mspg.poicat.maps.SharedLocationDetector
 import kotlinx.coroutines.launch
 
 // Step4-3: Memo-only design tokens, matching Home (Step1) / bottom nav
@@ -252,6 +255,7 @@ fun MemoScreen(embedded: Boolean = false) {
 
 @Composable
 private fun MemoRow(memo: CatEvent, onClick: () -> Unit, onDelete: () -> Unit) {
+    val context = LocalContext.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -271,6 +275,37 @@ private fun MemoRow(memo: CatEvent, onClick: () -> Unit, onDelete: () -> Unit) {
                 fontSize = 12.sp,
                 color = MemoGold,
             )
+            // #148 Maps場所メモ統一: 場所(memo.locationText)が設定されている
+            // メモにだけ、CalendarScreenのEventRow/PoiScreenのTaskRowと同じ
+            // 場所導線を出す。読み取り専用、タップしてもCatEventRepositoryへの
+            // 書き込みは発生しない。表示名はLocationDisplayName.
+            // extractDisplayNameで、共有テキストにURLと一緒に含まれていた施設名
+            // 部分だけを抽出する(施設名の推測・捏造はしない、URLのみならフォール
+            // バック表示)。無理な共通化は避け、EventRow/TaskRow側と同じロジック
+            // をこの関数内にそのまま置く。
+            val locationText = memo.locationText
+            if (!locationText.isNullOrBlank()) {
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.clickable {
+                        val url = SharedLocationDetector.extractMapsUrl(locationText)
+                        if (url != null) {
+                            MapsLauncher.openUrl(context, url)
+                        } else {
+                            MapsLauncher.openSearch(context, locationText)
+                        }
+                    },
+                ) {
+                    Text("📍", fontSize = 12.sp)
+                    Text(
+                        LocationDisplayName.extractDisplayName(locationText) ?: "Googleマップで開く",
+                        fontSize = 11.sp,
+                        color = MemoGold,
+                    )
+                }
+            }
         }
         IconButton(onClick = onDelete) {
             Text("✕", color = MaterialTheme.colorScheme.error)
