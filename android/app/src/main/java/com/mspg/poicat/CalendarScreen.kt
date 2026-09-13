@@ -59,6 +59,8 @@ import com.mspg.poicat.data.CatEvent
 import com.mspg.poicat.data.CatEventRepository
 import com.mspg.poicat.data.Photo
 import com.mspg.poicat.data.PhotoRepository
+import com.mspg.poicat.maps.MapsLauncher
+import com.mspg.poicat.maps.SharedLocationDetector
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -434,6 +436,7 @@ private fun EventRow(
     onAssigneeChange: (String?) -> Unit,
     onAlsoShowAsTaskChange: (Boolean) -> Unit,
 ) {
+    val context = LocalContext.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -497,6 +500,34 @@ private fun EventRow(
                     ),
                     border = BorderStroke(0.dp, Color.Transparent),
                 )
+            }
+            // #148 Maps-2B: 場所(event.locationText)が設定されている予定にだけ、
+            // 「Googleマップで開く」導線を追加する。読み取り専用 — タップしても
+            // CatEventRepositoryへの書き込みは一切発生しない。長いURLをそのまま
+            // 表示すると予定一覧が読みにくくなるため、生のlocationText文字列
+            // 自体は表示せず、固定のラベルだけを見せる。Maps-1Bの確認ダイアログ
+            // と全く同じ安全な起動経路(SharedLocationDetector.extractMapsUrlで
+            // URLを検出できればMapsLauncher.openUrl、できなければ
+            // MapsLauncher.openSearchへフォールバック)をそのまま再利用する —
+            // 新しいURL解析・Intent起動ロジックはここで重複実装しない。
+            val locationText = event.locationText
+            if (!locationText.isNullOrBlank()) {
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.clickable {
+                        val url = SharedLocationDetector.extractMapsUrl(locationText)
+                        if (url != null) {
+                            MapsLauncher.openUrl(context, url)
+                        } else {
+                            MapsLauncher.openSearch(context, locationText)
+                        }
+                    },
+                ) {
+                    Text("📍", fontSize = 12.sp)
+                    Text("Googleマップで開く", fontSize = 11.sp, color = CalendarGold)
+                }
             }
         }
         IconButton(onClick = onDelete) {

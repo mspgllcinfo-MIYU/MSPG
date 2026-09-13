@@ -59,6 +59,8 @@ import com.mspg.poicat.data.CatEvent
 import com.mspg.poicat.data.CatEventRepository
 import com.mspg.poicat.data.Photo
 import com.mspg.poicat.data.PhotoRepository
+import com.mspg.poicat.maps.MapsLauncher
+import com.mspg.poicat.maps.SharedLocationDetector
 import java.time.LocalDate
 import kotlinx.coroutines.launch
 
@@ -492,6 +494,7 @@ private fun TaskRow(
     onDelete: () -> Unit,
     onAssigneeChange: (String?) -> Unit,
 ) {
+    val context = LocalContext.current
     // Step4-1: a completed row stays the same shape, just quieter — lighter
     // card, weaker ink — on top of the existing strike-through.
     val cardColor = if (task.completed) PoiCard.copy(alpha = 0.55f) else PoiCard
@@ -566,6 +569,35 @@ private fun TaskRow(
                             border = BorderStroke(0.dp, Color.Transparent),
                         )
                     }
+                }
+            }
+            // #148 Maps-2B: 予定連動タスク(alsoShowAsTask)が場所(locationText)を
+            // 持つ場合、CalendarScreenのEventRowと同じ「Googleマップで開く」
+            // 導線を出す — 同じCatEventの同じフィールドを見ているだけで、
+            // 別データを新設するものではない。読み取り専用、タップしても
+            // CatEventRepositoryへの書き込みは発生しない。無理な共通化は
+            // 避け、EventRow側と同じロジックをこの関数内にそのまま置く。
+            val locationText = task.locationText
+            if (!locationText.isNullOrBlank()) {
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.clickable {
+                        val url = SharedLocationDetector.extractMapsUrl(locationText)
+                        if (url != null) {
+                            MapsLauncher.openUrl(context, url)
+                        } else {
+                            MapsLauncher.openSearch(context, locationText)
+                        }
+                    },
+                ) {
+                    Text("📍", fontSize = 12.sp)
+                    Text(
+                        "Googleマップで開く",
+                        fontSize = 11.sp,
+                        color = if (task.completed) PoiInk.copy(alpha = 0.35f) else PoiGold,
+                    )
                 }
             }
         }
