@@ -7,6 +7,7 @@ import com.mspg.poicat.data.PhotoRepository
 import com.mspg.poicat.gemini.GeminiOutcome
 import com.mspg.poicat.gemini.GeminiRegistrationIntent
 import com.mspg.poicat.gemini.GeminiWorkJudge
+import com.mspg.poicat.maps.LocationDisplayName
 import java.time.LocalDate
 import java.time.LocalDateTime
 import kotlinx.coroutines.withTimeoutOrNull
@@ -646,6 +647,75 @@ class CatBrain(
         }
         return null
     }
+
+    // #148 Maps-2D: 保存済みの場所を参照する際にだけ使う、[mapNavigationSuffixes]/
+    // [mapSearchSuffixes]とは別の末尾トリガー。「に行って」「を開いて」は
+    // 地図/ナビの意図が明確とは限らない一般的な言い方のため、
+    // [detectMapCommand]の既存リストには加えない — [findSavedLocationText]が
+    // 保存済み場所とちょうど1件だけ完全一致した場合にのみ安全に使う設計と
+    // セットで初めて成立する(一致が無ければ何もしない、後述)。
+    private val savedLocationOnlySuffixes = listOf("に行って", "を開いて")
+
+    /**
+     * #148 Maps-2D: [name]と表示名が完全一致するCatEventを、保存済み場所を
+     * 持つ行だけから探す共有ヘルパー。読み取り専用 — CatEventの更新・新規
+     * 作成は一切行わない。
+     *
+     * 曖昧一致は絶対にしない: 部分一致・類似度判定は行わず、
+     * [LocationDisplayName.extractDisplayName]の結果との完全一致(==)だけを
+     * 見る。一致が0件、または2件以上(同じ表示名の場所が複数保存されている
+     * 場合)は必ずnullを返す — 「最新のイベントだから」「日時が新しいから」
+     * 等の追加基準で1件に絞り込むことはしない。URLのみでdisplayNameが
+     * 取得できない(施設名を含まない)行は、そもそも比較対象に含まれない
+     * ([LocationDisplayName.extractDisplayName]がnullを返すため)。
+     */
+    private suspend fun lookupSavedLocationByExactName(name: String): String? {
+        val matches = repository.eventsWithLocation().filter { event ->
+            LocationDisplayName.extractDisplayName(event.locationText.orEmpty()) == name
+        }
+        return matches.singleOrNull()?.locationText
+    }
+
+    /**
+     * #148 Maps-2D: 「九州大学病院に行って」「九州大学病院を開いて」のような、
+     * 保存済みの場所への広い参照表現から、POI内に保存済みの場所
+     * (CatEvent.locationText)を検索する。[savedLocationOnlySuffixes]に一致
+     * しない入力、または一致してもちょうど1件の完全一致が見つからない場合は
+     * 必ずnullを返す — この場合、呼び出し元(MariTanRow)は
+     * [detectMapCommand]や既存のGemini雑談等、他の経路へそのまま進む
+     * (「を開いて」等はそれ単体では地図の意図が確実ではないため、一致が
+     * 無い場合にまでGoogle Maps検索を強制しない)。
+     *
+     * 読み取り専用。CatEventの更新・新規作成・locationTextの書き換えは
+     * 一切行わない。
+     */
+    suspend fun findSavedLocationText(input: String): String? {
+        val trimmed = input.trim().replace(Regex("[「」『』]"), "").trim()
+        if (trimmed.isEmpty()) return null
+
+        val candidateName = savedLocationOnlySuffixes.firstNotNullOfOrNull { suffix ->
+            if (trimmed.endsWith(suffix) && trimmed.length > suffix.length) {
+                trimmed.removeSuffix(suffix).trim().ifBlank { null }
+            } else {
+                null
+            }
+        } ?: return null
+
+        return lookupSavedLocationByExactName(candidateName)
+    }
+
+    /**
+     * #148 Maps-2D: [detectMapCommand]が既に抽出した目的地文字列
+     * ([destination])が、POI内に保存済みの場所と表示名で完全一致する場合に
+     * だけ、そのlocationTextを返す。「九州大学病院までナビして」のように
+     * Maps-1Aの既存トリガーに一致した場合でも、保存済みの場所があれば
+     * そちらのURLを優先して使えるようにするためのもの。一致しなければ
+     * nullを返し、呼び出し元は[destination]自体を使う従来通りの
+     * Google Maps検索/ナビへフォールバックする(Maps-1Aの既存動作を変更
+     * しない)。読み取り専用。
+     */
+    suspend fun findSavedLocationForDestination(destination: String): String? =
+        lookupSavedLocationByExactName(destination.trim())
 
     /**
      * #148 Phase 3-1/3-2: マリたん(Gemini経由の音声アシスタント)専用の、

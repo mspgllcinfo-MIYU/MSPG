@@ -72,6 +72,7 @@ import com.mspg.poicat.gemini.MariTanMemoryStore
 import com.mspg.poicat.gemini.extractForgetQuery
 import com.mspg.poicat.gemini.extractRememberContent
 import com.mspg.poicat.maps.MapsLauncher
+import com.mspg.poicat.maps.SharedLocationDetector
 import com.mspg.poicat.room.RoomStore
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
@@ -584,6 +585,26 @@ private fun MariTanRow(catBrain: CatBrain) {
                             speak(poiReply.text) { state = MariTanState.IDLE }
                             return@launch
                         }
+                        // #148 Maps-2D: 地図命令(Maps-1A)の判定より先に、POI保存済みの
+                        // 場所への広い参照表現(「◯◯に行って」「◯◯を開いて」)を試す。
+                        // これらは「まで案内して」等ほど地図の意図が確実ではないため、
+                        // 保存済みの場所とちょうど1件だけ完全一致した場合にだけ動作し、
+                        // 一致しなければ何もせず(null)下のdetectMapCommand等へそのまま
+                        // 進む — 一致が無い場合にまでGoogle Maps検索を強制しない。
+                        // 読み取り専用、CatEventの更新・新規作成は一切行わない。
+                        val savedLocationByPhrase = catBrain.findSavedLocationText(text)
+                        if (savedLocationByPhrase != null) {
+                            val url = SharedLocationDetector.extractMapsUrl(savedLocationByPhrase)
+                            val opened = if (url != null) {
+                                MapsLauncher.openUrl(context.applicationContext, url)
+                            } else {
+                                MapsLauncher.openSearch(context.applicationContext, savedLocationByPhrase)
+                            }
+                            val reply = if (opened) "地図を開くにゃ" else "地図を開けなかったにゃ"
+                            state = MariTanState.SPEAKING
+                            speak(reply) { state = MariTanState.IDLE }
+                            return@launch
+                        }
                         // #148 Maps-1A: 予定登録の判定より先に、地図/ナビ命令として
                         // 明確に解析できるかを試す。「明日、銀行まで案内して」のように
                         // 日付語を含んでいても、末尾が「まで案内して」等の地図命令
@@ -595,11 +616,26 @@ private fun MariTanRow(catBrain: CatBrain) {
                         // MapsLauncher(この関数の外、Android Contextを持つ側)の責務。
                         val mapCommand = catBrain.detectMapCommand(text)
                         if (mapCommand != null) {
-                            val opened = when (mapCommand.mode) {
-                                MapCommandMode.NAVIGATION ->
-                                    MapsLauncher.openNavigation(context.applicationContext, mapCommand.destination)
-                                MapCommandMode.SEARCH ->
-                                    MapsLauncher.openSearch(context.applicationContext, mapCommand.destination)
+                            // #148 Maps-2D: detectMapCommandが抽出した目的地が、POI保存
+                            // 済みの場所と表示名で完全一致する場合はそちらのURLを優先する
+                            // (「九州大学病院までナビして」のような、Maps-1Aの既存トリガー
+                            // でも保存済みの正確な場所を使えるようにするため)。一致しない
+                            // 場合はdestination自体を使う、Maps-1Aの既存動作のまま。
+                            val savedLocationForDestination = catBrain.findSavedLocationForDestination(mapCommand.destination)
+                            val opened = if (savedLocationForDestination != null) {
+                                val url = SharedLocationDetector.extractMapsUrl(savedLocationForDestination)
+                                if (url != null) {
+                                    MapsLauncher.openUrl(context.applicationContext, url)
+                                } else {
+                                    MapsLauncher.openSearch(context.applicationContext, savedLocationForDestination)
+                                }
+                            } else {
+                                when (mapCommand.mode) {
+                                    MapCommandMode.NAVIGATION ->
+                                        MapsLauncher.openNavigation(context.applicationContext, mapCommand.destination)
+                                    MapCommandMode.SEARCH ->
+                                        MapsLauncher.openSearch(context.applicationContext, mapCommand.destination)
+                                }
                             }
                             val reply = if (opened) "地図を開くにゃ" else "地図を開けなかったにゃ"
                             state = MariTanState.SPEAKING
