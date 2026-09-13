@@ -25,8 +25,26 @@ class CatEventRepository(context: Context) {
         return saved
     }
 
+    /**
+     * #143: 呼び出し元(Compose/UI側)が渡す[event]は、直前に読み込んだ古い
+     * スナップショットの可能性がある。特に[CatEvent.roomEventId]は、この行が
+     * 作成された直後、非同期のFirestore初回プッシュがまだ完了していない間は
+     * nullのままUI側に渡っていることがあり、そのままdao.update()すると、
+     * その後に初回プッシュが完了して既にDB側へ書き込まれていたroomEventIdを
+     * nullへ巻き戻してしまう恐れがある。巻き戻ると、このupdateAndSync自身が
+     * 起動する後続のpushUpsertがroomEventId==nullと誤認し、同じ論理タスクに
+     * 対して新しいUUIDのFirestoreドキュメントを別途作成してしまう(実機で
+     * 確認された重複タスクの一因)。
+     *
+     * そこで書き込み直前に同じidの現在のDB行を再取得し、DB側に既に
+     * roomEventIdがあればそちらを優先する。呼び出し元が変更したかった
+     * フィールド(title/completed/assignee等)自体は[event]の値をそのまま使う
+     * — ここで上書きするのはroomEventIdだけ。担当変更・完了変更・その他の
+     * 編集など、updateAndSyncを経由する全ての操作に共通で効く。
+     */
     private suspend fun updateAndSync(event: CatEvent) {
-        val toUpdate = event.copy(updatedAt = System.currentTimeMillis())
+        val currentRoomEventId = dao.byId(event.id)?.roomEventId ?: event.roomEventId
+        val toUpdate = event.copy(updatedAt = System.currentTimeMillis(), roomEventId = currentRoomEventId)
         dao.update(toUpdate)
         syncScope.launch { RoomEventSync.pushUpsert(appContext, toUpdate) { roomEventId -> markRoomEventId(toUpdate.id, roomEventId) } }
     }

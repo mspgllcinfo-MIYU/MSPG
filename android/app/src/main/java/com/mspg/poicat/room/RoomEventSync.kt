@@ -12,6 +12,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
 
 /**
@@ -33,6 +35,29 @@ import kotlinx.coroutines.tasks.await
 object RoomEventSync {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var listenerRegistration: ListenerRegistration? = null
+
+    /**
+     * #143: [startListening]が受け取るDocumentChangeごとの「ローカルDB反映」
+     * (dao.byRoomEventIdでの存在確認 → 無ければinsert / あればupdate)を、
+     * 複数のDocumentChangeについて同時に走らせないための排他ロック。
+     *
+     * Dispatchers.IOはマルチスレッドで、[scope].launchはDocumentChangeごと
+     * (あるいはスナップショット配信ごと)に新しいコルーチンを起動するため、
+     * このロックが無いと「まだローカルに存在しない」という判定が複数の
+     * コルーチンで同時に真になり得る — 例えば「タスク作成」の直後に「担当変更」
+     * のような編集を行うと、作成分と更新分がほぼ同時にFirestoreスナップショット
+     * として届き、片方のdao.insert()がまだ完了していない間にもう片方の
+     * dao.byRoomEventIdも同じくnullを返してしまい、同じ論理タスクが2行として
+     * insertされる(実機で確認された重複タスクの一因)。
+     *
+     * Dispatchers.IO.limitedParallelism(1)のような「ディスパッチャ単位」の
+     * 制限だけでは不十分 — Roomのsuspend DAO呼び出しは内部で
+     * db.queryExecutor等の別ディスパッチャへ一時的にwithContextで移るため、
+     * その間だけ元のディスパッチャの「枠」が空き、別のコルーチンがその隙に
+     * 割り込んで動き出せてしまう。[Mutex]はディスパッチャをまたいだ
+     * suspend区間全体をロックできるため、この隙間を作らない。
+     */
+    private val applyMutex = Mutex()
 
     private fun db() = FirebaseFirestore.getInstance()
     private fun eventsRef(roomId: String) = db().collection("rooms").document(roomId).collection("events")
@@ -105,36 +130,41 @@ object RoomEventSync {
             for (change in snapshot.documentChanges) {
                 val roomEventId = change.document.id
                 scope.launch {
-                    runCatching {
-                        if (change.type == DocumentChange.Type.REMOVED) {
-                            dao.byRoomEventId(roomEventId)?.let { dao.delete(it) }
-                            return@runCatching
+                    // #143: このDocumentChangeの反映が完了するまで、他のDocumentChangeの
+                    // 反映処理を待たせる — 1件ずつ直列実行にする。既存の判定・書き込み
+                    // ロジック自体は一切変更していない。
+                    applyMutex.withLock {
+                        runCatching {
+                            if (change.type == DocumentChange.Type.REMOVED) {
+                                dao.byRoomEventId(roomEventId)?.let { dao.delete(it) }
+                                return@runCatching
+                            }
+                            val data = change.document.data ?: return@runCatching
+                            val remoteUpdatedAt = (data["updatedAt"] as? Number)?.toLong() ?: 0L
+                            val local = dao.byRoomEventId(roomEventId)
+                            if (local != null && remoteUpdatedAt <= local.updatedAt) {
+                                // ローカルの方が同じか新しい — 何もしない（こちらの内容は
+                                // 次のpushでFirestoreへ反映される）。
+                                return@runCatching
+                            }
+                            val merged = CatEvent(
+                                id = local?.id ?: 0,
+                                title = data["title"] as? String ?: "",
+                                dateTime = (data["dateTime"] as? Number)?.toLong(),
+                                createdAt = (data["createdAt"] as? Number)?.toLong() ?: System.currentTimeMillis(),
+                                reminded1Day = data["reminded1Day"] as? Boolean ?: false,
+                                reminded1Hour = data["reminded1Hour"] as? Boolean ?: false,
+                                isTask = data["isTask"] as? Boolean ?: false,
+                                completed = data["completed"] as? Boolean ?: false,
+                                category = data["category"] as? String,
+                                roomEventId = roomEventId,
+                                updatedAt = remoteUpdatedAt,
+                                // 旧版端末(assigneeをまだ知らないバージョン)が書いたドキュメントには
+                                // このキー自体が無い — その場合はnull(未設定)として扱う。
+                                assignee = data["assignee"] as? String,
+                            )
+                            if (local == null) dao.insert(merged) else dao.update(merged)
                         }
-                        val data = change.document.data ?: return@runCatching
-                        val remoteUpdatedAt = (data["updatedAt"] as? Number)?.toLong() ?: 0L
-                        val local = dao.byRoomEventId(roomEventId)
-                        if (local != null && remoteUpdatedAt <= local.updatedAt) {
-                            // ローカルの方が同じか新しい — 何もしない（こちらの内容は
-                            // 次のpushでFirestoreへ反映される）。
-                            return@runCatching
-                        }
-                        val merged = CatEvent(
-                            id = local?.id ?: 0,
-                            title = data["title"] as? String ?: "",
-                            dateTime = (data["dateTime"] as? Number)?.toLong(),
-                            createdAt = (data["createdAt"] as? Number)?.toLong() ?: System.currentTimeMillis(),
-                            reminded1Day = data["reminded1Day"] as? Boolean ?: false,
-                            reminded1Hour = data["reminded1Hour"] as? Boolean ?: false,
-                            isTask = data["isTask"] as? Boolean ?: false,
-                            completed = data["completed"] as? Boolean ?: false,
-                            category = data["category"] as? String,
-                            roomEventId = roomEventId,
-                            updatedAt = remoteUpdatedAt,
-                            // 旧版端末(assigneeをまだ知らないバージョン)が書いたドキュメントには
-                            // このキー自体が無い — その場合はnull(未設定)として扱う。
-                            assignee = data["assignee"] as? String,
-                        )
-                        if (local == null) dao.insert(merged) else dao.update(merged)
                     }
                 }
             }
