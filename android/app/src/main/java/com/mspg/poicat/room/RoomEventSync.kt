@@ -74,6 +74,7 @@ object RoomEventSync {
         "updatedAt" to event.updatedAt,
         "assignee" to event.assignee,
         "alsoShowAsTask" to event.alsoShowAsTask,
+        "locationText" to event.locationText,
     )
 
     /**
@@ -167,6 +168,10 @@ object RoomEventSync {
                                 // バージョン)が書いたドキュメントにはこのキー自体が無い —
                                 // その場合は必ずfalse(通常予定のまま)として扱う。
                                 alsoShowAsTask = data["alsoShowAsTask"] as? Boolean ?: false,
+                                // #148 Maps-2A: 同じく旧版端末(locationTextをまだ知らない
+                                // バージョン)が書いたドキュメントにはこのキー自体が無い —
+                                // その場合はnull(「場所なし」)として扱う。
+                                locationText = data["locationText"] as? String,
                             )
                             if (local == null) dao.insert(merged) else dao.update(merged)
                         }

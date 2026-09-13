@@ -16,13 +16,15 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  *  - v5: added assignee (仕事タスクの担当ラベル、みゆたん/かっちゃん/2人/未設定) — see MIGRATION_4_5
  *  - v6: added alsoShowAsTask (#148フェーズ1、予定を正本のままタスクビューにも
  *    同時表示するための独立フラグ) — see MIGRATION_5_6
+ *  - v7: added locationText (#148 Maps-2A、共有された場所を加工せず保持する
+ *    基盤フィールド) — see MIGRATION_6_7
  *
  * Real schedules/memos/tasks now live in this database on-device, so any
  * future version bump must ship its own explicit Migration here (following
  * MIGRATION_1_2's pattern, same as PhotoDatabase.MIGRATION_1_2) instead of
  * falling back to a destructive recreate, which would silently wipe them.
  */
-@Database(entities = [CatEvent::class], version = 6, exportSchema = true)
+@Database(entities = [CatEvent::class], version = 7, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun catEventDao(): CatEventDao
 
@@ -79,6 +81,16 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // v6 -> v7: added locationText (#148 Maps-2A)。categoryやassigneeと同じ
+        // 形の、NOT NULL制約もDEFAULTも無いnullable TEXTのADD COLUMNのみ。既存の
+        // 全ての行(予定・タスク・メモ問わず)はlocationText=NULL(「場所なし」と
+        // いう実在の状態)のまま残り、これを自動的に埋める処理は無い。
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE cat_events ADD COLUMN locationText TEXT")
+            }
+        }
+
         @Volatile
         private var instance: AppDatabase? = null
 
@@ -89,7 +101,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "poicat.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                     .build().also { instance = it }
             }
     }

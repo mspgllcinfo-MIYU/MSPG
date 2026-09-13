@@ -140,6 +140,18 @@ class CatEventRepository(context: Context) {
         updateAndSync(event.copy(alsoShowAsTask = enabled, category = category))
     }
 
+    /**
+     * #148 Maps-2A: [CatEvent.locationText]だけを変更する専用更新経路。
+     * [setAssignee]/[setAlsoShowAsTask]と全く同じ形で[updateAndSync]を経由
+     * するだけの薄いラッパーで、#143の「呼び出し元の古いスナップショットが
+     * 持つroomEventIdでDB側の値を巻き戻さない」保護をそのまま受け継ぐ —
+     * ここで独自にdao.update()を呼んだり別の保存経路を新設したりしない。
+     * [locationText]以外のフィールド([event]の値)には一切手を加えない。
+     */
+    suspend fun setLocation(event: CatEvent, locationText: String?) {
+        updateAndSync(event.copy(locationText = locationText))
+    }
+
     suspend fun dueFor1DayReminder(windowStart: Long, windowEnd: Long) =
         dao.dueFor1DayReminder(windowStart, windowEnd)
 

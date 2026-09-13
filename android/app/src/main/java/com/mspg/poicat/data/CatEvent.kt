@@ -72,6 +72,27 @@ data class CatEvent(
      * trueになる経路自体がまだ存在しない）。
      */
     val alsoShowAsTask: Boolean = false,
+    /**
+     * #148 Maps-2A: 共有(Google Maps/Gemini等からのAndroid標準共有)または
+     * 将来の入力経路で紐付けられた場所を、加工せず生のテキストのまま保持
+     * する基盤フィールド。POI自身は住所解決・座標変換を一切行わない
+     * ([com.mspg.poicat.maps.SharedLocationDetector]/[com.mspg.poicat.maps.MapsLauncher]
+     * 参照)ため、施設名・URL(短縮URL含む)等が混在した1本のフリーテキストを
+     * そのまま保存する — 表示・再度開く際は、この文字列に対して改めて
+     * [com.mspg.poicat.maps.SharedLocationDetector.extractMapsUrl]を呼べば
+     * よく、別の構造化フィールド(住所/緯度経度等)は用意しない。
+     *
+     * 未設定はnull(「場所なし」という実在の状態、[category]/[assignee]と
+     * 同じ扱い)。[category]/[assignee]と同様、NOT NULL制約もDEFAULT値も
+     * 持たない — 既存の全ての行はこのMigrationでnullのまま残り、値を自動
+     * 推測して埋める処理は無い。
+     *
+     * Maps-2Aの時点ではこのフィールドへ書き込むUI/AI判定はまだ存在しない
+     * ([CatEventRepository.setLocation]という保存経路だけを用意する) —
+     * 「予定に追加」UI等、実際にこの値を設定する機能は後続のフェーズで
+     * 追加する。
+     */
+    val locationText: String? = null,
 ) {
     companion object {
         const val CATEGORY_WORK = "work"
