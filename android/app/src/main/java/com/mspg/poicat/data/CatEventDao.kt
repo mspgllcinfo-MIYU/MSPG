@@ -17,9 +17,12 @@ interface CatEventDao {
     @Delete
     suspend fun delete(event: CatEvent)
 
-    /** An already-remembered schedule/memo with the exact same title and time, if any — used to avoid duplicates. */
-    @Query("SELECT * FROM cat_events WHERE isTask = 0 AND dateTime = :dateTime AND title = :title LIMIT 1")
-    suspend fun findDuplicate(title: String, dateTime: Long): CatEvent?
+    /** Already-remembered schedules with exactly this [dateTime] — used by
+     * [CatEventRepository.remember] to check for a duplicate title (compared with safe
+     * whitespace normalization in Kotlin, since SQL exact-match let whitespace-only
+     * differences from repeated voice/chat input create duplicate rows). */
+    @Query("SELECT * FROM cat_events WHERE isTask = 0 AND dateTime = :dateTime")
+    suspend fun onSameDateTime(dateTime: Long): List<CatEvent>
 
     /** Looks up a row by its room-sync id — used by [com.mspg.poicat.room.RoomEventSync] to
      * find the local counterpart of a Firestore-side event. */

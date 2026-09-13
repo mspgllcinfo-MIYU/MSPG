@@ -65,10 +65,29 @@ class CatEventRepository(context: Context) {
     /** Inserts a new dated/date-less item, unless a dated one with the same title+time already exists. */
     suspend fun remember(title: String, dateTime: Long?): CatEvent {
         if (dateTime != null) {
-            dao.findDuplicate(title, dateTime)?.let { return it }
+            findDuplicateByNormalizedTitle(title, dateTime)?.let { return it }
         }
         return insertAndSync(CatEvent(title = title, dateTime = dateTime))
     }
+
+    /**
+     * #POI-148: BBへ同じ予定を続けて話しかけると、音声認識/入力のわずかな表記ゆれ
+     * (前後の空白・連続する空白など)のせいで、以前の完全一致比較(SQLの`title = :title`)
+     * をすり抜け、同じ予定がもう1件作成されてしまう実機不具合が確認された。まず
+     * [dateTime]が完全一致する既存行を全件取得し、タイトルは前後の空白を取り除き
+     * 連続する空白を1つに詰めてから比較する — 既存行のtitle自体は一切書き換えない、
+     * 比較のためだけの正規化。ここで一致が見つかった場合、[remember]はその既存行を
+     * そのまま返す(新規insertしない)ため、呼び出し元の
+     * [com.mspg.poicat.brain.CatBrain.rememberScheduleWithWorkJudgment]が続けて行う
+     * setAlsoShowAsTaskも、この同じ既存行(canonicalな1件)に対してだけ作用する。
+     */
+    private suspend fun findDuplicateByNormalizedTitle(title: String, dateTime: Long): CatEvent? {
+        val normalized = normalizeTitleForDuplicateCheck(title)
+        return dao.onSameDateTime(dateTime).firstOrNull { normalizeTitleForDuplicateCheck(it.title) == normalized }
+    }
+
+    private fun normalizeTitleForDuplicateCheck(title: String): String =
+        title.trim().replace(Regex("\\s+"), " ")
 
     /** Full edit of an existing event; resets both reminder flags so a changed time can notify again. */
     suspend fun edit(event: CatEvent, title: String, dateTime: Long?) {
