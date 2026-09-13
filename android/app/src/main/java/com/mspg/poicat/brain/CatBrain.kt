@@ -112,8 +112,11 @@ class CatBrain(
             // content itself names a date — that makes it a schedule, not a memo.
             val scheduleFromMemo = DateTimeParser.parseRegistration(memoContent, now)
             if (scheduleFromMemo != null) {
-                repository.remember(scheduleFromMemo.title, scheduleFromMemo.dateTime.toEpochMilli())
-                return CatReply("覚えたにゃ")
+                val (saved, judgment) = rememberScheduleWithWorkJudgment(
+                    scheduleFromMemo.title,
+                    scheduleFromMemo.dateTime.toEpochMilli(),
+                )
+                return CatReply(scheduleRegisteredReply(saved, judgment, now))
             }
             repository.remember(memoContent, null)
             return CatReply("メモしたにゃ")
@@ -121,8 +124,8 @@ class CatBrain(
 
         val registration = DateTimeParser.parseRegistration(trimmed, now)
         if (registration != null) {
-            repository.remember(registration.title, registration.dateTime.toEpochMilli())
-            return CatReply("覚えたにゃ")
+            val (saved, judgment) = rememberScheduleWithWorkJudgment(registration.title, registration.dateTime.toEpochMilli())
+            return CatReply(scheduleRegisteredReply(saved, judgment, now))
         }
 
         // Last resort before this line was "save it as a memo no matter what" — which
@@ -347,6 +350,79 @@ class CatBrain(
      */
     private fun classifyTaskCategory(title: String): String =
         if (workSignals.any { title.contains(it) }) CatEvent.CATEGORY_WORK else CatEvent.CATEGORY_PRIVATE
+
+    /**
+     * #148 フェーズ3a: 予定登録時に「仕事として実行・対応すべき予定」かどうかを
+     * 端末内だけで判定した結果。ネットワーク・外部AI(Gemini含む)は一切使わない
+     * — [judgeWorkIntent]をこの3値の判定だけを返す独立した関数にしておくことで、
+     * 将来Gemini等の意味判定に差し替える場合も、このenumの意味(WORK/NOT_WORK/
+     * UNKNOWN)自体はそのまま維持できるようにしている。
+     */
+    private enum class WorkJudgment { WORK, NOT_WORK, UNKNOWN }
+
+    // #148 フェーズ3a: 明確に私用と分かる語。workSignalsに複数一致しない限り
+    // WORKにはしない前提の上で、こちらに一致した場合は明示的にNOT_WORKとする
+    // (「病院で検査結果を確認する」のように「確認」等の弱い語だけでは仕事に
+    // しない、という誤判定防止の要件に対応)。
+    private val privateSignals = listOf(
+        "病院", "美容院", "友達", "買い物", "旅行", "家族", "猫", "通院", "検査", "歯医者", "ご飯",
+    )
+
+    /**
+     * #148 フェーズ3a: 予定のタイトルから仕事判定を行う。既存の[classifyTaskCategory]
+     * (仕事タスク登録時の判定)が使う[workSignals]をそのまま再利用し、新しい
+     * 重複リストは作らない。
+     *
+     * 単一キーワード1個だけでWORKと判定しない — [workSignals]に**2つ以上**
+     * 一致した場合だけWORKとする。「確認」のような弱い単語や、「打ち合わせ」
+     * のような語1つだけでは私用の可能性を排除できないため(「打ち合わせ」単独
+     * では友人との約束等もあり得る)。[workSignals]に1つも一致しない場合、
+     * [privateSignals]に一致すれば明示的にNOT_WORK、どちらにも一致しなければ
+     * 安全側のUNKNOWNとする — 「仕事か私用か安全に判断できない場合は無理に
+     * WORKへ分類しない」という方針をそのまま反映している。
+     */
+    private fun judgeWorkIntent(title: String): WorkJudgment {
+        val workMatches = workSignals.count { title.contains(it) }
+        if (workMatches >= 2) return WorkJudgment.WORK
+        if (privateSignals.any { title.contains(it) }) return WorkJudgment.NOT_WORK
+        return WorkJudgment.UNKNOWN
+    }
+
+    /**
+     * #148 フェーズ3a: 予定を保存した直後に、正本の同じCatEventに対して仕事判定を
+     * 適用する。予定の保存([CatEventRepository.remember])自体は判定より必ず先に
+     * 完了しており、判定結果に関わらず予定は残る — 判定に失敗しても(＝UNKNOWNに
+     * なっても)予定登録そのものは既に成功済みなので影響しない。判定がWORKの
+     * 場合だけ、既存の[CatEventRepository.setAlsoShowAsTask]
+     * (#148フェーズ1/2で実装済み、#143のroomEventId再取得保護をそのまま受け継ぐ)
+     * を呼んで同じCatEventをタスクビューにも表示する。新しいCatEventのinsertは
+     * 一切行わない。
+     */
+    private suspend fun rememberScheduleWithWorkJudgment(title: String, dateTime: Long): Pair<CatEvent, WorkJudgment> {
+        val saved = repository.remember(title, dateTime)
+        val judgment = judgeWorkIntent(saved.title)
+        if (judgment == WorkJudgment.WORK) {
+            repository.setAlsoShowAsTask(saved, true)
+        }
+        return saved to judgment
+    }
+
+    /** #148 フェーズ3a: WORK判定された予定だけ、登録完了に加えて「仕事にも
+     * 出しとく」ことが分かる短い返答にする。NOT_WORK/UNKNOWNは従来通り
+     * 「覚えたにゃ」のまま変更しない。 */
+    private fun scheduleRegisteredReply(event: CatEvent, judgment: WorkJudgment, now: LocalDateTime): String {
+        if (judgment != WorkJudgment.WORK) return "覚えたにゃ"
+        val dateTime = event.dateTime
+        val whenPrefix = if (dateTime != null) {
+            val local = dateTime.toLocalDateTime()
+            val day = DateTimeParser.formatWhen(local.toLocalDate(), now.toLocalDate())
+            val timeText = if (local.minute == 0) "${local.hour}時" else "${local.hour}時${local.minute}分"
+            "${day}${timeText}に"
+        } else {
+            ""
+        }
+        return "${whenPrefix}『${event.title}』入れたにゃ。仕事にも出しとく。"
+    }
 
     private val taskCompletionSuffixes = listOf(
         "のタスク終わった", "のタスクが終わった", "タスクは終わった", "タスク終わった",
