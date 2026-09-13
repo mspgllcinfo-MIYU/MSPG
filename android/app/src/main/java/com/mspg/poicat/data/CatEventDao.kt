@@ -67,16 +67,20 @@ interface CatEventDao {
     )
     suspend fun memosMatching(keyword: String): List<CatEvent>
 
-    /** All tasks: incomplete first, soonest due date first, undated ones after dated ones. */
+    /** All tasks: incomplete first, soonest due date first, undated ones after dated ones.
+     * #148フェーズ1: isTask=1の通常タスクに加えて、alsoShowAsTask=1の予定
+     * (正本は予定のまま、タスクビューにも表示するハイブリッド予定)も含む。
+     * 予定側のonDay/between/upcoming等のisTask=0条件は変更していないため、
+     * ハイブリッド予定は引き続き予定としても取得される。 */
     @Query(
-        "SELECT * FROM cat_events WHERE isTask = 1 " +
+        "SELECT * FROM cat_events WHERE (isTask = 1 OR alsoShowAsTask = 1) " +
             "ORDER BY completed ASC, (dateTime IS NULL) ASC, dateTime ASC, createdAt DESC",
     )
     suspend fun tasks(): List<CatEvent>
 
-    /** Not-yet-done tasks, soonest due date first. */
+    /** Not-yet-done tasks, soonest due date first. #148フェーズ1: alsoShowAsTask=1も含む。 */
     @Query(
-        "SELECT * FROM cat_events WHERE isTask = 1 AND completed = 0 " +
+        "SELECT * FROM cat_events WHERE (isTask = 1 OR alsoShowAsTask = 1) AND completed = 0 " +
             "ORDER BY (dateTime IS NULL) ASC, dateTime ASC, createdAt DESC",
     )
     suspend fun incompleteTasks(): List<CatEvent>
@@ -85,25 +89,27 @@ interface CatEventDao {
      * Not-yet-done tasks due within a date range, plus any with no due date at all — an
      * undated task ("牛乳買うの忘れないで" with no date) is open-ended, so it counts as
      * something to do today just as much as one due today specifically. Used to answer
-     * "今日やることは？".
+     * "今日やることは？". #148フェーズ1: alsoShowAsTask=1も含む。
      */
     @Query(
-        "SELECT * FROM cat_events WHERE isTask = 1 AND completed = 0 " +
+        "SELECT * FROM cat_events WHERE (isTask = 1 OR alsoShowAsTask = 1) AND completed = 0 " +
             "AND (dateTime IS NULL OR dateTime BETWEEN :start AND :end) " +
             "ORDER BY (dateTime IS NULL) ASC, dateTime ASC, createdAt DESC",
     )
     suspend fun incompleteTasksDueOrUndated(start: Long, end: Long): List<CatEvent>
 
-    /** Not-yet-done, dated tasks due at or before a point in time — used to answer "明日までのタスクは？". */
+    /** Not-yet-done, dated tasks due at or before a point in time — used to answer "明日までのタスクは？".
+     * #148フェーズ1: alsoShowAsTask=1も含む。 */
     @Query(
-        "SELECT * FROM cat_events WHERE isTask = 1 AND completed = 0 " +
+        "SELECT * FROM cat_events WHERE (isTask = 1 OR alsoShowAsTask = 1) AND completed = 0 " +
             "AND dateTime IS NOT NULL AND dateTime <= :end ORDER BY dateTime ASC",
     )
     suspend fun incompleteTasksDueBy(end: Long): List<CatEvent>
 
-    /** Not-yet-done tasks whose title contains the given keyword — used to mark one done by name. */
+    /** Not-yet-done tasks whose title contains the given keyword — used to mark one done by name.
+     * #148フェーズ1: alsoShowAsTask=1も含む。 */
     @Query(
-        "SELECT * FROM cat_events WHERE isTask = 1 AND completed = 0 " +
+        "SELECT * FROM cat_events WHERE (isTask = 1 OR alsoShowAsTask = 1) AND completed = 0 " +
             "AND title LIKE '%' || :keyword || '%' ORDER BY (dateTime IS NULL) ASC, dateTime ASC, createdAt DESC",
     )
     suspend fun incompleteTasksMatching(keyword: String): List<CatEvent>

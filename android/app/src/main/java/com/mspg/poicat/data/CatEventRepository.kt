@@ -117,6 +117,16 @@ class CatEventRepository(context: Context) {
         updateAndSync(event.copy(assignee = assignee))
     }
 
+    /** #148 フェーズ1: 予定(isTask=false)を、正本は予定のまま仕事/プラベ
+     * タスク画面にも同時表示する(またはやめる)ための専用更新経路。
+     * updateAndSync()を経由するため、#143の「呼び出し元の古いスナップショット
+     * が持つroomEventIdでDB側の値を巻き戻さない」保護をそのまま受け継ぐ —
+     * ここで独自にdao.update()を呼んだり[event]を丸ごと上書きしたりしない。
+     * isTask自体は変更しない。 */
+    suspend fun setAlsoShowAsTask(event: CatEvent, enabled: Boolean) {
+        updateAndSync(event.copy(alsoShowAsTask = enabled))
+    }
+
     suspend fun dueFor1DayReminder(windowStart: Long, windowEnd: Long) =
         dao.dueFor1DayReminder(windowStart, windowEnd)
 

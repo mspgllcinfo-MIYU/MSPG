@@ -73,6 +73,7 @@ object RoomEventSync {
         "category" to event.category,
         "updatedAt" to event.updatedAt,
         "assignee" to event.assignee,
+        "alsoShowAsTask" to event.alsoShowAsTask,
     )
 
     /**
@@ -162,6 +163,10 @@ object RoomEventSync {
                                 // 旧版端末(assigneeをまだ知らないバージョン)が書いたドキュメントには
                                 // このキー自体が無い — その場合はnull(未設定)として扱う。
                                 assignee = data["assignee"] as? String,
+                                // #148フェーズ1: 同じく旧版端末(alsoShowAsTaskをまだ知らない
+                                // バージョン)が書いたドキュメントにはこのキー自体が無い —
+                                // その場合は必ずfalse(通常予定のまま)として扱う。
+                                alsoShowAsTask = data["alsoShowAsTask"] as? Boolean ?: false,
                             )
                             if (local == null) dao.insert(merged) else dao.update(merged)
                         }

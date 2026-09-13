@@ -53,6 +53,25 @@ data class CatEvent(
      * であり、既存の行を黙って「2人」等へ書き換えることはしない。
      */
     val assignee: String? = null,
+    /**
+     * #148 フェーズ1: [isTask] == false かつ[dateTime]ありの予定を、正本は
+     * 予定のまま保持しつつ、仕事/プラベタスク画面にも同時に表示するための
+     * 独立フラグ。[isTask]自体の意味は一切変えない — 「予定を2重登録せず、
+     * 1つの正本データを両方のビューから見る」という設計方針そのもの。
+     *
+     * - isTask=true → 従来通りの通常タスク（このフラグは無関係）。
+     * - isTask=false かつ dateTimeあり かつ alsoShowAsTask=false →
+     *   従来通りの通常予定（カレンダーのみ）。
+     * - isTask=false かつ dateTimeあり かつ alsoShowAsTask=true →
+     *   予定を正本としながらタスクビューにも表示するハイブリッド予定。
+     *
+     * 独立した2件目のCatEventを作る方式は採用しない — 編集・削除・担当
+     * 変更・完了状態が2行の間でズレる危険を避けるため。既存の全ての行は
+     * 追加のMigrationでfalseのまま残り、この値を自動的にtrueへ書き換える
+     * 処理は無い（フェーズ1時点ではUI/AI判定どちらも未実装のため、実際に
+     * trueになる経路自体がまだ存在しない）。
+     */
+    val alsoShowAsTask: Boolean = false,
 ) {
     companion object {
         const val CATEGORY_WORK = "work"

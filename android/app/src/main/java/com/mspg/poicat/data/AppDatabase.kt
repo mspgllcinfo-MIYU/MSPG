@@ -14,13 +14,15 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  *  - v3: added category (Poi work/private classification) — see MIGRATION_2_3
  *  - v4: added roomEventId, updatedAt (4桁PINルーム共有) — see MIGRATION_3_4
  *  - v5: added assignee (仕事タスクの担当ラベル、みゆたん/かっちゃん/2人/未設定) — see MIGRATION_4_5
+ *  - v6: added alsoShowAsTask (#148フェーズ1、予定を正本のままタスクビューにも
+ *    同時表示するための独立フラグ) — see MIGRATION_5_6
  *
  * Real schedules/memos/tasks now live in this database on-device, so any
  * future version bump must ship its own explicit Migration here (following
  * MIGRATION_1_2's pattern, same as PhotoDatabase.MIGRATION_1_2) instead of
  * falling back to a destructive recreate, which would silently wipe them.
  */
-@Database(entities = [CatEvent::class], version = 5, exportSchema = true)
+@Database(entities = [CatEvent::class], version = 6, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun catEventDao(): CatEventDao
 
@@ -66,6 +68,17 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // v5 -> v6: added alsoShowAsTask (#148フェーズ1)。categoryやassigneeと
+        // 同じ形の、NOT NULL + DEFAULT付きの単純なADD COLUMNのみ。既存の全ての
+        // 行(予定・タスク・メモ問わず)はalsoShowAsTask=false(0)のまま残り、
+        // フェーズ1時点ではこの値を自動的にtrueへ変更する経路自体が存在しない
+        // (UI/CatBrainどちらも未実装)ため、既存データの見え方は一切変わらない。
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE cat_events ADD COLUMN alsoShowAsTask INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         @Volatile
         private var instance: AppDatabase? = null
 
@@ -76,7 +89,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "poicat.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .build().also { instance = it }
             }
     }
