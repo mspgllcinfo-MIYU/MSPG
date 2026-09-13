@@ -145,18 +145,38 @@ object DriveFolderRepository {
             runCatching {
                 val query = "'${escapeQueryValue(parentFolderId)}' in parents and trashed=false " +
                     "and mimeType != '$FOLDER_MIME'"
-                val url = "$API_BASE?q=${URLEncoder.encode(query, "UTF-8")}" +
-                    "&fields=${URLEncoder.encode("files(id,name,mimeType)", "UTF-8")}"
-                val response = request(url, "GET", accessToken, body = null)
-                val files = JSONObject(response).optJSONArray("files") ?: JSONArray()
-                (0 until files.length()).map { i ->
-                    val obj = files.getJSONObject(i)
-                    DriveListedFile(
-                        id = obj.getString("id"),
-                        name = obj.getString("name"),
-                        mimeType = if (obj.has("mimeType")) obj.getString("mimeType") else null,
-                    )
-                }
+                val result = mutableListOf<DriveListedFile>()
+                // Drive v3のfiles.listはデフォルトで1ページ最大100件しか返さず、それ以上は
+                // nextPageTokenを渡して続きを取得しないと後続分が黙って欠落する。アルバム/
+                // ファイルが100件を超えた時点で「新しく追加した分がもう片方の端末に一切
+                // 反映されない(片方向どころか完全に同期されない)」という、実機で報告された
+                // 症状と一致する既知のバグだったため、pageSizeを明示し、nextPageTokenが
+                // 返る限りループして全件を取得するようにした。
+                var pageToken: String? = null
+                do {
+                    val urlBuilder = StringBuilder(API_BASE)
+                        .append("?q=").append(URLEncoder.encode(query, "UTF-8"))
+                        .append("&fields=").append(URLEncoder.encode("nextPageToken,files(id,name,mimeType)", "UTF-8"))
+                        .append("&pageSize=1000")
+                    if (pageToken != null) {
+                        urlBuilder.append("&pageToken=").append(URLEncoder.encode(pageToken, "UTF-8"))
+                    }
+                    val response = request(urlBuilder.toString(), "GET", accessToken, body = null)
+                    val obj = JSONObject(response)
+                    val files = obj.optJSONArray("files") ?: JSONArray()
+                    for (i in 0 until files.length()) {
+                        val fileObj = files.getJSONObject(i)
+                        result.add(
+                            DriveListedFile(
+                                id = fileObj.getString("id"),
+                                name = fileObj.getString("name"),
+                                mimeType = if (fileObj.has("mimeType")) fileObj.getString("mimeType") else null,
+                            ),
+                        )
+                    }
+                    pageToken = if (obj.has("nextPageToken")) obj.getString("nextPageToken") else null
+                } while (pageToken != null)
+                result
             }
         }
 

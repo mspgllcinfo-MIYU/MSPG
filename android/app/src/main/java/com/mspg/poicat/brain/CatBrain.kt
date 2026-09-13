@@ -124,8 +124,14 @@ class CatBrain(
         if (memoContent != null) {
             // "明日病院だから覚えといて" uses a memo-style "覚えといて" trigger, but the
             // content itself names a date — that makes it a schedule, not a memo.
+            // #BB修正3(ユーザー承認済み): 日付語が見つかっただけでは即予定化しない —
+            // judgeRegistrationIntentで「予定として十分に認識できる」(SCHEDULE)と判定
+            // できた場合だけ予定登録する。「今日は暑いねって覚えといて」のような雑談を
+            // メモ指示経由で誤って予定にしてしまわないための、registerScheduleCore
+            // (マリたん用)と同じ判定をここにも適用したもの。判定を通らなかった場合は
+            // 従来通りメモとして保存する — 明示的な保存指示自体は常に尊重する。
             val scheduleFromMemo = DateTimeParser.parseRegistration(memoContent, now)
-            if (scheduleFromMemo != null) {
+            if (scheduleFromMemo != null && judgeRegistrationIntent(memoContent) == RegistrationIntent.SCHEDULE) {
                 val (saved, judgment) = rememberScheduleWithWorkJudgment(
                     scheduleFromMemo.title,
                     scheduleFromMemo.dateTime.toEpochMilli(),
@@ -136,22 +142,28 @@ class CatBrain(
             return CatReply("メモしたにゃ")
         }
 
+        // #BB修正3(ユーザー承認済み): マリたん専用のregisterScheduleCoreと同じ考え方を
+        // BB(respond())にも適用 — 日付語が見つかっただけでは予定登録せず、
+        // judgeRegistrationIntentが「予定として十分に認識できる」(SCHEDULE)と判定した
+        // 場合だけ登録する。「今日は暑いね」等(NOT_SCHEDULE/UNKNOWN)は予定として保存
+        // されない。
         val registration = DateTimeParser.parseRegistration(trimmed, now)
-        if (registration != null) {
+        if (registration != null && judgeRegistrationIntent(trimmed) == RegistrationIntent.SCHEDULE) {
             val (saved, judgment) = rememberScheduleWithWorkJudgment(registration.title, registration.dateTime.toEpochMilli())
             return CatReply(scheduleRegisteredReply(saved, judgment, now))
         }
 
-        // Last resort before this line was "save it as a memo no matter what" — which
-        // meant something like "英語に翻訳して" got filed away as a memo titled exactly
-        // that. Turn away anything that looks out of scope here instead of guessing at
-        // it or hoarding it; anything else genuinely unrecognized still gets remembered
-        // as before.
+        // #BB修正4(ユーザー承認済み): 「解釈できなかった発言は何であれメモとして保存
+        // する」というキャッチオール仕様は廃止。明示的な保存指示(上のextractMemoCommand/
+        // extractTaskCommand)でも、予定として十分に認識できる入力(直前のSCHEDULE判定)
+        // でもない発言は、一切保存せず普通の会話として返す — 「猫かわいい」「眠い」
+        // 「今日は暑いね」等の雑談がメモ/タスク/予定として保存されることはない。曖昧な
+        // 通常会話を判定する新しいAI判定は追加しない(ユーザー方針: 既存のlooksOutOfScope
+        // より先には何も判定を挟まない)。
         if (looksOutOfScope(trimmed)) {
             return CatReply(outOfScopeReply(trimmed))
         }
-        repository.remember(DateTimeParser.cleanTitle(trimmed, fallback = trimmed), null)
-        return CatReply("覚えたにゃ")
+        return CatReply(chitchatReply())
     }
 
     /**
@@ -283,11 +295,24 @@ class CatBrain(
         return outOfScopeReplies.random()
     }
 
+    // #BB修正4(ユーザー承認済み): 明示的な保存指示でも予定登録でもない、普通の会話
+    // ("今日は暑いね"/"猫かわいい"/"眠い"等)への相槌だけの返事。何も保存しない。
+    private val chitchatReplies = listOf(
+        "そうにゃ",
+        "にゃーん",
+        "そうかもにゃ",
+        "ふーん、にゃ",
+    )
+
+    private fun chitchatReply(): String = chitchatReplies.random()
+
     private val taskTriggerSuffixes = listOf(
         "の忘れないで", "を忘れないで", "忘れないで",
         "の忘れずに", "を忘れずに", "忘れずに",
         "を忘れるな", "忘れるな",
         "忘れないように",
+        // #BB修正2: 「タスクにして」等の明示的なタスク指示。
+        "をタスクにして", "のタスクにして", "タスクにして",
         "買わなきゃ", "買わないと",
         "やる", "買う", "送る",
     )
@@ -323,17 +348,12 @@ class CatBrain(
             val content = text.replace("までに", "").trim()
             if (content.isNotBlank()) return content
         }
-        // "牛乳買うの覚えといて" phrases a task using a memo-style "覚えといて" trigger —
-        // still a task, since the content right before it ends in a task verb ("買う").
-        // The verb stays in the returned title for the same reason as above.
-        for (verb in memoVerbs) {
-            for (memoSuffix in listOf("って$verb", "を$verb", verb)) {
-                if (text.endsWith(memoSuffix)) {
-                    val inner = text.removeSuffix(memoSuffix).trim().removeSuffix("の").removeSuffix("を").trim()
-                    if (taskVerbEndings.any { inner.endsWith(it) }) return inner
-                }
-            }
-        }
+        // #BB修正1(ユーザー承認済み): 以前はここで、内容が"買う"/"送る"等のtaskVerbEndings
+        // で終わる場合、メモ/覚えて系のトリガー("牛乳買うの覚えといて")もタスクとして
+        // 横取りしていた。これが「牛乳買うのメモして」のように明示的に「メモして」と
+        // 指定した発話まで誤ってタスク化してしまう原因だったため、この横取り自体を廃止。
+        // 明示的なメモ/覚えて指示は、内容が何で終わっていても必ずextractMemoCommand側で
+        // メモとして扱われる。
         return null
     }
 
@@ -768,7 +788,7 @@ class CatBrain(
         for (verb in memoVerbs) {
             for (suffix in listOf("って$verb", "を$verb", verb)) {
                 if (text.endsWith(suffix)) {
-                    val content = text.removeSuffix(suffix).trim()
+                    val content = text.removeSuffix(suffix).trim().removeSuffix("の").removeSuffix("を").trim()
                     if (content.isNotBlank()) return content
                 }
             }
