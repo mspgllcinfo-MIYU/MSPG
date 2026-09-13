@@ -10,6 +10,7 @@ import com.mspg.poicat.data.FileRepository
 import com.mspg.poicat.data.Photo
 import com.mspg.poicat.data.PhotoRepository
 import com.mspg.poicat.drive.FileDriveSync
+import com.mspg.poicat.room.RoomStore
 
 /**
  * Handles an incoming ACTION_SEND intent (share-to-PoiCat from another app),
@@ -62,7 +63,10 @@ object ShareIntentHandler {
 
         runCatching {
             val photoRepository = PhotoRepository(context)
-            val catBrain = CatBrain(CatEventRepository(context), photoRepository)
+            // #144: AiChatScreen.ktと同じく、この端末の現在の利用者
+            // (RoomStore.displayName)を都度読めるラムダとしてCatBrainへ渡す。
+            val roomStore = RoomStore(context)
+            val catBrain = CatBrain(CatEventRepository(context), photoRepository) { roomStore.displayName }
 
             // 2. Import the photo (if any) and record the user message — same
             // shape as AiChatScreen.send(): text may be blank, photoIds may be empty.

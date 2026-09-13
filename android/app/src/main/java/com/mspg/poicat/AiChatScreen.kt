@@ -70,6 +70,7 @@ import com.mspg.poicat.gemini.GeminiSearchService
 import com.mspg.poicat.gemini.MariTanMemoryStore
 import com.mspg.poicat.gemini.extractForgetQuery
 import com.mspg.poicat.gemini.extractRememberContent
+import com.mspg.poicat.room.RoomStore
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -113,7 +114,13 @@ private fun ChatView(modifier: Modifier = Modifier) {
     var isSending by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
     val photoRepository = remember { PhotoRepository(context.applicationContext) }
-    val catBrain = remember { CatBrain(CatEventRepository(context.applicationContext), photoRepository) }
+    // #144: 「私の仕事」のような話者本人を指す質問にCatBrainが答えられるよう、
+    // この端末の現在の利用者(RoomStore.displayName)を都度読めるラムダとして渡す
+    // — 固定値ではないので、設定画面で表示名を変えても次の発話から反映される。
+    val roomStore = remember { RoomStore(context.applicationContext) }
+    val catBrain = remember {
+        CatBrain(CatEventRepository(context.applicationContext), photoRepository) { roomStore.displayName }
+    }
     var detailPhoto by remember { mutableStateOf<Photo?>(null) }
     // Phase B: a photo picked but not yet sent, shown as a preview next to the input.
     // Phase C will teach CatBrain to sort what this photo (plus any caption) means;

@@ -20,6 +20,16 @@ data class CatReply(val text: String, val photoIds: List<Long> = emptyList())
 class CatBrain(
     private val repository: CatEventRepository,
     private val photoRepository: PhotoRepository,
+    /**
+     * #144: 現在この端末を使っている利用者の表示名(「みゆたん」「かっちゃん」、
+     * 未設定ならnull、正本は[com.mspg.poicat.room.RoomStore.displayName])を
+     * 都度取得するための関数。固定値ではなく関数にしているのは、CatBrainの
+     * インスタンス自体は呼び出し元でremember等により使い回される一方、表示名は
+     * 設定画面でいつでも変更され得るため、呼ぶたびに最新値を読めるようにするため。
+     * 「私の仕事」のような、話者本人を指す質問にのみ使う — 予定/メモ/他の
+     * 仕事タスクの取得・表示・同期には一切影響しない。
+     */
+    private val currentDisplayName: () -> String? = { null },
 ) {
 
     suspend fun respond(input: String): CatReply {
@@ -36,6 +46,17 @@ class CatBrain(
         // schedule/memo query path would otherwise answer from cat_events instead.
         if (isPhotoQuery(trimmed)) {
             return answerPhotoQuery(trimmed, now)
+        }
+
+        // #144: 「私の仕事」「今日の仕事」のような、仕事タスクの担当を尋ねる質問は
+        // 「？」等を伴わない体言止めの言い方が多く、下のDateTimeParser.isQuery()の
+        // 判定(「？」「いつ」や「教えて」「の予定は」等の特定の言い回しに限定した、
+        // DateTimeParser.kt側の既存の質問検出)には一致しないものがほとんどのため、
+        // その判定を待たずにここで独立に判定する。DateTimeParser.kt・
+        // isTaskQuestion()・answerTaskQuery()・answerQuery()は一切変更していない。
+        if (isWorkTaskQuestion(trimmed)) {
+            if (looksOutOfScope(trimmed)) return CatReply(outOfScopeReply(trimmed))
+            return CatReply(answerWorkTaskQuery(trimmed, now, currentDisplayName()))
         }
 
         if (DateTimeParser.isQuery(trimmed)) {
@@ -447,6 +468,87 @@ class CatBrain(
             else -> "残ってるのは${titles}だにゃ"
         }
     }
+
+    /**
+     * #144: 「私の仕事」「今日の仕事」「仕事全部」等、仕事タスクの担当を尋ねる
+     * 質問かどうかの判定。単に「仕事」という単語を含むだけでは判定しない —
+     * 「明日仕事に行く」(予定登録)や「仕事は完了したよ」「見積書の仕事終わった」
+     * (完了報告)のように、文中のどこかに「仕事」が出てくるだけの既存の登録/完了
+     * フレーズを誤ってここで横取りしてしまわないようにするため。代わりに、
+     * 「の仕事」で終わる(「私の仕事」「今日のみゆたんの仕事」等)か、「仕事全部」
+     * を含む、体言止め・話題提示の形に絞る。それ以外は既存のDateTimeParser.
+     * isQuery()による質問判定(「仕事ある?」「仕事について教えて」等)にだけ従う
+     * — DateTimeParser.kt自体は変更しない。
+     */
+    private fun isWorkTaskQuestion(text: String): Boolean {
+        if (!text.contains("仕事")) return false
+        if (text.endsWith("の仕事")) return true
+        if (text.contains("仕事全部")) return true
+        return DateTimeParser.isQuery(text)
+    }
+
+    /**
+     * #144: 仕事タスク(isTask=1 かつ category=CATEGORY_WORK)を、誰の担当かで
+     * 絞り込んで答える。担当は「表示を絞る」ためのものではなく(仕事タスク自体は
+     * これまで通りみゆたん・かっちゃん双方の端末に全件表示・同期される)、この
+     * 質問への「答え方」だけを絞り込むためのもの — ここでも新しいDB問い合わせは
+     * 追加せず、既存の[CatEventRepository.incompleteTasks]が返す全件をこの関数の
+     * 中でKotlin側でfilterするだけ(PoiScreen.ktの既存のcategoryフィルタと同じやり方)。
+     *
+     * 判定順序が重要: 「みゆたん」「かっちゃん」「2人」という明示的な指定を、
+     * 「私/自分」や「(指定なしの)全部」より必ず先に判定する。指定が無ければ
+     * category=WORKの仕事タスクをassigneeに関係なく(null/2人も含め)全件返す。
+     *
+     * 「私の仕事」「自分の仕事」はRoomStore.displayName(この端末の現在の利用者)
+     * を使い、assigneeがその名前、または「2人」と一致するものを対象にする —
+     * 「2人」は「担当者不在」ではなく「両者が責任を持つ」タスクなので、自分の
+     * 仕事として一緒に見える方が聞き漏れがない、という#144での確定方針。
+     * 個人名/「2人」を明示した質問では、その値だけに厳密に絞り込み、nullは
+     * 一切含めない(未設定を「2人」やどちらか個人の担当と誤って扱わない)。
+     *
+     * 表示名が未設定(null)のまま「私の仕事」を聞かれた場合は、DBには一切
+     * 問い合わせず、話者を特定できない旨だけを返す。
+     */
+    private suspend fun answerWorkTaskQuery(text: String, now: LocalDateTime, myDisplayName: String?): String {
+        val today = now.toLocalDate()
+        val scopeDate = when {
+            text.contains("今日") -> today
+            text.contains("明日") -> today.plusDays(1)
+            else -> null
+        }
+
+        val workTasks = repository.incompleteTasks()
+            .filter { it.category == CatEvent.CATEGORY_WORK }
+            .filter { scopeDate == null || it.dateTime == null || it.dateTime.toLocalDate() == scopeDate }
+
+        val matched = when {
+            text.contains("みゆたん") -> workTasks.filter { it.assignee == CatEvent.ASSIGNEE_MIYU }
+            text.contains("かっちゃん") -> workTasks.filter { it.assignee == CatEvent.ASSIGNEE_KATCHAN }
+            text.contains(CatEvent.ASSIGNEE_BOTH) -> workTasks.filter { it.assignee == CatEvent.ASSIGNEE_BOTH }
+            text.contains("私の仕事") || text.contains("自分の仕事") -> {
+                if (myDisplayName == null) return unknownSpeakerReply()
+                workTasks.filter { it.assignee == myDisplayName || it.assignee == CatEvent.ASSIGNEE_BOTH }
+            }
+            else -> workTasks
+        }
+
+        if (matched.isEmpty()) {
+            return when {
+                scopeDate == today -> "今日の仕事はまだ無いにゃ"
+                scopeDate != null -> "${DateTimeParser.formatWhen(scopeDate, today)}の仕事はまだ無いにゃ"
+                else -> "仕事はまだ無いにゃ"
+            }
+        }
+        val titles = matched.joinToString("、") { it.title }
+        return when {
+            scopeDate == today -> "今日の仕事は${titles}だにゃ"
+            scopeDate != null -> "${DateTimeParser.formatWhen(scopeDate, today)}の仕事は${titles}だにゃ"
+            else -> "仕事は${titles}だにゃ"
+        }
+    }
+
+    /** RoomStore.displayNameが未設定のまま「私の仕事」を聞かれた場合の返答。 */
+    private fun unknownSpeakerReply(): String = "今どっちが話してるか分からないにゃ。まず設定で名前を選んでにゃ"
 
     /** "今日の写真見せて"/"病院の写真見せて" style — requires the literal word "写真",
      * which never appears in a schedule/memo/task sentence, so this can't misfire on them. */
