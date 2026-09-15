@@ -1,5 +1,7 @@
 package com.mspgllc.iqpuchin.render
 
+import kotlin.math.sqrt
+
 /**
  * Every display-only tunable in one place. None of these affect game
  * rules (there are none yet) -- they exist purely so board size,
@@ -26,12 +28,29 @@ object RenderConfig {
     /** Fraction of view width reserved on each side of the board. */
     const val SIDE_MARGIN_FRACTION = 0.03f
 
-    /** Baseline screen-px per world-height unit (1.0 = the QUBE's own
-     * full resting height) used only for the QUBE's toppling motion --
-     * the floor tiles and player marker never use height. This is what
-     * to adjust if the QUBE's vertical arc looks too flat or too tall
-     * once seen on a real device. */
-    const val QUBE_HEIGHT_SCALE_PX = 180f
+    /**
+     * Baseline screen-px per world-height unit (1.0 = the QUBE's own full
+     * resting height), used only for the QUBE's toppling motion -- the
+     * floor tiles and player marker never use height.
+     *
+     * Derived, not tuned by feel: TILE_WIDTH_PX/TILE_HEIGHT_PX already
+     * define how a 1-world-unit edge along the ground (X or Z) projects
+     * to screen pixels -- that projected length is sqrt(halfW^2 + halfH^2)
+     * (Pythagorean, since the projection mixes both axes). For a QUBE
+     * that is genuinely 1x1x1 in world space (see QubeRenderer -- its
+     * half-extent is a fixed 0.5 in every direction) to actually look
+     * like a cube rather than a slab, its vertical (Y) edge needs to
+     * project to that *same* screen length. That equality is exactly
+     * what this formula guarantees; it is intentionally a computed
+     * property (not a constant) so it can never drift out of sync with
+     * TILE_WIDTH_PX/TILE_HEIGHT_PX if those are ever retuned.
+     */
+    val QUBE_HEIGHT_SCALE_PX: Float
+        get() {
+            val halfW = TILE_WIDTH_PX / 2f
+            val halfH = TILE_HEIGHT_PX / 2f
+            return sqrt(halfW * halfW + halfH * halfH)
+        }
 
     /**
      * Cosmetic-only shrink applied to the QUBE after its rotation is
