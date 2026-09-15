@@ -31,7 +31,7 @@ object RenderConfig {
      * the floor tiles and player marker never use height. This is what
      * to adjust if the QUBE's vertical arc looks too flat or too tall
      * once seen on a real device. */
-    const val QUBE_HEIGHT_SCALE_PX = 150f
+    const val QUBE_HEIGHT_SCALE_PX = 180f
 
     /**
      * Cosmetic-only shrink applied to the QUBE after its rotation is
@@ -43,7 +43,7 @@ object RenderConfig {
      * gap (fills the cell edge-to-edge); lower = more visible gap between
      * the QUBE and the cell boundary.
      */
-    const val QUBE_VISUAL_SCALE = 0.88f
+    const val QUBE_VISUAL_SCALE = 0.95f
 
     /**
      * A toppling QUBE's highest corner rises to exactly sqrt(2) (~1.414)

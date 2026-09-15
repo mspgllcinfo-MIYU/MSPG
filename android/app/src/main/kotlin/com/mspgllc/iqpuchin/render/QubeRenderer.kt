@@ -14,99 +14,129 @@ import kotlin.math.sin
  *
  * This computes the QUBE's 8 corners as real 3D points rotated about the
  * shared edge between the two cells, then projects each corner through
- * the same [IsoProjection] used for the floor -- not by rotating a
- * single flat icon. That distinction matters: rotating a flat 2D drawing
- * around an axis in its own plane visually collapses it to a line at 90
- * degrees, which would make the QUBE appear to vanish exactly at the
- * moment it's supposed to land. Rotating real 3D points has no such
- * problem, and it's also what makes the pivot corner stay pinned in
- * place (the edge it's actually toppling over) instead of the whole
- * shape sliding.
+ * the same [IsoProjection] used for the floor -- not by rotating a flat
+ * icon. The rotation pivot is always placed as if the QUBE exactly fills
+ * one cell (half-extent 0.5), which is what makes every topple advance
+ * exactly one grid unit with a flush landing; [RenderConfig.QUBE_VISUAL_SCALE]
+ * is applied afterward as a cosmetic shrink toward the shape's own
+ * center, never touching that pivot math.
  *
- * The rotation pivot is always exactly at the true boundary between the
- * two cells (half a grid unit from each cell's center) -- that's what
- * guarantees every topple advances the QUBE by exactly one grid unit
- * with a perfectly flush landing and no visual jump into the next
- * topple. [RenderConfig.QUBE_VISUAL_SCALE] never touches that; it only
- * shrinks the already-correct projected corners toward their own center
- * afterward, purely so a small gap can show against the cell edges.
+ * Which physical face of the cube is "the top" and "the face turned
+ * toward the camera" changes *during* a topple -- e.g. at the instant a
+ * topple finishes, what was the cube's back face is now its top, and
+ * what was its top face is now turned toward the camera. Earlier this
+ * class rendered a fixed group of corners as "the top face" regardless
+ * of rotation angle, which is what made a mid/late-rotation (and the
+ * settled, fully-landed) QUBE look like two flat vertical panels plus a
+ * bottom instead of a cube. The fix: at every frame, compute each
+ * rotating face's current outward normal and pick whichever face is
+ * actually pointing up (drawn bright, "top" role) and whichever
+ * remaining face is pointing most toward the camera (drawn mid-tone,
+ * "front" role) -- this is standard back-face culling by normal
+ * direction. The +X face is unaffected by this rotation (the pivot axis
+ * runs parallel to it) so it is always the visible dark side face; -X
+ * and the "currently facing away" candidate are never drawn at all,
+ * which is the culling. The three chosen faces are then depth-sorted
+ * (farthest first) before drawing, as a defensive measure against any
+ * edge-on overlap during rotation.
  */
 class QubeRenderer {
 
-    private val topPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(130, 180, 255) }
-    private val rightFacePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(70, 115, 205) }
-    private val frontFacePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(45, 80, 155) }
+    private enum class Face { TOP, BOTTOM, FRONT, BACK }
+
+    private val brightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(150, 195, 255) }
+    private val midPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(80, 130, 215) }
+    private val darkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(45, 80, 155) }
     private val outline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.rgb(15, 25, 45)
         style = Paint.Style.STROKE
         strokeWidth = 2f
     }
 
-    /** Cosine-based ease-in-out: slow start, fast middle, slow finish --
-     * a constant rotation speed would read as mechanical rather than a
-     * natural topple. */
+    /** Cosine-based ease-in-out: slow start, fast middle, slow finish. */
     private fun easeInOut(linearT: Float): Float =
         (1f - cos(linearT * Math.PI.toFloat())) / 2f
 
     fun draw(canvas: Canvas, qube: Qube, motion: QubeMotion, projection: IsoProjection) {
         val easedT = easeInOut(motion.rotationProgress())
-        val thetaBase = easedT * (Math.PI.toFloat() / 2f) // 0..90 degrees, in radians
+        val dz = qube.direction.dz.toFloat()
+        val theta = easedT * (Math.PI.toFloat() / 2f) * dz // signed 0..90 degrees, in radians
 
-        // Rotation always pivots as if the QUBE exactly filled one cell
-        // (half-extent 0.5), regardless of the cosmetic visual scale --
-        // see the class doc for why.
         val half = 0.5f
+        val fromX = qube.previousCoord.x.toFloat()
+        val fromZ = qube.previousCoord.z.toFloat()
+        val pivotZ = half * dz
+        val cosT = cos(theta)
+        val sinT = sin(theta)
 
-        fun corner(localX: Float, localY: Float, localZ: Float): FloatArray {
-            val fromX = qube.previousCoord.x.toFloat()
-            val fromZ = qube.previousCoord.z.toFloat()
-            val dz = qube.direction.dz.toFloat()
-
-            val pivotZ = half * dz
+        fun cornerScreen(localX: Float, localY: Float, localZ: Float): FloatArray {
             val relY = localY
             val relZ = localZ - pivotZ
-            val theta = thetaBase * dz
-            val cosT = cos(theta)
-            val sinT = sin(theta)
-
             val worldY = cosT * relY - sinT * relZ
             val relZ2 = sinT * relY + cosT * relZ
             val worldZ = fromZ + pivotZ + relZ2
             val worldX = fromX + localX
-
             return projection.toScreen(worldX, worldZ, worldY)
         }
 
-        val bLL = corner(-half, 0f, -half)
-        val bLR = corner(half, 0f, -half)
-        val bFL = corner(-half, 0f, half)
-        val bFR = corner(half, 0f, half)
-        val tLL = corner(-half, 2f * half, -half)
-        val tLR = corner(half, 2f * half, -half)
-        val tFL = corner(-half, 2f * half, half)
-        val tFR = corner(half, 2f * half, half)
+        val bLL = cornerScreen(-half, 0f, -half)
+        val bLR = cornerScreen(half, 0f, -half)
+        val bFL = cornerScreen(-half, 0f, half)
+        val bFR = cornerScreen(half, 0f, half)
+        val tLL = cornerScreen(-half, 2f * half, -half)
+        val tLR = cornerScreen(half, 2f * half, -half)
+        val tFL = cornerScreen(-half, 2f * half, half)
+        val tFR = cornerScreen(half, 2f * half, half)
 
-        // Cosmetic-only: shrink all 8 projected points toward their
-        // shared center, after the physically-correct rotation above.
+        // Cosmetic-only shrink toward the shared center -- see class doc.
         val raw = arrayOf(bLL, bLR, bFL, bFR, tLL, tLR, tFL, tFR)
         val centerX = raw.sumOf { it[0].toDouble() }.toFloat() / raw.size
         val centerY = raw.sumOf { it[1].toDouble() }.toFloat() / raw.size
-        val scale = RenderConfig.QUBE_VISUAL_SCALE
-        val shrunk = Array(raw.size) { i ->
-            floatArrayOf(centerX + (raw[i][0] - centerX) * scale, centerY + (raw[i][1] - centerY) * scale)
+        val vScale = RenderConfig.QUBE_VISUAL_SCALE
+        val s = Array(raw.size) { i ->
+            floatArrayOf(centerX + (raw[i][0] - centerX) * vScale, centerY + (raw[i][1] - centerY) * vScale)
         }
-        // Index order matches `raw` above: 0=bLL 1=bLR 2=bFL 3=bFR 4=tLL 5=tLR 6=tFL 7=tFR
-        drawFace(canvas, topPaint, shrunk[4], shrunk[5], shrunk[7], shrunk[6])
-        drawFace(canvas, rightFacePaint, shrunk[1], shrunk[5], shrunk[7], shrunk[3])
-        drawFace(canvas, frontFacePaint, shrunk[2], shrunk[3], shrunk[7], shrunk[6])
+        // s indices: 0=bLL 1=bLR 2=bFL 3=bFR 4=tLL 5=tLR 6=tFL 7=tFR
+
+        // Outward normals of the four faces this rotation actually
+        // affects (TOP/BOTTOM/FRONT/BACK all live in the Y-Z plane the
+        // pivot rotates). The +X (right) face's normal is untouched by a
+        // rotation about an axis parallel to X, so it needs no normal
+        // check -- it is simply always the visible dark side face.
+        val normalY = mapOf(Face.TOP to cosT, Face.BOTTOM to -cosT, Face.FRONT to -sinT, Face.BACK to sinT)
+        val normalZ = mapOf(Face.TOP to sinT, Face.BOTTOM to -sinT, Face.FRONT to cosT, Face.BACK to -cosT)
+
+        val upFace = normalY.maxByOrNull { it.value }!!.key
+        val frontFace = normalZ.filterKeys { it != upFace }.maxByOrNull { it.value }!!.key
+
+        fun quadOf(face: Face): Array<FloatArray> = when (face) {
+            Face.TOP -> arrayOf(s[4], s[5], s[7], s[6])    // tLL,tLR,tFR,tFL
+            Face.BOTTOM -> arrayOf(s[0], s[1], s[3], s[2]) // bLL,bLR,bFR,bFL
+            Face.FRONT -> arrayOf(s[2], s[3], s[7], s[6])  // bFL,bFR,tFR,tFL
+            Face.BACK -> arrayOf(s[1], s[0], s[4], s[5])   // bLR,bLL,tLL,tLR
+        }
+
+        val rightQuad = arrayOf(s[1], s[5], s[7], s[3]) // bLR,tLR,tFR,bFR -- always the +X face
+        val upQuad = quadOf(upFace)
+        val frontQuad = quadOf(frontFace)
+
+        fun avgScreenY(quad: Array<FloatArray>) = quad.sumOf { it[1].toDouble() }.toFloat() / quad.size
+
+        val drawOrder = listOf(
+            brightPaint to upQuad,
+            midPaint to frontQuad,
+            darkPaint to rightQuad
+        ).sortedBy { (_, quad) -> avgScreenY(quad) } // farther/higher (smaller screen Y) drawn first
+
+        for ((paint, quad) in drawOrder) {
+            drawFace(canvas, paint, quad)
+        }
     }
 
-    private fun drawFace(canvas: Canvas, paint: Paint, a: FloatArray, b: FloatArray, c: FloatArray, d: FloatArray) {
+    private fun drawFace(canvas: Canvas, paint: Paint, pts: Array<FloatArray>) {
         val path = Path().apply {
-            moveTo(a[0], a[1])
-            lineTo(b[0], b[1])
-            lineTo(c[0], c[1])
-            lineTo(d[0], d[1])
+            moveTo(pts[0][0], pts[0][1])
+            for (i in 1 until pts.size) lineTo(pts[i][0], pts[i][1])
             close()
         }
         canvas.drawPath(path, paint)
