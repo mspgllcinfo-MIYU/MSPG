@@ -7,26 +7,32 @@ import android.graphics.Path
 import com.mspgllc.iqpuchin.board.GridCoord
 
 /**
- * Pure presentation: draws the board and player wherever GameView tells
- * it to. Never touches game state and never decides where things go on
- * screen -- that's GameView's job (see recomputeLayout there). Flat,
- * placeholder shapes only, per STEP 2 scope (no polish/effects yet).
+ * Pure presentation: draws the floor tiles and player wherever GameView
+ * tells it to. Never touches game state and never decides where things
+ * go on screen -- that's GameView's job (see recomputeLayout there).
+ * Flat, placeholder shapes only (no polish/effects yet). See
+ * QubeRenderer for the QUBE itself.
  */
 class BoardRenderer {
 
     /** Distance (in baseline/unscaled px) from the drawing origin to each
      * edge of the full board, including the player marker's height above
-     * the tile plane. Used by GameView to compute a scale/position that
-     * fits the whole board on screen. */
+     * the tile plane and a toppling QUBE's peak height (reached mid-arc
+     * while crossing the board's back row, the closest it ever gets to
+     * the top of the screen). Used by GameView to compute a scale/
+     * position that fits everything -- floor, player, and QUBE -- on
+     * screen. */
     data class BoardBounds(val leftPx: Float, val rightPx: Float, val topPx: Float, val bottomPx: Float)
 
     fun boardBounds(gridWidth: Int, gridDepth: Int): BoardBounds {
         val halfW = RenderConfig.TILE_WIDTH_PX / 2f
         val halfH = RenderConfig.TILE_HEIGHT_PX / 2f
+        val qubeLiftPx = RenderConfig.QUBE_HEIGHT_SCALE_PX * RenderConfig.QUBE_MAX_LIFT_WORLD_UNITS
+        val topClearancePx = maxOf(RenderConfig.PLAYER_SIZE_PX, qubeLiftPx)
         return BoardBounds(
             leftPx = gridDepth * halfW,
             rightPx = gridWidth * halfW,
-            topPx = halfH + RenderConfig.PLAYER_SIZE_PX,
+            topPx = halfH + topClearancePx,
             bottomPx = (gridWidth + gridDepth - 1) * halfH
         )
     }
@@ -50,18 +56,21 @@ class BoardRenderer {
         strokeWidth = 3f
     }
 
+    /**
+     * [projection] is built once per frame by GameView and shared with
+     * QubeRenderer, so the floor grid and the QUBE are guaranteed to line
+     * up -- this never builds its own.
+     */
     fun draw(
         canvas: Canvas,
+        projection: IsoProjection,
         gridWidth: Int,
         gridDepth: Int,
         playerPosition: GridCoord,
-        originX: Float,
-        originY: Float,
         scale: Float
     ) {
         val tileW = RenderConfig.TILE_WIDTH_PX * scale
         val tileH = RenderConfig.TILE_HEIGHT_PX * scale
-        val projection = IsoProjection(tileW, tileH, originX, originY)
 
         for (x in 0 until gridWidth) {
             for (z in 0 until gridDepth) {
