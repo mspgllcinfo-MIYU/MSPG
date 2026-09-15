@@ -10,6 +10,7 @@ import com.mspgllc.iqpuchin.board.BoardConfig
 import com.mspgllc.iqpuchin.board.BoardLogic
 import com.mspgllc.iqpuchin.board.Direction
 import com.mspgllc.iqpuchin.board.GridCoord
+import com.mspgllc.iqpuchin.board.MarkController
 import com.mspgllc.iqpuchin.board.Qube
 import com.mspgllc.iqpuchin.board.QubeMotion
 import com.mspgllc.iqpuchin.input.InputActionListener
@@ -32,6 +33,7 @@ class GameView @JvmOverloads constructor(
 ) : View(context, attrs), InputActionListener {
 
     private val boardLogic = BoardLogic()
+    private val markController = MarkController()
     private val boardRenderer = BoardRenderer()
     private val qubeRenderer = QubeRenderer()
 
@@ -126,6 +128,7 @@ class GameView @JvmOverloads constructor(
             BoardConfig.GRID_WIDTH,
             BoardConfig.GRID_DEPTH,
             boardLogic.playerPosition,
+            markController.markedCoord,
             displayScale
         )
 
@@ -136,5 +139,10 @@ class GameView @JvmOverloads constructor(
         if (boardLogic.movePlayer(direction)) {
             invalidate()
         }
+    }
+
+    override fun onMarkRequested() {
+        markController.markAt(boardLogic.playerPosition)
+        invalidate()
     }
 }

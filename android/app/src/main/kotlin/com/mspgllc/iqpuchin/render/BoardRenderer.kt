@@ -41,6 +41,11 @@ class BoardRenderer {
         color = Color.rgb(40, 46, 56)
         style = Paint.Style.FILL
     }
+    /** STEP 4 placeholder color for the single MARKed cell. */
+    private val markedFloorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(235, 195, 60)
+        style = Paint.Style.FILL
+    }
     private val floorOutline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.rgb(96, 106, 122)
         style = Paint.Style.STROKE
@@ -67,6 +72,7 @@ class BoardRenderer {
         gridWidth: Int,
         gridDepth: Int,
         playerPosition: GridCoord,
+        markedCoord: GridCoord?,
         scale: Float
     ) {
         val tileW = RenderConfig.TILE_WIDTH_PX * scale
@@ -74,14 +80,23 @@ class BoardRenderer {
 
         for (x in 0 until gridWidth) {
             for (z in 0 until gridDepth) {
-                drawTile(canvas, projection, x.toFloat(), z.toFloat(), tileW, tileH)
+                val marked = markedCoord != null && markedCoord.x == x && markedCoord.z == z
+                drawTile(canvas, projection, x.toFloat(), z.toFloat(), tileW, tileH, marked)
             }
         }
 
         drawPlayer(canvas, projection, playerPosition, scale)
     }
 
-    private fun drawTile(canvas: Canvas, projection: IsoProjection, gx: Float, gz: Float, tileW: Float, tileH: Float) {
+    private fun drawTile(
+        canvas: Canvas,
+        projection: IsoProjection,
+        gx: Float,
+        gz: Float,
+        tileW: Float,
+        tileH: Float,
+        marked: Boolean
+    ) {
         val p = projection.toScreen(gx, gz)
         val hw = tileW / 2f
         val hh = tileH / 2f
@@ -92,7 +107,7 @@ class BoardRenderer {
             lineTo(p[0] - hw, p[1])
             close()
         }
-        canvas.drawPath(path, floorPaint)
+        canvas.drawPath(path, if (marked) markedFloorPaint else floorPaint)
         canvas.drawPath(path, floorOutline)
     }
 
