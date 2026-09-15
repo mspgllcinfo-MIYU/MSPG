@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- No <uses-permission> entries: this install-test build needs none
-         (no network, no storage, nothing). -->
+    <!-- No <uses-permission> entries: this build needs none (no network,
+         no storage, nothing). -->
 
     <application
         android:allowBackup="true"
@@ -12,7 +12,8 @@
 
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:screenOrientation="portrait">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
