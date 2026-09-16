@@ -23,19 +23,27 @@ import kotlin.math.min
  * with no debouncing/delay added here, matching how the D-pad buttons
  * worked (a discrete "press", not held-repeat).
  *
- * Touch handling: dragging the knob away from center resolves to a
- * direction once past [DEADZONE_FRACTION] of the base radius (smaller
- * finger jitter near center is ignored entirely), by comparing the
- * absolute drag distance on each axis -- horizontal wins only when
- * strictly greater than vertical, so an exact tie (or anything closer to
- * vertical) resolves to up/down, per the requested tie-break rule. A
- * move is only requested on the instant the resolved direction *changes*
- * (entering a new direction, or first leaving the deadzone) -- holding
- * the stick steady in one direction does not repeatedly fire, mirroring
- * the D-pad's own single-press-per-tap behavior; reaching the same
- * direction again requires passing back through the deadzone first.
- * Releasing the touch snaps the knob back to center and clears that
- * state, ready for a fresh press.
+ * Touch handling, VIRTUAL-STICK-TUNE-01 (direction lock): dragging the
+ * knob away from center resolves a direction once past
+ * [DEADZONE_FRACTION] of the base radius (smaller finger jitter near
+ * center is ignored entirely), by comparing the absolute drag distance
+ * on each axis at that instant -- horizontal wins only when strictly
+ * greater than vertical, so an exact tie (or anything closer to
+ * vertical) resolves to up/down, per the requested tie-break rule. That
+ * resolved direction is then *locked* ([lockedDirection]): while still
+ * outside the deadzone, further drag does not re-resolve or switch
+ * direction at all, even if it drifts diagonally past what the raw
+ * axis comparison would otherwise pick -- this is specifically what
+ * keeps a thumb pushed "left" from flickering to up/down on natural
+ * wobble. The lock is released only by the finger returning inside the
+ * deadzone, or by lifting it (ACTION_UP/ACTION_CANCEL, which also snaps
+ * the knob back to center) -- only then can the next deadzone crossing
+ * resolve (and lock) a new direction. A move is requested exactly once
+ * per lock acquired, mirroring the D-pad's own single-press-per-tap
+ * behavior (no held-repeat); the visual knob position, once locked, is
+ * also constrained to the locked axis (see [applyKnobOffset]) so its
+ * position always matches what is actually locked in, never implying a
+ * direction that isn't the one currently in effect.
  */
 class VirtualStickView @JvmOverloads constructor(
     context: Context,
@@ -95,10 +103,12 @@ class VirtualStickView @JvmOverloads constructor(
     private var knobOffsetY = 0f
     private var knobActive = false
 
-    /** The direction last actually sent to [listener], or null while
-     * centered/in the deadzone -- the edge-detection state described in
-     * the class doc. */
-    private var lastFiredDirection: Direction? = null
+    /** Null while centered/in the deadzone; otherwise the direction
+     * resolved at the instant the deadzone was last crossed, held fixed
+     * (locked) until the finger returns to the deadzone or is released
+     * -- see the class doc. Doubles as the one-move-per-lock edge-fire
+     * gate, since a lock's direction never changes during its lifetime. */
+    private var lockedDirection: Direction? = null
 
     init {
         isClickable = true
@@ -144,43 +154,73 @@ class VirtualStickView @JvmOverloads constructor(
         var dx = touchX - cx
         var dy = touchY - cy
         val distance = hypot(dx, dy)
-        if (distance > maxKnobRadius && distance > 0f) {
+
+        if (distance < deadzoneRadius) {
+            // Back near center: release the lock (rule 4) so the next
+            // deadzone crossing resolves a fresh direction.
+            lockedDirection = null
+            knobActive = false
+            knobOffsetX = dx
+            knobOffsetY = dy
+            invalidate()
+            return
+        }
+
+        if (distance > maxKnobRadius) {
             val scale = maxKnobRadius / distance
             dx *= scale
             dy *= scale
         }
-        knobOffsetX = dx
-        knobOffsetY = dy
-
-        if (distance < deadzoneRadius) {
-            knobActive = false
-            lastFiredDirection = null
-            invalidate()
-            return
-        }
         knobActive = true
 
-        // Dominant-axis resolution: horizontal only wins on a strict
-        // inequality, so an exact tie (or anything closer to vertical)
-        // resolves to up/down, per the requested tie-break rule.
-        val direction = if (abs(dx) > abs(dy)) {
-            if (dx > 0f) Direction.EAST else Direction.WEST
-        } else {
-            if (dy > 0f) Direction.SOUTH else Direction.NORTH
-        }
-
-        if (direction != lastFiredDirection) {
-            lastFiredDirection = direction
+        val alreadyLocked = lockedDirection
+        if (alreadyLocked == null) {
+            // First crossing since the last unlock: resolve and lock a
+            // direction now (dominant-axis rule -- horizontal wins only
+            // on a strict inequality, so a tie resolves to up/down), and
+            // request the move exactly once for this newly-acquired lock.
+            val direction = if (abs(dx) > abs(dy)) {
+                if (dx > 0f) Direction.EAST else Direction.WEST
+            } else {
+                if (dy > 0f) Direction.SOUTH else Direction.NORTH
+            }
+            lockedDirection = direction
+            applyKnobOffset(direction, dx, dy)
             listener?.onMoveRequested(direction)
+        } else {
+            // Still locked: direction does not change no matter how the
+            // finger drifts while outside the deadzone (rule 3) -- only
+            // the knob's own on-screen position keeps following, and
+            // stays constrained to the locked axis (see applyKnobOffset).
+            applyKnobOffset(alreadyLocked, dx, dy)
         }
         invalidate()
     }
 
+    /** Draws the knob's offset constrained to [direction]'s own axis, so
+     * its position always matches the direction actually locked in --
+     * e.g. once locked to EAST/WEST, vertical drift never moves the knob
+     * off the horizontal axis. */
+    private fun applyKnobOffset(direction: Direction, dx: Float, dy: Float) {
+        when (direction) {
+            Direction.EAST, Direction.WEST -> {
+                knobOffsetX = dx
+                knobOffsetY = 0f
+            }
+            Direction.NORTH, Direction.SOUTH -> {
+                knobOffsetX = 0f
+                knobOffsetY = dy
+            }
+        }
+    }
+
     private fun resetKnob() {
+        // Rule 6: ACTION_UP/ACTION_CANCEL always releases the lock and
+        // returns the knob to center.
         knobOffsetX = 0f
         knobOffsetY = 0f
         knobActive = false
-        lastFiredDirection = null
+        lockedDirection = null
         invalidate()
     }
 }
