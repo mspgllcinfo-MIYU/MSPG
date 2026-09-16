@@ -35,8 +35,14 @@ class SoundEventPlayer(context: Context) {
     private companion object {
         const val MAX_STREAMS = 8
 
-        const val VOLUME_QUBE_ROLL_START = 0.65f
-        const val VOLUME_QUBE_LAND = 0.92f
+        // CATPUNCH-FIX-01: real-device feedback was that both QUBE SE
+        // still read as too light even after SOUND-03's added bands --
+        // bumped further alongside the assets' own strengthened
+        // 150-300Hz/300-600Hz content (see the regenerated WAVs; QUBE_LAND
+        // sits near SoundPool's ceiling since its own peak is already
+        // near-maximal).
+        const val VOLUME_QUBE_ROLL_START = 0.78f
+        const val VOLUME_QUBE_LAND = 0.97f
         const val VOLUME_MARK_SET = 0.6f
         const val VOLUME_CAPTURE_SUCCESS = 0.65f
 
@@ -47,6 +53,9 @@ class SoundEventPlayer(context: Context) {
         // 1.5-4kHz), but the *level* balance had it backwards: the impact
         // played louder (0.8) than the squeal (0.7) despite the squeal
         // being the signal that must always read clearly. Inverted here.
+        // CATPUNCH-FIX-01: squeal.wav itself was redesigned (see that
+        // asset's own notes) -- this balance still holds, so the volumes
+        // themselves are unchanged.
         const val VOLUME_POI_HIT_IMPACT = 0.68f
         const val VOLUME_POI_HIT_SQUEAL = 1.0f
 
