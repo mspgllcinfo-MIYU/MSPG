@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive Icon background: a plain, simple dark fill. No QUBE motifs
+     or other decoration -- the icon's entire subject is Poi's face,
+     drawn in the foreground layer, so nothing here should compete with
+     it. Tone is close to but distinguishable from Poi's own near-black
+     fur (see ic_launcher_foreground), so the face silhouette still
+     reads as its own shape rather than blending into the background. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M0,0 H108 V108 H0 Z"
+        android:fillColor="#181B22" />
+</vector>

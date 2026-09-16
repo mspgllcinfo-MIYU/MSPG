@@ -65,19 +65,24 @@ class MainActivity : Activity() {
         // below it.
         val uiVerticalOffsetPx = UiConfig.UI_VERTICAL_CENTER_OFFSET_DP * density
 
+        // UI-SWAP: ACTION (one-shot MARK/ACTIVATE, left thumb) is now on
+        // the left; the virtual stick (continuous movement, right thumb)
+        // is now on the right -- swapped from the previous round per
+        // real-device feedback. Only Gravity/margin sides change below;
+        // sizes and the shared vertical offset are untouched.
         val root = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
             addView(gameView, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
             addView(
-                virtualStick,
-                FrameLayout.LayoutParams(stickSizePx, stickSizePx, Gravity.CENTER_VERTICAL or Gravity.START).apply {
-                    leftMargin = stickMarginPx
+                actionButton,
+                FrameLayout.LayoutParams(actionButtonSizePx, actionButtonSizePx, Gravity.CENTER_VERTICAL or Gravity.START).apply {
+                    leftMargin = actionButtonMarginPx
                 }
             )
             addView(
-                actionButton,
-                FrameLayout.LayoutParams(actionButtonSizePx, actionButtonSizePx, Gravity.CENTER_VERTICAL or Gravity.END).apply {
-                    rightMargin = actionButtonMarginPx
+                virtualStick,
+                FrameLayout.LayoutParams(stickSizePx, stickSizePx, Gravity.CENTER_VERTICAL or Gravity.END).apply {
+                    rightMargin = stickMarginPx
                 }
             )
         }

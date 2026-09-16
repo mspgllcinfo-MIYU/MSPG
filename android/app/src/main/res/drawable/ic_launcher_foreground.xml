@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Adaptive Icon foreground: an extreme close-up of Poi's face -- the
+  head fills nearly the whole 108x108dp canvas and bleeds past its
+  edges/corners on purpose (the "leaning in too close to fit" look),
+  rather than a small, safely-centered character portrait. Same
+  character design as the in-game PLAYER marker (see PlayerRenderer.kt):
+  black-cat head, triangular ears, large gold eyes with black pupils, a
+  small gold crown -- no new design, no body, no collar medal (not
+  visible in a face-only crop).
+
+  Placement is deliberately split by how much clipping each part can
+  survive under an Adaptive Icon mask:
+  - Head/ears bleed toward the outer edges and corners -- they are
+    expected to be cropped by round/squircle masks, which is exactly
+    the intended "pressed up against the frame" effect.
+  - Both eyes (radius 13dp, centered at x=37/71, y=58) sit fully inside
+    the 66dp-diameter safe zone centered on the canvas (their outer
+    edges are ~30.5dp from center, under the 33dp safe radius), so they
+    -- the single most important identifying feature -- always survive
+    every mask shape.
+  - The crown's base (y=24, ~30dp from center) is also inside that same
+    safe radius even though its peak tips (y=6) are not, so a mask can
+    trim the crown's points without ever erasing it completely.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Left ear -->
+    <path
+        android:pathData="M26,40 L50,24 L10,2 Z"
+        android:fillColor="#121216" />
+    <!-- Right ear -->
+    <path
+        android:pathData="M82,40 L58,24 L98,2 Z"
+        android:fillColor="#121216" />
+
+    <!-- Head: large enough to bleed past the canvas edges by design. -->
+    <path
+        android:pathData="M4,60 A50,50 0 1,0 104,60 A50,50 0 1,0 4,60 Z"
+        android:fillColor="#121216" />
+
+    <!-- Crown: base stays inside the safe zone even though the peaks
+         reach close to the top edge. -->
+    <path
+        android:pathData="M40,24 L40,15 L47,6 L54,17 L61,6 L68,15 L68,24 Z"
+        android:fillColor="#FFCD3C" />
+
+    <!-- Eyes: the one feature guaranteed to survive every mask shape. -->
+    <path
+        android:pathData="M24,58 A13,13 0 1,0 50,58 A13,13 0 1,0 24,58 Z"
+        android:fillColor="#FFCD3C" />
+    <path
+        android:pathData="M58,58 A13,13 0 1,0 84,58 A13,13 0 1,0 58,58 Z"
+        android:fillColor="#FFCD3C" />
+
+    <!-- Pupils -->
+    <path
+        android:pathData="M31.5,58 A5.5,5.5 0 1,0 42.5,58 A5.5,5.5 0 1,0 31.5,58 Z"
+        android:fillColor="#000000" />
+    <path
+        android:pathData="M65.5,58 A5.5,5.5 0 1,0 76.5,58 A5.5,5.5 0 1,0 65.5,58 Z"
+        android:fillColor="#000000" />
+</vector>

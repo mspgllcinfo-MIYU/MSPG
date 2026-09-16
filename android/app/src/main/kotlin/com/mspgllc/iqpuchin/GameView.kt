@@ -24,6 +24,8 @@ import com.mspgllc.iqpuchin.render.PlayerRenderer
 import com.mspgllc.iqpuchin.render.PoiHitReaction
 import com.mspgllc.iqpuchin.render.QubeRenderer
 import com.mspgllc.iqpuchin.render.RenderConfig
+import com.mspgllc.iqpuchin.sound.QubeSoundTracker
+import com.mspgllc.iqpuchin.sound.SoundEvent
 import com.mspgllc.iqpuchin.sound.SoundEventPlayer
 import kotlin.math.min
 
@@ -39,11 +41,12 @@ class GameView @JvmOverloads constructor(
     attrs: AttributeSet? = null
 ) : View(context, attrs), InputActionListener {
 
-    /** Pairs a [Qube] with the [QubeMotion] that advances it. QubeMotion
+    /** Pairs a [Qube] with the [QubeMotion] that advances it and the
+     * [QubeSoundTracker] that watches both for SE purposes. QubeMotion
      * keeps its own Qube reference private, so GameView needs to hold
-     * both together to hand each QUBE to the renderer -- this is a plain
-     * data holder for a list element, not a per-QUBE variable. */
-    private data class QubeInstance(val qube: Qube, val motion: QubeMotion)
+     * these together to hand each QUBE to the renderer -- this is a
+     * plain data holder for a list element, not a per-QUBE variable. */
+    private data class QubeInstance(val qube: Qube, val motion: QubeMotion, val soundTracker: QubeSoundTracker)
 
     private val boardLogic = BoardLogic()
     private val markController = MarkController()
@@ -53,10 +56,12 @@ class GameView @JvmOverloads constructor(
     private val playerRenderer = PlayerRenderer()
     private val qubeRenderer = QubeRenderer()
 
-    // VISUAL-01: Poi's brief HIT flinch and the (currently silent) HIT
-    // SE hook. Both are purely cosmetic/presentational -- neither is
-    // consulted by checkCollision() below, only triggered by it once the
-    // *result* of an unmodified HIT judgement is observed.
+    // VISUAL-01/SOUND-01: Poi's brief HIT flinch and the shared SE
+    // funnel (currently silent -- no audio assets yet, see
+    // SoundEventPlayer). Both are purely cosmetic/presentational --
+    // neither is consulted by any game-logic check below, only
+    // triggered once a logic result (a new HIT, a MARK placed, a
+    // CAPTURE, a QUBE's own roll/land) is observed.
     private val hitReaction = PoiHitReaction()
     private val soundEventPlayer = SoundEventPlayer()
 
@@ -75,7 +80,8 @@ class GameView @JvmOverloads constructor(
         val startXs = listOf(1, 3, 5)
         return startXs.map { x ->
             val qube = Qube(startCoord = GridCoord(x, 0), direction = Direction.SOUTH)
-            QubeInstance(qube, QubeMotion(qube))
+            val motion = QubeMotion(qube)
+            QubeInstance(qube, motion, QubeSoundTracker(qube, motion))
         }.toMutableList()
     }
 
@@ -110,7 +116,7 @@ class GameView @JvmOverloads constructor(
         val isNewHit = gameStateController.checkCollision(boardLogic.playerPosition, qubes.map { it.qube.coord })
         if (isNewHit) {
             hitReaction.trigger()
-            soundEventPlayer.playHitMeow()
+            soundEventPlayer.play(SoundEvent.POI_HIT)
         }
     }
 
@@ -120,7 +126,10 @@ class GameView @JvmOverloads constructor(
             val deltaMs = if (lastFrameTimeNanos == 0L) 0L else (frameTimeNanos - lastFrameTimeNanos) / 1_000_000L
             lastFrameTimeNanos = frameTimeNanos
 
-            for (instance in qubes) instance.motion.update(deltaMs)
+            for (instance in qubes) {
+                instance.motion.update(deltaMs)
+                instance.soundTracker.update(soundEventPlayer, boardLogic.playerPosition)
+            }
             hitReaction.update(deltaMs)
             gameStateController.update(deltaMs)
             checkCollision()
@@ -246,6 +255,7 @@ class GameView @JvmOverloads constructor(
         val currentMark = markController.markedCoord
         if (currentMark == null) {
             markController.markAt(boardLogic.playerPosition)
+            soundEventPlayer.play(SoundEvent.MARK_SET)
         } else {
             // Logical grid coordinates are unique per QUBE, so at most
             // one entry can ever match -- one MARK captures at most one
@@ -253,6 +263,7 @@ class GameView @JvmOverloads constructor(
             val index = qubes.indexOfFirst { captureSystem.isCaptured(currentMark, it.qube.coord) }
             if (index >= 0) {
                 qubes.removeAt(index)
+                soundEventPlayer.play(SoundEvent.CAPTURE_SUCCESS)
             }
             markController.clear()
         }
