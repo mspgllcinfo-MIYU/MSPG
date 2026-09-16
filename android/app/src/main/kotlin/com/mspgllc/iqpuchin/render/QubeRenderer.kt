@@ -30,25 +30,45 @@ import kotlin.math.sin
  * settled, fully-landed) QUBE look like two flat vertical panels plus a
  * bottom instead of a cube. The fix: at every frame, compute each
  * rotating face's current outward normal and pick whichever face is
- * actually pointing up (drawn bright, "top" role) and whichever
+ * actually pointing up (drawn brightest, "top" role) and whichever
  * remaining face is pointing most toward the camera (drawn mid-tone,
  * "front" role) -- this is standard back-face culling by normal
  * direction. The +X face is unaffected by this rotation (the pivot axis
- * runs parallel to it) so it is always the visible dark side face; -X
+ * runs parallel to it) so it is always the visible darkest side face; -X
  * and the "currently facing away" candidate are never drawn at all,
  * which is the culling. The three chosen faces are then depth-sorted
  * (farthest first) before drawing, as a defensive measure against any
  * edge-on overlap during rotation.
+ *
+ * VISUAL-01: the three faces are now painted as a cardboard shipping box
+ * (tape band on top, a small "grumpy" face on whichever face is
+ * currently playing the front role, a shipping mark on the always-dark
+ * side face) instead of flat blue. All of that is drawn as decoration
+ * *on top of* the already-computed face quads below -- none of the
+ * rotation/face-selection/depth-sort math above is touched, so the
+ * QUBE's motion and shape are exactly as before.
  */
 class QubeRenderer {
 
     private enum class Face { TOP, BOTTOM, FRONT, BACK }
 
-    private val brightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(150, 195, 255) }
-    private val midPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(80, 130, 215) }
-    private val darkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(45, 80, 155) }
+    private val brightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(196, 164, 118) }
+    private val midPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(168, 128, 82) }
+    private val darkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(128, 94, 58) }
     private val outline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(15, 25, 45)
+        color = Color.rgb(58, 40, 24)
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+    }
+    private val tapePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(222, 206, 174) }
+    private val eyePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(35, 24, 16)
+        style = Paint.Style.STROKE
+        strokeWidth = 4f
+        strokeCap = Paint.Cap.ROUND
+    }
+    private val markPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(92, 68, 42)
         style = Paint.Style.STROKE
         strokeWidth = 2f
     }
@@ -131,6 +151,13 @@ class QubeRenderer {
         for ((paint, quad) in drawOrder) {
             drawFace(canvas, paint, quad)
         }
+
+        // VISUAL-01 cardboard decoration, drawn on top of the already
+        // rotated/projected quads above -- purely cosmetic, feeds back
+        // into none of the geometry/face-selection/sort logic above.
+        drawTapeBand(canvas, upQuad)
+        drawGrumpyEyes(canvas, frontQuad)
+        drawShippingMark(canvas, rightQuad)
     }
 
     private fun drawFace(canvas: Canvas, paint: Paint, pts: Array<FloatArray>) {
@@ -141,5 +168,59 @@ class QubeRenderer {
         }
         canvas.drawPath(path, paint)
         canvas.drawPath(path, outline)
+    }
+
+    /** Bilinear point within a face quad, corners assumed in the same
+     * cyclic order [drawFace] connects them in: index0=(u=0,v=0),
+     * index1=(u=1,v=0), index2=(u=1,v=1), index3=(u=0,v=1). Lets
+     * decorations stay glued to a face's already-rotated/projected
+     * corners without any new corner/rotation math of their own. */
+    private fun quadPoint(quad: Array<FloatArray>, u: Float, v: Float): FloatArray {
+        val edge0 = lerp(quad[0], quad[1], u)
+        val edge1 = lerp(quad[3], quad[2], u)
+        return lerp(edge0, edge1, v)
+    }
+
+    private fun lerp(a: FloatArray, b: FloatArray, t: Float): FloatArray =
+        floatArrayOf(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
+
+    /** A single tape band across whichever face is currently playing the
+     * "up" role -- a simple, always-present "sealed box" cue for this
+     * first static visibility pass. */
+    private fun drawTapeBand(canvas: Canvas, upQuad: Array<FloatArray>) {
+        val a = quadPoint(upQuad, 0f, 0.4f)
+        val b = quadPoint(upQuad, 1f, 0.4f)
+        val c = quadPoint(upQuad, 1f, 0.6f)
+        val d = quadPoint(upQuad, 0f, 0.6f)
+        val path = Path().apply {
+            moveTo(a[0], a[1]); lineTo(b[0], b[1]); lineTo(c[0], c[1]); lineTo(d[0], d[1]); close()
+        }
+        canvas.drawPath(path, tapePaint)
+    }
+
+    /** Two short "slightly mean" eye strokes on whichever face is
+     * currently playing the "front" role. */
+    private fun drawGrumpyEyes(canvas: Canvas, frontQuad: Array<FloatArray>) {
+        drawEyeStroke(canvas, frontQuad, 0.26f, 0.7f, 0.42f, 0.58f)
+        drawEyeStroke(canvas, frontQuad, 0.74f, 0.7f, 0.58f, 0.58f)
+    }
+
+    private fun drawEyeStroke(canvas: Canvas, quad: Array<FloatArray>, uOuter: Float, vTop: Float, uInner: Float, vBottom: Float) {
+        val p1 = quadPoint(quad, uOuter, vTop)
+        val p2 = quadPoint(quad, uInner, vBottom)
+        canvas.drawLine(p1[0], p1[1], p2[0], p2[1], eyePaint)
+    }
+
+    /** A small shipping-label-style mark on the always-visible dark side
+     * face. */
+    private fun drawShippingMark(canvas: Canvas, rightQuad: Array<FloatArray>) {
+        val a = quadPoint(rightQuad, 0.35f, 0.4f)
+        val b = quadPoint(rightQuad, 0.65f, 0.4f)
+        val c = quadPoint(rightQuad, 0.65f, 0.6f)
+        val d = quadPoint(rightQuad, 0.35f, 0.6f)
+        val path = Path().apply {
+            moveTo(a[0], a[1]); lineTo(b[0], b[1]); lineTo(c[0], c[1]); lineTo(d[0], d[1]); close()
+        }
+        canvas.drawPath(path, markPaint)
     }
 }

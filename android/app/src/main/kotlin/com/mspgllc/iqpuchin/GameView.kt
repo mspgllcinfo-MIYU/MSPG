@@ -20,8 +20,11 @@ import com.mspgllc.iqpuchin.board.QubeMotion
 import com.mspgllc.iqpuchin.input.InputActionListener
 import com.mspgllc.iqpuchin.render.BoardRenderer
 import com.mspgllc.iqpuchin.render.IsoProjection
+import com.mspgllc.iqpuchin.render.PlayerRenderer
+import com.mspgllc.iqpuchin.render.PoiHitReaction
 import com.mspgllc.iqpuchin.render.QubeRenderer
 import com.mspgllc.iqpuchin.render.RenderConfig
+import com.mspgllc.iqpuchin.sound.SoundEventPlayer
 import kotlin.math.min
 
 /**
@@ -47,7 +50,15 @@ class GameView @JvmOverloads constructor(
     private val captureSystem = CaptureSystem()
     private val gameStateController = GameStateController()
     private val boardRenderer = BoardRenderer()
+    private val playerRenderer = PlayerRenderer()
     private val qubeRenderer = QubeRenderer()
+
+    // VISUAL-01: Poi's brief HIT flinch and the (currently silent) HIT
+    // SE hook. Both are purely cosmetic/presentational -- neither is
+    // consulted by checkCollision() below, only triggered by it once the
+    // *result* of an unmodified HIT judgement is observed.
+    private val hitReaction = PoiHitReaction()
+    private val soundEventPlayer = SoundEventPlayer()
 
     // STEP 6: every NORMAL QUBE lives in this one collection -- no
     // qube1/qube2/qube3 style variables. Each entry owns its own GridCoord
@@ -88,9 +99,20 @@ class GameView @JvmOverloads constructor(
      * change either side's logical coordinate (a player move, or a QUBE
      * motion tick landing on a new cell), so a HIT is caught the instant
      * it becomes true regardless of which side moved into the other.
+     *
+     * GameStateController.checkCollision (the actual judgement) and its
+     * PLAYING/HIT rule are entirely unmodified. This only *observes* the
+     * result before and after the call to detect the one-time
+     * PLAYING -> HIT edge and fire the cosmetic reaction/SE hook exactly
+     * then -- never on any later frame, since state stays HIT afterward.
      */
     private fun checkCollision() {
+        val wasHit = gameStateController.state == GameState.HIT
         gameStateController.checkCollision(boardLogic.playerPosition, qubes.map { it.qube.coord })
+        if (!wasHit && gameStateController.state == GameState.HIT) {
+            hitReaction.trigger()
+            soundEventPlayer.playHitMeow()
+        }
     }
 
     private var lastFrameTimeNanos = 0L
@@ -100,6 +122,7 @@ class GameView @JvmOverloads constructor(
             lastFrameTimeNanos = frameTimeNanos
 
             for (instance in qubes) instance.motion.update(deltaMs)
+            hitReaction.update(deltaMs)
             checkCollision()
 
             invalidate()
@@ -171,9 +194,16 @@ class GameView @JvmOverloads constructor(
             projection,
             BoardConfig.GRID_WIDTH,
             BoardConfig.GRID_DEPTH,
-            boardLogic.playerPosition,
             markController.markedCoord,
             displayScale
+        )
+
+        playerRenderer.draw(
+            canvas,
+            projection,
+            boardLogic.playerPosition,
+            displayScale,
+            hitReaction.progress()
         )
 
         // Painter's algorithm across QUBEs too: farther-back cells

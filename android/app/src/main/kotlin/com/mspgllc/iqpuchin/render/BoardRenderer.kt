@@ -7,11 +7,10 @@ import android.graphics.Path
 import com.mspgllc.iqpuchin.board.GridCoord
 
 /**
- * Pure presentation: draws the floor tiles and player wherever GameView
- * tells it to. Never touches game state and never decides where things
- * go on screen -- that's GameView's job (see recomputeLayout there).
- * Flat, placeholder shapes only (no polish/effects yet). See
- * QubeRenderer for the QUBE itself.
+ * Pure presentation: draws the floor tiles wherever GameView tells it
+ * to. Never touches game state and never decides where things go on
+ * screen -- that's GameView's job (see recomputeLayout there). See
+ * PlayerRenderer for Poi and QubeRenderer for the QUBEs themselves.
  */
 class BoardRenderer {
 
@@ -61,27 +60,17 @@ class BoardRenderer {
         style = Paint.Style.STROKE
         strokeWidth = 2f
     }
-    private val playerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(255, 214, 51)
-        style = Paint.Style.FILL
-    }
-    private val playerOutline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.BLACK
-        style = Paint.Style.STROKE
-        strokeWidth = 3f
-    }
 
     /**
      * [projection] is built once per frame by GameView and shared with
-     * QubeRenderer, so the floor grid and the QUBE are guaranteed to line
-     * up -- this never builds its own.
+     * PlayerRenderer/QubeRenderer, so the floor grid and everything on
+     * it are guaranteed to line up -- this never builds its own.
      */
     fun draw(
         canvas: Canvas,
         projection: IsoProjection,
         gridWidth: Int,
         gridDepth: Int,
-        playerPosition: GridCoord,
         markedCoord: GridCoord?,
         scale: Float
     ) {
@@ -94,8 +83,6 @@ class BoardRenderer {
                 drawTile(canvas, projection, x.toFloat(), z.toFloat(), axisMajor, axisMinor, marked)
             }
         }
-
-        drawPlayer(canvas, projection, playerPosition, scale)
     }
 
     /**
@@ -130,15 +117,5 @@ class BoardRenderer {
         }
         canvas.drawPath(path, if (marked) markedFloorPaint else floorPaint)
         canvas.drawPath(path, floorOutline)
-    }
-
-    private fun drawPlayer(canvas: Canvas, projection: IsoProjection, position: GridCoord, scale: Float) {
-        val p = projection.toScreen(position.x.toFloat(), position.z.toFloat())
-        val radius = (RenderConfig.PLAYER_SIZE_PX * scale) / 2f
-        // Lifted above the tile plane, purely so it doesn't visually
-        // blend into the floor outline it's standing on.
-        val centerY = p[1] - radius
-        canvas.drawCircle(p[0], centerY, radius, playerPaint)
-        canvas.drawCircle(p[0], centerY, radius, playerOutline)
     }
 }
