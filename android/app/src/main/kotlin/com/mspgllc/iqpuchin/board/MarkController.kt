@@ -15,4 +15,11 @@ class MarkController {
     fun markAt(coord: GridCoord) {
         markedCoord = coord
     }
+
+    /** STEP 7: clears the current mark (used after ACTIVATE runs, so the
+     * next ACTION press starts a fresh MARK instead of re-judging the
+     * same coordinate). */
+    fun clear() {
+        markedCoord = null
+    }
 }

@@ -6,9 +6,11 @@ import com.mspgllc.iqpuchin.board.Direction
 interface InputActionListener {
     fun onMoveRequested(direction: Direction)
 
-    /** Marks the player's current cell (STEP 4: replaces any previous mark). */
-    fun onMarkRequested()
-
-    /** STEP 5: attempts to CAPTURE whatever QUBE is at the MARKed cell. */
-    fun onActivateRequested()
+    /**
+     * STEP 7: the single ACTION button. No mark pending -> marks the
+     * player's current cell. A mark pending -> judges it (ACTIVATE)
+     * against every QUBE's current coord, then clears the mark either
+     * way so the next press starts a fresh MARK.
+     */
+    fun onActionRequested()
 }

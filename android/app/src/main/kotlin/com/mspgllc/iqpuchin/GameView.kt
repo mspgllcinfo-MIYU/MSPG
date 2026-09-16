@@ -56,7 +56,7 @@ class GameView @JvmOverloads constructor(
     // they currently share the same direction and timing constants.
     // Starts with 3 QUBEs across the back row (STEP 6 initial layout).
     // A successful CAPTURE removes exactly the matching entry from this
-    // list (see onActivateRequested) -- Qube.kt/QubeMotion.kt themselves
+    // list (see onActionRequested) -- Qube.kt/QubeMotion.kt themselves
     // are unmodified.
     private val qubes: MutableList<QubeInstance> = createInitialQubes()
 
@@ -197,19 +197,31 @@ class GameView @JvmOverloads constructor(
         }
     }
 
-    override fun onMarkRequested() {
-        markController.markAt(boardLogic.playerPosition)
+    /**
+     * STEP 7: MARK and ACTIVATE stay two separate systems underneath
+     * (MarkController / CaptureSystem, both unmodified in their own
+     * judging logic) -- only the single ACTION button's dispatch is
+     * unified here, based on whether a mark is currently pending.
+     */
+    override fun onActionRequested() {
+        val currentMark = markController.markedCoord
+        if (currentMark == null) {
+            markController.markAt(boardLogic.playerPosition)
+        } else {
+            // Logical grid coordinates are unique per QUBE, so at most
+            // one entry can ever match -- one MARK captures at most one
+            // QUBE.
+            val index = qubes.indexOfFirst { captureSystem.isCaptured(currentMark, it.qube.coord) }
+            if (index >= 0) {
+                qubes.removeAt(index)
+            }
+            markController.clear()
+        }
         invalidate()
     }
 
-    override fun onActivateRequested() {
-        val marked = markController.markedCoord ?: return
-        // Logical grid coordinates are unique per QUBE, so at most one
-        // entry can ever match -- one MARK captures at most one QUBE.
-        val index = qubes.indexOfFirst { captureSystem.isCaptured(marked, it.qube.coord) }
-        if (index >= 0) {
-            qubes.removeAt(index)
-            invalidate()
-        }
-    }
+    /** Read by [com.mspgllc.iqpuchin.input.ActionInputSource] to decide
+     * whether the ACTION button should currently read "MARK" (no mark
+     * pending) or "ACTIVATE" (a mark is pending). */
+    fun isAwaitingMark(): Boolean = markController.markedCoord == null
 }
