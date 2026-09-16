@@ -1,27 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Adaptive Icon foreground: an extreme close-up of Poi's face -- the
+  Adaptive Icon foreground: an extreme close-up of Poi's face; the
   head fills nearly the whole 108x108dp canvas and bleeds past its
   edges/corners on purpose (the "leaning in too close to fit" look),
   rather than a small, safely-centered character portrait. Same
   character design as the in-game PLAYER marker (see PlayerRenderer.kt):
   black-cat head, triangular ears, large gold eyes with black pupils, a
-  small gold crown -- no new design, no body, no collar medal (not
+  small gold crown; no new design, no body, no collar medal (not
   visible in a face-only crop).
 
   Placement is deliberately split by how much clipping each part can
   survive under an Adaptive Icon mask:
-  - Head/ears bleed toward the outer edges and corners -- they are
+  - Head/ears bleed toward the outer edges and corners; they are
     expected to be cropped by round/squircle masks, which is exactly
     the intended "pressed up against the frame" effect.
   - Both eyes (radius 13dp, centered at x=37/71, y=58) sit fully inside
     the 66dp-diameter safe zone centered on the canvas (their outer
-    edges are ~30.5dp from center, under the 33dp safe radius), so they
-    -- the single most important identifying feature -- always survive
+    edges are about 30.5dp from center, under the 33dp safe radius), so
+    they, the single most important identifying feature, always survive
     every mask shape.
-  - The crown's base (y=24, ~30dp from center) is also inside that same
-    safe radius even though its peak tips (y=6) are not, so a mask can
-    trim the crown's points without ever erasing it completely.
+  - The crown's base (y=24, about 30dp from center) is also inside that
+    same safe radius even though its peak tips (y=6) are not, so a mask
+    can trim the crown's points without ever erasing it completely.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Adaptive Icon background: a plain, simple dark fill. No QUBE motifs
-     or other decoration -- the icon's entire subject is Poi's face,
+     or other decoration; the icon's entire subject is Poi's face,
      drawn in the foreground layer, so nothing here should compete with
      it. Tone is close to but distinguishable from Poi's own near-black
      fur (see ic_launcher_foreground), so the face silhouette still
