@@ -18,6 +18,13 @@ private object UiConfig {
     const val DPAD_MARGIN_DP = 16
     const val ACTION_BUTTON_SIZE_DP = 130
     const val ACTION_BUTTON_MARGIN_DP = 16
+
+    /** UI-POSITION: how far below dead-center (vertically) the D-pad and
+     * ACTION button sit, in dp. Both use the same value so their centers
+     * land at the same height on opposite sides of the screen -- roughly
+     * where PLAYER starts (BoardConfig.GRID_DEPTH / 2, i.e. mid-board) to
+     * a bit below it, within peripheral view of the board while playing. */
+    const val UI_VERTICAL_CENTER_OFFSET_DP = 60
 }
 
 class MainActivity : Activity() {
@@ -57,24 +64,31 @@ class MainActivity : Activity() {
             contentDescription = "ACTION"
         }
 
+        // UI-POSITION: both controls moved from the bottom edge to
+        // vertical-center-plus-a-bit-lower, level with each other, so
+        // they sit in peripheral view of the board (around where PLAYER
+        // starts, mid-board) instead of below it. Horizontal placement
+        // (side margins, sizes) is unchanged from before this step.
+        val uiVerticalOffsetPx = UiConfig.UI_VERTICAL_CENTER_OFFSET_DP * density
+
         val root = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
             addView(gameView, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
             addView(
                 dpad,
-                FrameLayout.LayoutParams(dpadSizePx, dpadSizePx, Gravity.BOTTOM or Gravity.START).apply {
+                FrameLayout.LayoutParams(dpadSizePx, dpadSizePx, Gravity.CENTER_VERTICAL or Gravity.START).apply {
                     leftMargin = dpadMarginPx
-                    bottomMargin = dpadMarginPx
                 }
             )
             addView(
                 actionButton,
-                FrameLayout.LayoutParams(actionButtonSizePx, actionButtonSizePx, Gravity.BOTTOM or Gravity.END).apply {
+                FrameLayout.LayoutParams(actionButtonSizePx, actionButtonSizePx, Gravity.CENTER_VERTICAL or Gravity.END).apply {
                     rightMargin = actionButtonMarginPx
-                    bottomMargin = actionButtonMarginPx
                 }
             )
         }
+        dpad.translationY = uiVerticalOffsetPx
+        actionButton.translationY = uiVerticalOffsetPx
 
         DirectionalInputSource(upButton, downButton, leftButton, rightButton).attach(gameView)
         ActionInputSource(actionButton).attach(gameView) { gameView.isAwaitingMark() }
