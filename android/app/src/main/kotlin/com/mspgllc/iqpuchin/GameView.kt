@@ -3,6 +3,7 @@ package com.mspgllc.iqpuchin
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import android.util.AttributeSet
 import android.view.Choreographer
 import android.view.View
@@ -10,6 +11,8 @@ import com.mspgllc.iqpuchin.board.BoardConfig
 import com.mspgllc.iqpuchin.board.BoardLogic
 import com.mspgllc.iqpuchin.board.CaptureSystem
 import com.mspgllc.iqpuchin.board.Direction
+import com.mspgllc.iqpuchin.board.GameState
+import com.mspgllc.iqpuchin.board.GameStateController
 import com.mspgllc.iqpuchin.board.GridCoord
 import com.mspgllc.iqpuchin.board.MarkController
 import com.mspgllc.iqpuchin.board.Qube
@@ -42,6 +45,7 @@ class GameView @JvmOverloads constructor(
     private val boardLogic = BoardLogic()
     private val markController = MarkController()
     private val captureSystem = CaptureSystem()
+    private val gameStateController = GameStateController()
     private val boardRenderer = BoardRenderer()
     private val qubeRenderer = QubeRenderer()
 
@@ -68,6 +72,27 @@ class GameView @JvmOverloads constructor(
     private var originY = 0f
     private var displayScale = 1f
 
+    private val density = resources.displayMetrics.density
+    // STEP 7 placeholder-only "HIT" banner -- not part of any real HUD.
+    private val hitTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.RED
+        textSize = 40f * density
+        textAlign = Paint.Align.CENTER
+        isFakeBoldText = true
+    }
+
+    /**
+     * Judges collision purely from logical GridCoords -- PLAYER's current
+     * cell against every QUBE's current cell -- never anything about how
+     * they're currently animated/drawn. Called after any event that can
+     * change either side's logical coordinate (a player move, or a QUBE
+     * motion tick landing on a new cell), so a HIT is caught the instant
+     * it becomes true regardless of which side moved into the other.
+     */
+    private fun checkCollision() {
+        gameStateController.checkCollision(boardLogic.playerPosition, qubes.map { it.qube.coord })
+    }
+
     private var lastFrameTimeNanos = 0L
     private val frameCallback = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
@@ -75,6 +100,7 @@ class GameView @JvmOverloads constructor(
             lastFrameTimeNanos = frameTimeNanos
 
             for (instance in qubes) instance.motion.update(deltaMs)
+            checkCollision()
 
             invalidate()
             if (isAttachedToWindow) Choreographer.getInstance().postFrameCallback(this)
@@ -156,10 +182,15 @@ class GameView @JvmOverloads constructor(
         for (instance in qubes.sortedBy { it.qube.coord.x + it.qube.coord.z }) {
             qubeRenderer.draw(canvas, instance.qube, instance.motion, projection)
         }
+
+        if (gameStateController.state == GameState.HIT) {
+            canvas.drawText("HIT", width / 2f, 60f * density, hitTextPaint)
+        }
     }
 
     override fun onMoveRequested(direction: Direction) {
         if (boardLogic.movePlayer(direction)) {
+            checkCollision()
             invalidate()
         }
     }
