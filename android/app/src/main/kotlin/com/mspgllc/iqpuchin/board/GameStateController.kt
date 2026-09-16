@@ -12,6 +12,12 @@ package com.mspgllc.iqpuchin.board
  * are explicitly out of scope here -- every hit currently runs this same
  * brief flow and increments the same counter.
  *
+ * CATPUNCH-01: [life] now decrements on that exact same rising edge --
+ * same detection, same one-shot-per-contact guarantee, just one more
+ * side effect of an already-existing edge. When that decrement empties
+ * [life], [state] goes to GAME_OVER instead of the usual brief HIT (see
+ * [update]: GAME_OVER never times back out on its own, unlike HIT).
+ *
  * Judges collision purely from logical GridCoords -- PLAYER's current
  * cell against every QUBE's current cell -- never render/animation
  * position, same discipline as [CaptureSystem] -- and takes a plain list
@@ -29,12 +35,23 @@ class GameStateController {
          * length to) PlayerRenderer/PoiHitReaction's own visual squash/
          * recover timing; see that class for the animation itself. */
         const val HIT_DURATION_MS = 500L
+
+        /** CATPUNCH-01: internal life count PLAYER starts with. The UI
+         * never shows this integer directly (see the churu-count
+         * renderer) -- it exists here purely as the plain 3->0 counter
+         * the spec asks for. */
+        const val STARTING_LIFE = 3
     }
 
     var state: GameState = GameState.PLAYING
         private set
 
     var hitCount: Int = 0
+        private set
+
+    /** CATPUNCH-01: remaining life, [STARTING_LIFE] down to 0. Never goes
+     * negative; reaching 0 is what drives the GAME_OVER transition below. */
+    var life: Int = STARTING_LIFE
         private set
 
     private var hitElapsedMs = 0L
@@ -59,19 +76,22 @@ class GameStateController {
      * without duplicating this edge-detection themselves.
      */
     fun checkCollision(playerPosition: GridCoord, qubeCoords: List<GridCoord>): Boolean {
+        if (state == GameState.GAME_OVER) return false
         val colliding = qubeCoords.any { it == playerPosition }
         val isNewHit = colliding && !inContact
         if (isNewHit) {
             hitCount++
-            state = GameState.HIT
+            life = (life - 1).coerceAtLeast(0)
             hitElapsedMs = 0L
+            state = if (life <= 0) GameState.GAME_OVER else GameState.HIT
         }
         inContact = colliding
         return isNewHit
     }
 
     /** Advances the HIT sub-state's own timer back toward PLAYING; call
-     * once per frame alongside [checkCollision]. No-op while PLAYING. */
+     * once per frame alongside [checkCollision]. No-op while PLAYING or
+     * GAME_OVER -- unlike HIT, GAME_OVER never times back out. */
     fun update(deltaMs: Long) {
         if (state != GameState.HIT) return
         hitElapsedMs += deltaMs

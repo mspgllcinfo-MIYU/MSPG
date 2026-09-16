@@ -16,4 +16,10 @@ object QubeConfig {
      * -- duplicating it would let it drift out of sync with the two
      * values that actually define it. */
     val CYCLE_DURATION_MS: Long get() = ROTATION_DURATION_MS + SETTLE_DURATION_MS
+
+    /** CATPUNCH-01: hits a NORMAL QUBE can take from a cat punch before it
+     * breaks. Lives here (not as a literal in Qube's constructor default)
+     * so it's retunable from the same place as every other QUBE-feel
+     * number, without touching Qube.kt itself. */
+    const val NORMAL_QUBE_DURABILITY = 2
 }

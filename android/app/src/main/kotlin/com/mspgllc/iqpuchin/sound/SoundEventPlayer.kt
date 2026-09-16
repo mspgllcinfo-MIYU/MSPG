@@ -8,10 +8,10 @@ import com.mspgllc.iqpuchin.R
 /**
  * The single place game code reports "this happened" and sound code
  * decides what, if anything, to actually play. SOUND-02: now backed by a
- * real [SoundPool] loaded from res/raw (all six assets are original,
- * procedurally-synthesized SE -- see the SOUND-02 generation script kept
- * alongside the assets' own notes; nothing sampled or reused), but the
- * SOUND-01 funnel contract is unchanged: every caller (GameView,
+ * real [SoundPool] loaded from res/raw (every asset, including
+ * CATPUNCH-01's punch_hit/qube_break, is original, procedurally-
+ * synthesized SE -- nothing sampled or reused), but the SOUND-01 funnel
+ * contract is unchanged: every caller (GameView,
  * [QubeSoundTracker]) only ever names a [SoundEvent] [+ SoundEventContext];
  * which asset(s), at what volume, play for it lives entirely in this one
  * file, so a future mix change (asset swap, volume/pitch/EQ retune,
@@ -49,6 +49,10 @@ class SoundEventPlayer(context: Context) {
         // being the signal that must always read clearly. Inverted here.
         const val VOLUME_POI_HIT_IMPACT = 0.68f
         const val VOLUME_POI_HIT_SQUEAL = 1.0f
+
+        // CATPUNCH-01
+        const val VOLUME_PUNCH_HIT = 0.8f
+        const val VOLUME_QUBE_BREAK = 0.85f
     }
 
     private val appContext = context.applicationContext
@@ -84,6 +88,8 @@ class SoundEventPlayer(context: Context) {
     private val captureSuccessId = load(R.raw.capture_success)
     private val poiHitImpactId = load(R.raw.poi_hit_impact)
     private val poiHitSquealId = load(R.raw.poi_hit_squeal)
+    private val punchHitId = load(R.raw.punch_hit)
+    private val qubeBreakId = load(R.raw.qube_break)
 
     private fun load(resId: Int): Int {
         val id = soundPool.load(appContext, resId, 1)
@@ -100,6 +106,11 @@ class SoundEventPlayer(context: Context) {
             SoundEvent.POI_HIT -> {
                 playSample(poiHitImpactId, VOLUME_POI_HIT_IMPACT)
                 playSample(poiHitSquealId, VOLUME_POI_HIT_SQUEAL)
+            }
+            SoundEvent.PUNCH_HIT -> playSample(punchHitId, VOLUME_PUNCH_HIT)
+            SoundEvent.QUBE_BREAK -> {
+                playSample(punchHitId, VOLUME_PUNCH_HIT)
+                playSample(qubeBreakId, VOLUME_QUBE_BREAK)
             }
         }
     }

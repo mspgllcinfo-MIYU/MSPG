@@ -19,6 +19,7 @@ import com.mspgllc.iqpuchin.board.Qube
 import com.mspgllc.iqpuchin.board.QubeMotion
 import com.mspgllc.iqpuchin.input.InputActionListener
 import com.mspgllc.iqpuchin.render.BoardRenderer
+import com.mspgllc.iqpuchin.render.ChuruLifeRenderer
 import com.mspgllc.iqpuchin.render.IsoProjection
 import com.mspgllc.iqpuchin.render.PlayerRenderer
 import com.mspgllc.iqpuchin.render.PoiHitReaction
@@ -64,6 +65,9 @@ class GameView @JvmOverloads constructor(
     // CAPTURE, a QUBE's own roll/land) is observed.
     private val hitReaction = PoiHitReaction()
     private val soundEventPlayer = SoundEventPlayer(context)
+    // CATPUNCH-01: purely cosmetic, like hitReaction above -- reads
+    // gameStateController.life each frame, never written back to it.
+    private val churuRenderer = ChuruLifeRenderer()
 
     // STEP 6: every NORMAL QUBE lives in this one collection -- no
     // qube1/qube2/qube3 style variables. Each entry owns its own GridCoord
@@ -98,6 +102,17 @@ class GameView @JvmOverloads constructor(
         isFakeBoldText = true
     }
 
+    // CATPUNCH-01: GAME_OVER is a full, non-reverting overlay -- unlike
+    // the "HIT x{n}" debug text above, which is a brief informational
+    // banner that never blocks anything.
+    private val gameOverDimPaint = Paint().apply { color = Color.argb(170, 0, 0, 0) }
+    private val gameOverTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = 56f * density
+        textAlign = Paint.Align.CENTER
+        isFakeBoldText = true
+    }
+
     /**
      * Judges collision purely from logical GridCoords -- PLAYER's current
      * cell against every QUBE's current cell -- never anything about how
@@ -126,13 +141,19 @@ class GameView @JvmOverloads constructor(
             val deltaMs = if (lastFrameTimeNanos == 0L) 0L else (frameTimeNanos - lastFrameTimeNanos) / 1_000_000L
             lastFrameTimeNanos = frameTimeNanos
 
-            for (instance in qubes) {
-                instance.motion.update(deltaMs)
-                instance.soundTracker.update(soundEventPlayer, boardLogic.playerPosition)
+            // CATPUNCH-01: GAME_OVER freezes the board (QUBE motion, SE
+            // tracking, collision checks) instead of continuing to play
+            // out underneath the overlay. Nothing else in this block's
+            // own timing/order changed.
+            if (gameStateController.state != GameState.GAME_OVER) {
+                for (instance in qubes) {
+                    instance.motion.update(deltaMs)
+                    instance.soundTracker.update(soundEventPlayer, boardLogic.playerPosition)
+                }
+                hitReaction.update(deltaMs)
+                gameStateController.update(deltaMs)
+                checkCollision()
             }
-            hitReaction.update(deltaMs)
-            gameStateController.update(deltaMs)
-            checkCollision()
 
             invalidate()
             if (isAttachedToWindow) Choreographer.getInstance().postFrameCallback(this)
@@ -221,7 +242,8 @@ class GameView @JvmOverloads constructor(
             projection,
             boardLogic.playerPosition,
             displayScale,
-            hitReaction.progress()
+            hitReaction.progress(),
+            angerLevel()
         )
 
         // Painter's algorithm across QUBEs too: farther-back cells
@@ -236,9 +258,34 @@ class GameView @JvmOverloads constructor(
         if (gameStateController.state == GameState.HIT) {
             canvas.drawText("HIT x${gameStateController.hitCount}", width / 2f, 60f * density, hitTextPaint)
         }
+
+        // CATPUNCH-01: life shown as churu count, not a heart/number HUD.
+        churuRenderer.draw(
+            canvas,
+            gameStateController.life,
+            GameStateController.STARTING_LIFE,
+            16f * density,
+            40f * density,
+            40f * density
+        )
+
+        if (gameStateController.state == GameState.GAME_OVER) {
+            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), gameOverDimPaint)
+            canvas.drawText("GAME OVER", width / 2f, height / 2f, gameOverTextPaint)
+        }
+    }
+
+    /** CATPUNCH-01: 0 (life 3) / 1 (life 2) / 2 (life 1-0) -- cosmetic
+     * only, read by PlayerRenderer to swap Azusan's expression. Never
+     * consulted by anything gameplay-affecting. */
+    private fun angerLevel(): Int = when {
+        gameStateController.life <= 1 -> 2
+        gameStateController.life == 2 -> 1
+        else -> 0
     }
 
     override fun onMoveRequested(direction: Direction) {
+        if (gameStateController.state == GameState.GAME_OVER) return
         if (boardLogic.movePlayer(direction)) {
             checkCollision()
             invalidate()
@@ -250,13 +297,20 @@ class GameView @JvmOverloads constructor(
      * (MarkController / CaptureSystem, both unmodified in their own
      * judging logic) -- only the single ACTION button's dispatch is
      * unified here, based on whether a mark is currently pending.
+     *
+     * CATPUNCH-01: adds a third branch, but the priority order the user
+     * asked for is preserved exactly -- a pending MARK always resolves
+     * as ACTIVATE first (unchanged from before), and only when no MARK
+     * is pending does a QUBE within punch range pre-empt placing a new
+     * MARK. No new button/gesture: this is still the single existing
+     * ACTION press, one punch per press -- a 2-hit combo is just two
+     * separate presses while still in range, never anything automatic
+     * from Virtual Stick movement.
      */
     override fun onActionRequested() {
+        if (gameStateController.state == GameState.GAME_OVER) return
         val currentMark = markController.markedCoord
-        if (currentMark == null) {
-            markController.markAt(boardLogic.playerPosition)
-            soundEventPlayer.play(SoundEvent.MARK_SET)
-        } else {
+        if (currentMark != null) {
             // Logical grid coordinates are unique per QUBE, so at most
             // one entry can ever match -- one MARK captures at most one
             // QUBE.
@@ -266,8 +320,39 @@ class GameView @JvmOverloads constructor(
                 soundEventPlayer.play(SoundEvent.CAPTURE_SUCCESS)
             }
             markController.clear()
+        } else {
+            val punchIndex = qubes.indexOfFirst { isPunchRange(boardLogic.playerPosition, it.qube.coord) }
+            if (punchIndex >= 0) {
+                performPunch(punchIndex)
+            } else {
+                markController.markAt(boardLogic.playerPosition)
+                soundEventPlayer.play(SoundEvent.MARK_SET)
+            }
         }
         invalidate()
+    }
+
+    /** CATPUNCH-01: orthogonally adjacent (one cell north/south/east/west,
+     * never diagonal or the same cell) -- deliberately not read from
+     * anywhere else, so it can never change collision/HIT semantics. */
+    private fun isPunchRange(a: GridCoord, b: GridCoord): Boolean {
+        val dx = kotlin.math.abs(a.x - b.x)
+        val dz = kotlin.math.abs(a.z - b.z)
+        return (dx == 1 && dz == 0) || (dx == 0 && dz == 1)
+    }
+
+    /** Applies exactly one punch to the QUBE at [index]. Never touches
+     * QubeMotion, so the QUBE keeps advancing on its own schedule
+     * whether this punch breaks it, dents it, or the player walks away
+     * -- there is no stall and no invented safe window either way. */
+    private fun performPunch(index: Int) {
+        val destroyed = qubes[index].qube.punch()
+        if (destroyed) {
+            qubes.removeAt(index)
+            soundEventPlayer.play(SoundEvent.QUBE_BREAK)
+        } else {
+            soundEventPlayer.play(SoundEvent.PUNCH_HIT)
+        }
     }
 
     /** Read by [com.mspgllc.iqpuchin.input.ActionInputSource] to decide

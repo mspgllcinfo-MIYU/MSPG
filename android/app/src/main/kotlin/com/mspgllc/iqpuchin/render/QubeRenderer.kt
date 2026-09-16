@@ -5,6 +5,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import com.mspgllc.iqpuchin.board.Qube
+import com.mspgllc.iqpuchin.board.QubeConfig
 import com.mspgllc.iqpuchin.board.QubeMotion
 import kotlin.math.cos
 import kotlin.math.sin
@@ -71,6 +72,20 @@ class QubeRenderer {
         color = Color.rgb(92, 68, 42)
         style = Paint.Style.STROKE
         strokeWidth = 2f
+    }
+
+    // CATPUNCH-01: a caved-in patch drawn on a punched-but-not-yet-broken
+    // QUBE's front face (see drawDent). Darker than midPaint so it reads
+    // as a shadowed dent, not a decal.
+    private val dentFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(96, 70, 44)
+        style = Paint.Style.FILL
+    }
+    private val dentCrackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(48, 32, 18)
+        style = Paint.Style.STROKE
+        strokeWidth = 2.5f
+        strokeCap = Paint.Cap.ROUND
     }
 
     /** Cosine-based ease-in-out: slow start, fast middle, slow finish. */
@@ -158,6 +173,15 @@ class QubeRenderer {
         drawTapeBand(canvas, upQuad)
         drawGrumpyEyes(canvas, frontQuad)
         drawShippingMark(canvas, rightQuad)
+
+        // CATPUNCH-01: a first cat punch dents but doesn't destroy --
+        // durability sits strictly between 0 (destroyed, removed from
+        // play before it ever reaches this draw call) and its starting
+        // value. Drawn last, on the front face, so it's readable from
+        // roughly the same angle the player punched from.
+        if (qube.durability in 1 until QubeConfig.NORMAL_QUBE_DURABILITY) {
+            drawDent(canvas, frontQuad)
+        }
     }
 
     private fun drawFace(canvas: Canvas, paint: Paint, pts: Array<FloatArray>) {
@@ -222,5 +246,26 @@ class QubeRenderer {
             moveTo(a[0], a[1]); lineTo(b[0], b[1]); lineTo(c[0], c[1]); lineTo(d[0], d[1]); close()
         }
         canvas.drawPath(path, markPaint)
+    }
+
+    /** A caved-in patch plus a couple of crack lines on the front face --
+     * "ベコッ": the box survived a punch but visibly took the hit. Placed
+     * off-center (not over the grumpy eyes) via the same [quadPoint]
+     * glue-to-face mechanism every other decoration here uses. */
+    private fun drawDent(canvas: Canvas, frontQuad: Array<FloatArray>) {
+        val center = quadPoint(frontQuad, 0.5f, 0.32f)
+        val a = quadPoint(frontQuad, 0.32f, 0.20f)
+        val b = quadPoint(frontQuad, 0.68f, 0.20f)
+        val c = quadPoint(frontQuad, 0.62f, 0.44f)
+        val d = quadPoint(frontQuad, 0.38f, 0.44f)
+        val path = Path().apply {
+            moveTo(a[0], a[1]); lineTo(b[0], b[1]); lineTo(c[0], c[1]); lineTo(d[0], d[1]); close()
+        }
+        canvas.drawPath(path, dentFillPaint)
+
+        val crack1 = quadPoint(frontQuad, 0.44f, 0.10f)
+        val crack2 = quadPoint(frontQuad, 0.56f, 0.48f)
+        canvas.drawLine(crack1[0], crack1[1], center[0], center[1], dentCrackPaint)
+        canvas.drawLine(center[0], center[1], crack2[0], crack2[1], dentCrackPaint)
     }
 }

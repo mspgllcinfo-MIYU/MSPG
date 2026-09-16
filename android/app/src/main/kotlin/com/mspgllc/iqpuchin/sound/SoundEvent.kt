@@ -24,6 +24,18 @@ enum class SoundEvent {
     CAPTURE_SUCCESS,
 
     /** PLAYER's contact with a QUBE just began (HIT-01's hitCount just
-     * rose) -- never fires again while that same contact continues. */
-    POI_HIT
+     * rose) -- never fires again while that same contact continues.
+     * CATPUNCH-01: this is also PLAYER's "crushed" event now that
+     * collisions cost a life -- unchanged asset/meaning, just a second
+     * consequence riding the same edge (see GameStateController.life). */
+    POI_HIT,
+
+    /** CATPUNCH-01: a cat punch landed on a QUBE that survived it
+     * (durability dropped but didn't reach 0). Fires once per punch. */
+    PUNCH_HIT,
+
+    /** CATPUNCH-01: a cat punch just destroyed a QUBE (durability reached
+     * 0). Fires once, instead of [PUNCH_HIT], for the punch that breaks
+     * it. */
+    QUBE_BREAK
 }
