@@ -6,12 +6,12 @@ package com.mspgllc.iqpuchin.board
  */
 object QubeConfig {
     /** Time to topple 90 degrees onto the next cell. */
-    const val ROTATION_DURATION_MS = 350L
+    const val ROTATION_DURATION_MS = 600L
 
     /** Time the QUBE sits fully settled on a cell before the next topple starts. */
-    const val SETTLE_DURATION_MS = 250L
+    const val SETTLE_DURATION_MS = 400L
 
-    /** Derived: total time to advance one cell (rotation + settle, ~600ms
+    /** Derived: total time to advance one cell (rotation + settle, ~1000ms
      * at the defaults above). Deliberately not its own independent field
      * -- duplicating it would let it drift out of sync with the two
      * values that actually define it. */
