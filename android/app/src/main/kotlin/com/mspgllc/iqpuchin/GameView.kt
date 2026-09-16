@@ -8,6 +8,7 @@ import android.view.Choreographer
 import android.view.View
 import com.mspgllc.iqpuchin.board.BoardConfig
 import com.mspgllc.iqpuchin.board.BoardLogic
+import com.mspgllc.iqpuchin.board.CaptureSystem
 import com.mspgllc.iqpuchin.board.Direction
 import com.mspgllc.iqpuchin.board.GridCoord
 import com.mspgllc.iqpuchin.board.MarkController
@@ -34,17 +35,20 @@ class GameView @JvmOverloads constructor(
 
     private val boardLogic = BoardLogic()
     private val markController = MarkController()
+    private val captureSystem = CaptureSystem()
     private val boardRenderer = BoardRenderer()
     private val qubeRenderer = QubeRenderer()
 
     // The one NORMAL QUBE for STEP 3: enters from the far (back) edge in
     // the center column and advances toward the player. STEP 3 does not
     // yet handle a QUBE reaching the player's cell -- see BoardLogic.
-    private val qube = Qube(
+    // STEP 5: nullable so a successful CAPTURE can remove it from game
+    // state entirely (Qube/QubeMotion themselves are unmodified).
+    private var qube: Qube? = Qube(
         startCoord = GridCoord(BoardConfig.GRID_WIDTH / 2, 0),
         direction = Direction.SOUTH
     )
-    private val qubeMotion = QubeMotion(qube)
+    private var qubeMotion: QubeMotion? = qube?.let { QubeMotion(it) }
 
     private var originX = 0f
     private var originY = 0f
@@ -56,7 +60,7 @@ class GameView @JvmOverloads constructor(
             val deltaMs = if (lastFrameTimeNanos == 0L) 0L else (frameTimeNanos - lastFrameTimeNanos) / 1_000_000L
             lastFrameTimeNanos = frameTimeNanos
 
-            qubeMotion.update(deltaMs)
+            qubeMotion?.update(deltaMs)
 
             invalidate()
             if (isAttachedToWindow) Choreographer.getInstance().postFrameCallback(this)
@@ -132,7 +136,11 @@ class GameView @JvmOverloads constructor(
             displayScale
         )
 
-        qubeRenderer.draw(canvas, qube, qubeMotion, projection)
+        val currentQube = qube
+        val currentMotion = qubeMotion
+        if (currentQube != null && currentMotion != null) {
+            qubeRenderer.draw(canvas, currentQube, currentMotion, projection)
+        }
     }
 
     override fun onMoveRequested(direction: Direction) {
@@ -144,5 +152,14 @@ class GameView @JvmOverloads constructor(
     override fun onMarkRequested() {
         markController.markAt(boardLogic.playerPosition)
         invalidate()
+    }
+
+    override fun onActivateRequested() {
+        val currentQube = qube ?: return
+        if (captureSystem.isCaptured(markController.markedCoord, currentQube.coord)) {
+            qube = null
+            qubeMotion = null
+            invalidate()
+        }
     }
 }

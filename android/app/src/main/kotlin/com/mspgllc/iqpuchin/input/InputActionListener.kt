@@ -8,4 +8,7 @@ interface InputActionListener {
 
     /** Marks the player's current cell (STEP 4: replaces any previous mark). */
     fun onMarkRequested()
+
+    /** STEP 5: attempts to CAPTURE whatever QUBE is at the MARKed cell. */
+    fun onActivateRequested()
 }

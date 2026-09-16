@@ -6,19 +6,21 @@ import android.os.Bundle
 import android.view.Gravity
 import android.widget.Button
 import android.widget.FrameLayout
+import com.mspgllc.iqpuchin.input.ActivateInputSource
 import com.mspgllc.iqpuchin.input.DirectionalInputSource
 import com.mspgllc.iqpuchin.input.MarkInputSource
 
-/** Button sizing for the placeholder D-pad and MARK button, in dp so it
- * reads the same physical size across Galaxy devices at different
- * densities. Adjustable independently of anything in render/RenderConfig,
- * which only concerns the board itself. */
+/** Button sizing for the placeholder D-pad and MARK/ACTIVATE buttons, in
+ * dp so it reads the same physical size across Galaxy devices at
+ * different densities. Adjustable independently of anything in
+ * render/RenderConfig, which only concerns the board itself. */
 private object UiConfig {
     const val BUTTON_SIZE_DP = 64
     const val DPAD_MARGIN_DP = 16
-    const val MARK_BUTTON_WIDTH_DP = 120
-    const val MARK_BUTTON_HEIGHT_DP = 64
-    const val MARK_BUTTON_MARGIN_DP = 16
+    const val ACTION_BUTTON_WIDTH_DP = 120
+    const val ACTION_BUTTON_HEIGHT_DP = 64
+    const val ACTION_BUTTON_MARGIN_DP = 16
+    const val ACTION_BUTTON_GAP_DP = 12
 }
 
 class MainActivity : Activity() {
@@ -45,14 +47,25 @@ class MainActivity : Activity() {
             addView(rightButton, FrameLayout.LayoutParams(buttonSizePx, buttonSizePx, Gravity.CENTER_VERTICAL or Gravity.END))
         }
 
-        val markButtonWidthPx = (UiConfig.MARK_BUTTON_WIDTH_DP * density).toInt()
-        val markButtonHeightPx = (UiConfig.MARK_BUTTON_HEIGHT_DP * density).toInt()
-        val markButtonMarginPx = (UiConfig.MARK_BUTTON_MARGIN_DP * density).toInt()
+        val actionButtonWidthPx = (UiConfig.ACTION_BUTTON_WIDTH_DP * density).toInt()
+        val actionButtonHeightPx = (UiConfig.ACTION_BUTTON_HEIGHT_DP * density).toInt()
+        val actionButtonMarginPx = (UiConfig.ACTION_BUTTON_MARGIN_DP * density).toInt()
+        val actionButtonGapPx = (UiConfig.ACTION_BUTTON_GAP_DP * density).toInt()
         val markButton = Button(this).apply {
             text = "MARK"
             setTextColor(Color.WHITE)
             setBackgroundColor(Color.rgb(140, 110, 20))
             contentDescription = "MARK"
+        }
+        // Distinct color/button from MARK -- STEP 5 requires ACTIVATE to
+        // be functionally and visually separate. Stacked directly above
+        // MARK (same bottom-right corner) so both stay reachable with one
+        // thumb without overlapping.
+        val activateButton = Button(this).apply {
+            text = "ACTIVATE"
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.rgb(150, 40, 40))
+            contentDescription = "ACTIVATE"
         }
 
         val root = FrameLayout(this).apply {
@@ -67,15 +80,23 @@ class MainActivity : Activity() {
             )
             addView(
                 markButton,
-                FrameLayout.LayoutParams(markButtonWidthPx, markButtonHeightPx, Gravity.BOTTOM or Gravity.END).apply {
-                    rightMargin = markButtonMarginPx
-                    bottomMargin = markButtonMarginPx
+                FrameLayout.LayoutParams(actionButtonWidthPx, actionButtonHeightPx, Gravity.BOTTOM or Gravity.END).apply {
+                    rightMargin = actionButtonMarginPx
+                    bottomMargin = actionButtonMarginPx + actionButtonHeightPx + actionButtonGapPx
+                }
+            )
+            addView(
+                activateButton,
+                FrameLayout.LayoutParams(actionButtonWidthPx, actionButtonHeightPx, Gravity.BOTTOM or Gravity.END).apply {
+                    rightMargin = actionButtonMarginPx
+                    bottomMargin = actionButtonMarginPx
                 }
             )
         }
 
         DirectionalInputSource(upButton, downButton, leftButton, rightButton).attach(gameView)
         MarkInputSource(markButton).attach(gameView)
+        ActivateInputSource(activateButton).attach(gameView)
 
         setContentView(root)
     }
