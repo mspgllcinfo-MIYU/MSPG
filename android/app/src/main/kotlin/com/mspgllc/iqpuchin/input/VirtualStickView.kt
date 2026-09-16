@@ -69,24 +69,27 @@ class VirtualStickView @JvmOverloads constructor(
         this.listener = listener
     }
 
+    // UI-CUTE-01: POI-themed repaint (black+gold ring, paw-shaped knob) --
+    // purely cosmetic, drawn below in onDraw; none of the deadzone/lock/
+    // direction fields or touch handling in this file changed.
     private val basePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(90, 255, 255, 255)
+        color = Color.argb(110, 0, 0, 0)
         style = Paint.Style.FILL
     }
     private val baseOutline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(170, 255, 255, 255)
+        color = Color.rgb(255, 205, 60)
         style = Paint.Style.STROKE
-        strokeWidth = 3f
+        strokeWidth = 5f
     }
 
-    /** Knob color while centered/within the deadzone (not currently
-     * resolving to any direction). */
+    /** Knob (paw) color while centered/within the deadzone (not
+     * currently resolving to any direction). */
     private val knobIdlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.rgb(140, 110, 20)
         style = Paint.Style.FILL
     }
 
-    /** Knob color while actively resolving a direction, past the
+    /** Knob (paw) color while actively resolving a direction, past the
      * deadzone -- a clearly brighter color so which way is currently
      * being pushed reads at a glance even with a finger over it. */
     private val knobActivePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -94,7 +97,7 @@ class VirtualStickView @JvmOverloads constructor(
         style = Paint.Style.FILL
     }
     private val knobOutline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.BLACK
+        color = Color.rgb(40, 30, 10)
         style = Paint.Style.STROKE
         strokeWidth = 3f
     }
@@ -125,9 +128,15 @@ class VirtualStickView @JvmOverloads constructor(
         canvas.drawCircle(cx, cy, baseRadius, baseOutline)
 
         val knobRadius = baseRadius * 0.4f
-        val knobPaint = if (knobActive) knobActivePaint else knobIdlePaint
-        canvas.drawCircle(cx + knobOffsetX, cy + knobOffsetY, knobRadius, knobPaint)
-        canvas.drawCircle(cx + knobOffsetX, cy + knobOffsetY, knobRadius, knobOutline)
+        val knobFill = if (knobActive) knobActivePaint else knobIdlePaint
+        val knobCx = cx + knobOffsetX
+        val knobCy = cy + knobOffsetY
+        // A slightly "pressed" paw while actively pushed past the deadzone.
+        val knobScale = if (knobActive) 0.92f else 1f
+        canvas.save()
+        canvas.scale(knobScale, knobScale, knobCx, knobCy)
+        PawShape.draw(canvas, knobCx, knobCy, knobRadius, knobFill, knobOutline)
+        canvas.restore()
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {

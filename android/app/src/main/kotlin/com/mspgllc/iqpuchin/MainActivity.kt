@@ -4,9 +4,9 @@ import android.app.Activity
 import android.graphics.Color
 import android.os.Bundle
 import android.view.Gravity
-import android.widget.Button
 import android.widget.FrameLayout
 import com.mspgllc.iqpuchin.input.ActionInputSource
+import com.mspgllc.iqpuchin.input.PawActionButtonView
 import com.mspgllc.iqpuchin.input.VirtualStickView
 
 /** Sizing for the virtual stick and the single ACTION button, in dp so
@@ -48,16 +48,12 @@ class MainActivity : Activity() {
 
         val actionButtonSizePx = (UiConfig.ACTION_BUTTON_SIZE_DP * density).toInt()
         val actionButtonMarginPx = (UiConfig.ACTION_BUTTON_MARGIN_DP * density).toInt()
-        // STEP 7: MARK and ACTIVATE share this one button now -- its
-        // label toggles between the two (see ActionInputSource) so the
-        // pending action stays visible during testing. Starts on "MARK"
-        // since no mark is pending at launch.
-        val actionButton = Button(this).apply {
-            text = "MARK"
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.rgb(140, 110, 20))
-            contentDescription = "ACTION"
-        }
+        // STEP 7: MARK and ACTIVATE share this one button; UI-CUTE-01
+        // replaced the old rectangular label Button with a paw-shaped
+        // PawActionButtonView -- same position/size/touch area, same
+        // MARK->ACTIVATE->clear logic below, just a gold paw (glowing
+        // once a MARK is pending) instead of text (see ActionInputSource).
+        val actionButton = PawActionButtonView(this)
 
         // UI-POSITION: both controls sit at vertical-center-plus-a-bit-
         // lower, level with each other, so they sit in peripheral view of
