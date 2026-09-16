@@ -182,12 +182,21 @@ class GameView @JvmOverloads constructor(
         super.onDraw(canvas)
         canvas.drawColor(Color.BLACK)
 
-        // One projection per frame, shared by both renderers, so the
-        // floor grid and the QUBE are always perfectly aligned.
+        // Same axisMajor/axisMinor/origin for every renderer this frame,
+        // so the floor grid, Poi, and every QUBE are always perfectly
+        // aligned to the same cells. Floor tiles and the player marker
+        // never pass a worldHeight, so `projection`'s own height value is
+        // irrelevant to them; QUBEs get a second instance built with
+        // RenderConfig.QUBE_VISUAL_HEIGHT_SCALE_PX (a cosmetic-only,
+        // *shorter* height than the true QUBE_HEIGHT_SCALE_PX -- see that
+        // constant's doc) purely so a QUBE reads as a cube rather than an
+        // elongated slab under this camera, without touching the shared
+        // axis geometry (board footprint / floor tile size) at all.
         val axisMajor = RenderConfig.BOARD_AXIS_MAJOR_PX * displayScale
         val axisMinor = RenderConfig.BOARD_AXIS_MINOR_PX * displayScale
-        val heightScale = RenderConfig.QUBE_HEIGHT_SCALE_PX * displayScale
-        val projection = IsoProjection(axisMajor, axisMinor, originX, originY, heightScale)
+        val projection = IsoProjection(axisMajor, axisMinor, originX, originY)
+        val qubeHeightScale = RenderConfig.QUBE_VISUAL_HEIGHT_SCALE_PX * displayScale
+        val qubeProjection = IsoProjection(axisMajor, axisMinor, originX, originY, qubeHeightScale)
 
         boardRenderer.draw(
             canvas,
@@ -212,7 +221,7 @@ class GameView @JvmOverloads constructor(
         // depth-ordering key -- same ordering principle QubeRenderer
         // already applies to a single QUBE's own faces.
         for (instance in qubes.sortedBy { it.qube.coord.z }) {
-            qubeRenderer.draw(canvas, instance.qube, instance.motion, projection)
+            qubeRenderer.draw(canvas, instance.qube, instance.motion, qubeProjection)
         }
 
         if (gameStateController.state == GameState.HIT) {

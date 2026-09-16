@@ -70,6 +70,35 @@ object RenderConfig {
         }
 
     /**
+     * The height scale actually used when *drawing* a QUBE (GameView
+     * feeds this, not [QUBE_HEIGHT_SCALE_PX], into the height argument of
+     * the [IsoProjection] instance it hands to QubeRenderer -- floor
+     * tiles and the player marker never pass a worldHeight, so nothing
+     * else is affected by this).
+     *
+     * Deliberately smaller than the true [QUBE_HEIGHT_SCALE_PX], which
+     * stays exactly as derived above and is still what
+     * BoardRenderer.boardBounds uses for clearance. Under the current
+     * near-vertical camera (BOARD_AXIS_MINOR_PX small relative to
+     * BOARD_AXIS_MAJOR_PX), a QUBE drawn at its true height reads as
+     * visibly elongated: its always-thin dark side face (width fixed at
+     * BOARD_AXIS_MINOR_PX, since gridZ barely moves screen X under this
+     * camera) has a screen *height* of BOARD_AXIS_MAJOR_PX + trueHeight
+     * -- the board-depth span alone already contributes
+     * BOARD_AXIS_MAJOR_PX to that, regardless of the height chosen -- so
+     * that face towers over the top/front faces no matter what. The top
+     * face's own shape depends only on the X/Z axes, never on height, so
+     * it stays exactly as square as before at any value here; verified
+     * numerically that this fraction meaningfully shortens the overall
+     * silhouette (and the side face's spike) while keeping the front
+     * face -- the one carrying the QUBE's face decoration -- still
+     * clearly readable as its own face, not flattened to a sliver.
+     */
+    const val QUBE_VISUAL_HEIGHT_FRACTION = 0.6f
+    val QUBE_VISUAL_HEIGHT_SCALE_PX: Float
+        get() = QUBE_HEIGHT_SCALE_PX * QUBE_VISUAL_HEIGHT_FRACTION
+
+    /**
      * Cosmetic-only shrink applied to the QUBE after its rotation is
      * computed (see QubeRenderer). The rotation itself always pivots the
      * QUBE as if it exactly filled one cell -- that's what keeps every
