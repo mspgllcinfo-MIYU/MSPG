@@ -56,14 +56,14 @@ class GameView @JvmOverloads constructor(
     private val playerRenderer = PlayerRenderer()
     private val qubeRenderer = QubeRenderer()
 
-    // VISUAL-01/SOUND-01: Poi's brief HIT flinch and the shared SE
-    // funnel (currently silent -- no audio assets yet, see
+    // VISUAL-01/SOUND-01/SOUND-02: Poi's brief HIT flinch and the shared
+    // SE funnel (SOUND-02: now backed by real SoundPool playback, see
     // SoundEventPlayer). Both are purely cosmetic/presentational --
     // neither is consulted by any game-logic check below, only
     // triggered once a logic result (a new HIT, a MARK placed, a
     // CAPTURE, a QUBE's own roll/land) is observed.
     private val hitReaction = PoiHitReaction()
-    private val soundEventPlayer = SoundEventPlayer()
+    private val soundEventPlayer = SoundEventPlayer(context)
 
     // STEP 6: every NORMAL QUBE lives in this one collection -- no
     // qube1/qube2/qube3 style variables. Each entry owns its own GridCoord
