@@ -100,16 +100,15 @@ class GameView @JvmOverloads constructor(
      * motion tick landing on a new cell), so a HIT is caught the instant
      * it becomes true regardless of which side moved into the other.
      *
-     * GameStateController.checkCollision (the actual judgement) and its
-     * PLAYING/HIT rule are entirely unmodified. This only *observes* the
-     * result before and after the call to detect the one-time
-     * PLAYING -> HIT edge and fire the cosmetic reaction/SE hook exactly
-     * then -- never on any later frame, since state stays HIT afterward.
+     * GameStateController.checkCollision now does its own new-hit edge
+     * detection internally (see its inContact tracking) and reports the
+     * result directly, so this just forwards that Boolean into the
+     * cosmetic reaction/SE hook -- neither of which ever feeds back into
+     * the judgement itself.
      */
     private fun checkCollision() {
-        val wasHit = gameStateController.state == GameState.HIT
-        gameStateController.checkCollision(boardLogic.playerPosition, qubes.map { it.qube.coord })
-        if (!wasHit && gameStateController.state == GameState.HIT) {
+        val isNewHit = gameStateController.checkCollision(boardLogic.playerPosition, qubes.map { it.qube.coord })
+        if (isNewHit) {
             hitReaction.trigger()
             soundEventPlayer.playHitMeow()
         }
@@ -123,6 +122,7 @@ class GameView @JvmOverloads constructor(
 
             for (instance in qubes) instance.motion.update(deltaMs)
             hitReaction.update(deltaMs)
+            gameStateController.update(deltaMs)
             checkCollision()
 
             invalidate()
@@ -225,7 +225,7 @@ class GameView @JvmOverloads constructor(
         }
 
         if (gameStateController.state == GameState.HIT) {
-            canvas.drawText("HIT", width / 2f, 60f * density, hitTextPaint)
+            canvas.drawText("HIT x${gameStateController.hitCount}", width / 2f, 60f * density, hitTextPaint)
         }
     }
 

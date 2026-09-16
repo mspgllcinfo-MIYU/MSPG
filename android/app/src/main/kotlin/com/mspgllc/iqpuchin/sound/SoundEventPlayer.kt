@@ -10,8 +10,11 @@ package com.mspgllc.iqpuchin.sound
  */
 class SoundEventPlayer {
     /**
-     * Fires exactly once, the instant PLAYER collides with a QUBE
-     * (PLAYING -> HIT) -- never again while already HIT. See
+     * Fires once per new collision -- the instant PLAYER's contact with
+     * a QUBE begins, never repeatedly while that contact continues (see
+     * GameStateController.checkCollision's inContact tracking). HIT-01:
+     * collisions no longer end the game, so this can fire again on a
+     * later, separate hit -- just never more than once per contact. See
      * GameView.checkCollision for the single call site.
      */
     fun playHitMeow() {
