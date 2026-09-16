@@ -22,16 +22,22 @@ import com.mspgllc.iqpuchin.render.RenderConfig
 import kotlin.math.min
 
 /**
- * Owns the board's logical state (player + the one QUBE) and draws it.
- * Player movement stays purely event-driven (see [onMoveRequested]) with
- * zero added delay, but the QUBE's toppling is time-based, so this now
- * also runs a per-frame [Choreographer] loop that advances
- * [qubeMotion] and redraws every frame regardless of input.
+ * Owns the board's logical state (player + every NORMAL QUBE) and draws
+ * it. Player movement stays purely event-driven (see [onMoveRequested])
+ * with zero added delay, but each QUBE's toppling is time-based, so this
+ * also runs a per-frame [Choreographer] loop that advances every QUBE's
+ * motion and redraws every frame regardless of input.
  */
 class GameView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null
 ) : View(context, attrs), InputActionListener {
+
+    /** Pairs a [Qube] with the [QubeMotion] that advances it. QubeMotion
+     * keeps its own Qube reference private, so GameView needs to hold
+     * both together to hand each QUBE to the renderer -- this is a plain
+     * data holder for a list element, not a per-QUBE variable. */
+    private data class QubeInstance(val qube: Qube, val motion: QubeMotion)
 
     private val boardLogic = BoardLogic()
     private val markController = MarkController()
@@ -39,16 +45,24 @@ class GameView @JvmOverloads constructor(
     private val boardRenderer = BoardRenderer()
     private val qubeRenderer = QubeRenderer()
 
-    // The one NORMAL QUBE for STEP 3: enters from the far (back) edge in
-    // the center column and advances toward the player. STEP 3 does not
-    // yet handle a QUBE reaching the player's cell -- see BoardLogic.
-    // STEP 5: nullable so a successful CAPTURE can remove it from game
-    // state entirely (Qube/QubeMotion themselves are unmodified).
-    private var qube: Qube? = Qube(
-        startCoord = GridCoord(BoardConfig.GRID_WIDTH / 2, 0),
-        direction = Direction.SOUTH
-    )
-    private var qubeMotion: QubeMotion? = qube?.let { QubeMotion(it) }
+    // STEP 6: every NORMAL QUBE lives in this one collection -- no
+    // qube1/qube2/qube3 style variables. Each entry owns its own GridCoord
+    // (via its Qube) and its own rotation/timing state (via its
+    // QubeMotion), so they advance completely independently even though
+    // they currently share the same direction and timing constants.
+    // Starts with 3 QUBEs across the back row (STEP 6 initial layout).
+    // A successful CAPTURE removes exactly the matching entry from this
+    // list (see onActivateRequested) -- Qube.kt/QubeMotion.kt themselves
+    // are unmodified.
+    private val qubes: MutableList<QubeInstance> = createInitialQubes()
+
+    private fun createInitialQubes(): MutableList<QubeInstance> {
+        val startXs = listOf(1, 3, 5)
+        return startXs.map { x ->
+            val qube = Qube(startCoord = GridCoord(x, 0), direction = Direction.SOUTH)
+            QubeInstance(qube, QubeMotion(qube))
+        }.toMutableList()
+    }
 
     private var originX = 0f
     private var originY = 0f
@@ -60,7 +74,7 @@ class GameView @JvmOverloads constructor(
             val deltaMs = if (lastFrameTimeNanos == 0L) 0L else (frameTimeNanos - lastFrameTimeNanos) / 1_000_000L
             lastFrameTimeNanos = frameTimeNanos
 
-            qubeMotion?.update(deltaMs)
+            for (instance in qubes) instance.motion.update(deltaMs)
 
             invalidate()
             if (isAttachedToWindow) Choreographer.getInstance().postFrameCallback(this)
@@ -136,10 +150,11 @@ class GameView @JvmOverloads constructor(
             displayScale
         )
 
-        val currentQube = qube
-        val currentMotion = qubeMotion
-        if (currentQube != null && currentMotion != null) {
-            qubeRenderer.draw(canvas, currentQube, currentMotion, projection)
+        // Painter's algorithm across QUBEs too: farther-back cells
+        // (smaller x+z) drawn first, same ordering principle QubeRenderer
+        // already applies to a single QUBE's own faces.
+        for (instance in qubes.sortedBy { it.qube.coord.x + it.qube.coord.z }) {
+            qubeRenderer.draw(canvas, instance.qube, instance.motion, projection)
         }
     }
 
@@ -155,10 +170,12 @@ class GameView @JvmOverloads constructor(
     }
 
     override fun onActivateRequested() {
-        val currentQube = qube ?: return
-        if (captureSystem.isCaptured(markController.markedCoord, currentQube.coord)) {
-            qube = null
-            qubeMotion = null
+        val marked = markController.markedCoord ?: return
+        // Logical grid coordinates are unique per QUBE, so at most one
+        // entry can ever match -- one MARK captures at most one QUBE.
+        val index = qubes.indexOfFirst { captureSystem.isCaptured(marked, it.qube.coord) }
+        if (index >= 0) {
+            qubes.removeAt(index)
             invalidate()
         }
     }
