@@ -35,12 +35,20 @@ class SoundEventPlayer(context: Context) {
     private companion object {
         const val MAX_STREAMS = 8
 
-        const val VOLUME_QUBE_ROLL_START = 0.55f
-        const val VOLUME_QUBE_LAND = 0.85f
+        const val VOLUME_QUBE_ROLL_START = 0.65f
+        const val VOLUME_QUBE_LAND = 0.92f
         const val VOLUME_MARK_SET = 0.6f
         const val VOLUME_CAPTURE_SUCCESS = 0.65f
-        const val VOLUME_POI_HIT_IMPACT = 0.8f
-        const val VOLUME_POI_HIT_SQUEAL = 0.7f
+
+        // SOUND-03: the real-device finding was that Poi's yelp was
+        // inaudible under the impact thud -- diagnosis (see the SOUND-03
+        // commit message) showed the two assets' own spectra were already
+        // well separated (impact >99% below 300Hz, squeal now >99% in
+        // 1.5-4kHz), but the *level* balance had it backwards: the impact
+        // played louder (0.8) than the squeal (0.7) despite the squeal
+        // being the signal that must always read clearly. Inverted here.
+        const val VOLUME_POI_HIT_IMPACT = 0.68f
+        const val VOLUME_POI_HIT_SQUEAL = 1.0f
     }
 
     private val appContext = context.applicationContext
