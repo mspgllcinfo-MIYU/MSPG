@@ -8,7 +8,7 @@ package com.mspgllc.iqpuchin.board
  */
 object BoardConfig {
     const val GRID_WIDTH = 7
-    const val GRID_DEPTH = 9
+    const val GRID_DEPTH = 12
 
     fun isInside(coord: GridCoord): Boolean =
         coord.x in 0 until GRID_WIDTH && coord.z in 0 until GRID_DEPTH
