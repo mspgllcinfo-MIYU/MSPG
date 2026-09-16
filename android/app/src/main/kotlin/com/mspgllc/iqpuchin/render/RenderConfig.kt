@@ -30,7 +30,7 @@ object RenderConfig {
      * [QUBE_HEIGHT_SCALE_PX]'s derivation below to produce a true cube.
      */
     const val BOARD_AXIS_MAJOR_PX = 90f
-    const val BOARD_AXIS_MINOR_PX = 18f
+    const val BOARD_AXIS_MINOR_PX = 6.3f
 
     /** Baseline (unscaled) player marker diameter. */
     const val PLAYER_SIZE_PX = 56f
