@@ -3,8 +3,8 @@
 
     <!-- UI-CONTROL-02: VIBRATE is a normal (auto-granted, no runtime
          prompt) permission needed for the virtual stick's single-tick
-         haptic on direction lock (see input/StickHaptics.kt). Nothing
-         else -- still no network/storage/etc. -->
+         haptic on direction lock (see input/StickHaptics.kt); still no
+         network/storage/etc. beyond this. -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
