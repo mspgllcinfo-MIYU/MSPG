@@ -24,16 +24,26 @@ class BoardRenderer {
      * screen. */
     data class BoardBounds(val leftPx: Float, val rightPx: Float, val topPx: Float, val bottomPx: Float)
 
+    /**
+     * Mirrors [IsoProjection]'s basis vectors: gridX -> (+MAJOR, +MINOR)
+     * is the rightmost/bottommost contributor, gridZ -> (-MINOR, +MAJOR)
+     * is the leftmost (via its negative X term) and bottommost
+     * contributor. A floor tile's own on-screen half-extent (in either
+     * screen direction) works out to (MAJOR+MINOR)/2 -- see the class doc
+     * on [drawTile] for the corner derivation -- which is added at each
+     * extreme cell so nothing is clipped.
+     */
     fun boardBounds(gridWidth: Int, gridDepth: Int): BoardBounds {
-        val halfW = RenderConfig.TILE_WIDTH_PX / 2f
-        val halfH = RenderConfig.TILE_HEIGHT_PX / 2f
+        val major = RenderConfig.BOARD_AXIS_MAJOR_PX
+        val minor = RenderConfig.BOARD_AXIS_MINOR_PX
+        val tileHalfExtentPx = (major + minor) / 2f
         val qubeLiftPx = RenderConfig.QUBE_HEIGHT_SCALE_PX * RenderConfig.QUBE_MAX_LIFT_WORLD_UNITS
         val topClearancePx = maxOf(RenderConfig.PLAYER_SIZE_PX, qubeLiftPx)
         return BoardBounds(
-            leftPx = gridDepth * halfW,
-            rightPx = gridWidth * halfW,
-            topPx = halfH + topClearancePx,
-            bottomPx = (gridWidth + gridDepth - 1) * halfH
+            leftPx = (gridDepth - 1) * minor + tileHalfExtentPx,
+            rightPx = (gridWidth - 1) * major + tileHalfExtentPx,
+            topPx = tileHalfExtentPx + topClearancePx,
+            bottomPx = (gridWidth - 1) * minor + (gridDepth - 1) * major + tileHalfExtentPx
         )
     }
 
@@ -75,36 +85,47 @@ class BoardRenderer {
         markedCoord: GridCoord?,
         scale: Float
     ) {
-        val tileW = RenderConfig.TILE_WIDTH_PX * scale
-        val tileH = RenderConfig.TILE_HEIGHT_PX * scale
+        val axisMajor = RenderConfig.BOARD_AXIS_MAJOR_PX * scale
+        val axisMinor = RenderConfig.BOARD_AXIS_MINOR_PX * scale
 
         for (x in 0 until gridWidth) {
             for (z in 0 until gridDepth) {
                 val marked = markedCoord != null && markedCoord.x == x && markedCoord.z == z
-                drawTile(canvas, projection, x.toFloat(), z.toFloat(), tileW, tileH, marked)
+                drawTile(canvas, projection, x.toFloat(), z.toFloat(), axisMajor, axisMinor, marked)
             }
         }
 
         drawPlayer(canvas, projection, playerPosition, scale)
     }
 
+    /**
+     * A floor tile's screen shape is the parallelogram spanned by
+     * [IsoProjection]'s two basis vectors, gridX -> (+axisMajor,
+     * +axisMinor) and gridZ -> (-axisMinor, +axisMajor) -- i.e. its four
+     * corners sit at the tile's projected center plus/minus half of
+     * (exVec+ezVec) and half of (exVec-ezVec). Working that out reduces
+     * to a rhombus at halfSum=(axisMajor+axisMinor)/2 and
+     * halfDiff=(axisMajor-axisMinor)/2 from center: top, right, bottom,
+     * left corners in that cyclic order, same drawing order as before
+     * this axis change.
+     */
     private fun drawTile(
         canvas: Canvas,
         projection: IsoProjection,
         gx: Float,
         gz: Float,
-        tileW: Float,
-        tileH: Float,
+        axisMajor: Float,
+        axisMinor: Float,
         marked: Boolean
     ) {
         val p = projection.toScreen(gx, gz)
-        val hw = tileW / 2f
-        val hh = tileH / 2f
+        val halfSum = (axisMajor + axisMinor) / 2f
+        val halfDiff = (axisMajor - axisMinor) / 2f
         val path = Path().apply {
-            moveTo(p[0], p[1] - hh)
-            lineTo(p[0] + hw, p[1])
-            lineTo(p[0], p[1] + hh)
-            lineTo(p[0] - hw, p[1])
+            moveTo(p[0] - halfDiff, p[1] - halfSum)
+            lineTo(p[0] + halfSum, p[1] - halfDiff)
+            lineTo(p[0] + halfDiff, p[1] + halfSum)
+            lineTo(p[0] - halfSum, p[1] + halfDiff)
             close()
         }
         canvas.drawPath(path, if (marked) markedFloorPaint else floorPaint)

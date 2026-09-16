@@ -161,10 +161,10 @@ class GameView @JvmOverloads constructor(
 
         // One projection per frame, shared by both renderers, so the
         // floor grid and the QUBE are always perfectly aligned.
-        val tileW = RenderConfig.TILE_WIDTH_PX * displayScale
-        val tileH = RenderConfig.TILE_HEIGHT_PX * displayScale
+        val axisMajor = RenderConfig.BOARD_AXIS_MAJOR_PX * displayScale
+        val axisMinor = RenderConfig.BOARD_AXIS_MINOR_PX * displayScale
         val heightScale = RenderConfig.QUBE_HEIGHT_SCALE_PX * displayScale
-        val projection = IsoProjection(tileW, tileH, originX, originY, heightScale)
+        val projection = IsoProjection(axisMajor, axisMinor, originX, originY, heightScale)
 
         boardRenderer.draw(
             canvas,
@@ -177,9 +177,11 @@ class GameView @JvmOverloads constructor(
         )
 
         // Painter's algorithm across QUBEs too: farther-back cells
-        // (smaller x+z) drawn first, same ordering principle QubeRenderer
+        // (smaller z) drawn first. gridZ is now the dominant screen-Y
+        // contributor (see IsoProjection), so z alone is the accurate
+        // depth-ordering key -- same ordering principle QubeRenderer
         // already applies to a single QUBE's own faces.
-        for (instance in qubes.sortedBy { it.qube.coord.x + it.qube.coord.z }) {
+        for (instance in qubes.sortedBy { it.qube.coord.z }) {
             qubeRenderer.draw(canvas, instance.qube, instance.motion, projection)
         }
 

@@ -9,11 +9,28 @@ import kotlin.math.sqrt
  * without touching board/input logic.
  */
 object RenderConfig {
-    /** Baseline (unscaled) tile footprint; a 2:1 width:height ratio is
-     * what makes the projection read as isometric. GameView multiplies
-     * these by a per-frame [displayScale] it computes to fill the screen. */
-    const val TILE_WIDTH_PX = 130f
-    const val TILE_HEIGHT_PX = 65f
+    /**
+     * Baseline (unscaled) per-grid-cell screen displacement, split into a
+     * dominant component and a small cross-axis component -- see
+     * [IsoProjection] for how these two combine into the actual basis
+     * vectors for gridX and gridZ. gridZ (the board's depth axis, also
+     * the direction every NORMAL QUBE travels) uses [BOARD_AXIS_MAJOR_PX]
+     * as its *vertical* step and [BOARD_AXIS_MINOR_PX] as its horizontal
+     * step, so advancing in gridZ reads as movement down the screen with
+     * only a small sideways lean -- this is what makes the board a
+     * vertical corridor instead of a 45-degree diagonal diamond. gridX
+     * (the board's width axis) uses the same two numbers with the roles
+     * swapped (dominant horizontal, minor vertical).
+     *
+     * The two numbers are deliberately shared between both axes (rather
+     * than each axis getting its own independent pair) because that is
+     * what makes gridX's basis vector (MAJOR, MINOR) and gridZ's basis
+     * vector (-MINOR, MAJOR) have *exactly* equal screen length by
+     * construction (sqrt(MAJOR^2 + MINOR^2) either way) -- required for
+     * [QUBE_HEIGHT_SCALE_PX]'s derivation below to produce a true cube.
+     */
+    const val BOARD_AXIS_MAJOR_PX = 90f
+    const val BOARD_AXIS_MINOR_PX = 18f
 
     /** Baseline (unscaled) player marker diameter. */
     const val PLAYER_SIZE_PX = 56f
@@ -33,23 +50,23 @@ object RenderConfig {
      * resting height), used only for the QUBE's toppling motion -- the
      * floor tiles and player marker never use height.
      *
-     * Derived, not tuned by feel: TILE_WIDTH_PX/TILE_HEIGHT_PX already
-     * define how a 1-world-unit edge along the ground (X or Z) projects
-     * to screen pixels -- that projected length is sqrt(halfW^2 + halfH^2)
-     * (Pythagorean, since the projection mixes both axes). For a QUBE
-     * that is genuinely 1x1x1 in world space (see QubeRenderer -- its
-     * half-extent is a fixed 0.5 in every direction) to actually look
+     * Derived, not tuned by feel: BOARD_AXIS_MAJOR_PX/BOARD_AXIS_MINOR_PX
+     * already define how a 1-world-unit edge along the ground (X or Z)
+     * projects to screen pixels -- both project to the same length,
+     * sqrt(MAJOR^2 + MINOR^2), by construction (see the doc above). For a
+     * QUBE that is genuinely 1x1x1 in world space (see QubeRenderer --
+     * its half-extent is a fixed 0.5 in every direction) to actually look
      * like a cube rather than a slab, its vertical (Y) edge needs to
      * project to that *same* screen length. That equality is exactly
      * what this formula guarantees; it is intentionally a computed
      * property (not a constant) so it can never drift out of sync with
-     * TILE_WIDTH_PX/TILE_HEIGHT_PX if those are ever retuned.
+     * BOARD_AXIS_MAJOR_PX/BOARD_AXIS_MINOR_PX if those are ever retuned.
      */
     val QUBE_HEIGHT_SCALE_PX: Float
         get() {
-            val halfW = TILE_WIDTH_PX / 2f
-            val halfH = TILE_HEIGHT_PX / 2f
-            return sqrt(halfW * halfW + halfH * halfH)
+            val major = BOARD_AXIS_MAJOR_PX
+            val minor = BOARD_AXIS_MINOR_PX
+            return sqrt(major * major + minor * minor)
         }
 
     /**
