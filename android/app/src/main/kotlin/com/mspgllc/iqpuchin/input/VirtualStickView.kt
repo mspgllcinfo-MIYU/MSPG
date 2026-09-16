@@ -4,11 +4,14 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.RadialGradient
+import android.graphics.Shader
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
 import com.mspgllc.iqpuchin.board.Direction
 import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.hypot
 import kotlin.math.min
 
@@ -43,7 +46,9 @@ import kotlin.math.min
  * behavior (no held-repeat); the visual knob position, once locked, is
  * also constrained to the locked axis (see [applyKnobOffset]) so its
  * position always matches what is actually locked in, never implying a
- * direction that isn't the one currently in effect.
+ * direction that isn't the one currently in effect. UI-CONTROL-02 adds
+ * exactly one side effect at the same single lock-acquisition point: a
+ * one-shot haptic tick (see [StickHaptics]) -- no condition here changed.
  */
 class VirtualStickView @JvmOverloads constructor(
     context: Context,
@@ -69,37 +74,65 @@ class VirtualStickView @JvmOverloads constructor(
         this.listener = listener
     }
 
-    // UI-CUTE-01: POI-themed repaint (black+gold ring, paw-shaped knob) --
-    // purely cosmetic, drawn below in onDraw; none of the deadzone/lock/
-    // direction fields or touch handling in this file changed.
-    private val basePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(110, 0, 0, 0)
-        style = Paint.Style.FILL
+    // UI-CONTROL-02: pseudo-3D gamepad-stick repaint (concave gold-rimmed
+    // dish + a raised knob that shifts shadow/highlight and squashes
+    // toward the push direction) -- purely cosmetic, all drawn below in
+    // onDraw/drawBase/drawKnob. Internal input stays 4-direction digital;
+    // none of the deadzone/lock/direction fields or touch handling in
+    // this file changed (see the one-line StickHaptics.tick call noted
+    // in updateKnob).
+    private val dishInnerShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(90, 0, 0, 0)
+        style = Paint.Style.STROKE
+        strokeWidth = 10f
     }
-    private val baseOutline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val goldRimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.rgb(255, 205, 60)
         style = Paint.Style.STROKE
         strokeWidth = 5f
     }
+    private val knobShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(130, 0, 0, 0)
+        style = Paint.Style.FILL
+    }
+    private val knobRimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.BLACK
+        style = Paint.Style.STROKE
+        strokeWidth = 3f
+    }
 
-    /** Knob (paw) color while centered/within the deadzone (not
-     * currently resolving to any direction). */
-    private val knobIdlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    /** Highlight on the knob's raised side while centered/idle -- a
+     * faint, direction-neutral sheen (ambient light, no push yet). */
+    private val knobHighlightIdlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(70, 255, 255, 255)
+        style = Paint.Style.FILL
+    }
+
+    /** Highlight while actively pushed -- brighter and warmer, and (see
+     * [drawKnob]) repositioned toward the push direction each frame. */
+    private val knobHighlightActivePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(120, 255, 240, 200)
+        style = Paint.Style.FILL
+    }
+
+    /** Paw-mark color while centered/within the deadzone (not currently
+     * resolving to any direction). */
+    private val pawIdleFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.rgb(140, 110, 20)
         style = Paint.Style.FILL
     }
 
-    /** Knob (paw) color while actively resolving a direction, past the
+    /** Paw-mark color while actively resolving a direction, past the
      * deadzone -- a clearly brighter color so which way is currently
      * being pushed reads at a glance even with a finger over it. */
-    private val knobActivePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val pawActiveFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.rgb(255, 214, 51)
         style = Paint.Style.FILL
     }
-    private val knobOutline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val pawOutlinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.rgb(40, 30, 10)
         style = Paint.Style.STROKE
-        strokeWidth = 3f
+        strokeWidth = 2.5f
     }
 
     private var knobOffsetX = 0f
@@ -124,18 +157,99 @@ class VirtualStickView @JvmOverloads constructor(
         val cy = height / 2f
         val baseRadius = min(width, height) / 2f
 
-        canvas.drawCircle(cx, cy, baseRadius, basePaint)
-        canvas.drawCircle(cx, cy, baseRadius, baseOutline)
+        drawBase(canvas, cx, cy, baseRadius)
+        drawKnob(canvas, cx, cy, baseRadius)
+    }
 
-        val knobRadius = baseRadius * 0.4f
-        val knobFill = if (knobActive) knobActivePaint else knobIdlePaint
+    /** The stick's outer "receiver": a concave gold-rimmed dish instead
+     * of a flat tinted circle, so it reads as a real gamepad stick base
+     * rather than a plain disc. */
+    private fun drawBase(canvas: Canvas, cx: Float, cy: Float, r: Float) {
+        val dishPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            shader = RadialGradient(
+                cx, cy, r,
+                intArrayOf(Color.rgb(8, 8, 10), Color.rgb(42, 40, 36)),
+                floatArrayOf(0f, 1f),
+                Shader.TileMode.CLAMP
+            )
+        }
+        canvas.drawCircle(cx, cy, r, dishPaint)
+        // Inset shadow just inside the rim reinforces the "recessed
+        // toward the center" concave read.
+        canvas.drawCircle(cx, cy, r * 0.9f, dishInnerShadowPaint)
+        canvas.drawCircle(cx, cy, r, goldRimPaint)
+    }
+
+    /** The raised knob: gradient-shaded sphere, a shadow that shifts
+     * opposite the push direction, a highlight that shifts toward it,
+     * and a slight squash along the push axis -- a cheap 2D stand-in for
+     * "the stick tilting/leaning" without an actual 3D model. The gold
+     * paw mark on top is always drawn upright (never rotated) so it
+     * stays legible. */
+    private fun drawKnob(canvas: Canvas, cx: Float, cy: Float, baseRadius: Float) {
+        val knobRadius = baseRadius * 0.42f
         val knobCx = cx + knobOffsetX
         val knobCy = cy + knobOffsetY
-        // A slightly "pressed" paw while actively pushed past the deadzone.
-        val knobScale = if (knobActive) 0.92f else 1f
+
+        val magnitude = hypot(knobOffsetX, knobOffsetY)
+        val pushing = knobActive && magnitude > 0.01f
+        val ux = if (pushing) knobOffsetX / magnitude else 0f
+        val uy = if (pushing) knobOffsetY / magnitude else 0f
+
+        // Drop shadow: offset opposite the push direction, as if the
+        // knob is lifting/leaning toward the finger.
+        val shadowShift = knobRadius * 0.30f
+        val shadowCx = knobCx - ux * shadowShift
+        val shadowCy = knobCy - uy * shadowShift + knobRadius * 0.2f
+        canvas.drawOval(
+            shadowCx - knobRadius * 0.85f, shadowCy - knobRadius * 0.7f,
+            shadowCx + knobRadius * 0.85f, shadowCy + knobRadius * 0.9f,
+            knobShadowPaint
+        )
+
         canvas.save()
-        canvas.scale(knobScale, knobScale, knobCx, knobCy)
-        PawShape.draw(canvas, knobCx, knobCy, knobRadius, knobFill, knobOutline)
+        if (pushing) {
+            // Squash slightly along the push axis and bulge
+            // perpendicular to it -- reads as "leaning" that way. The
+            // rotate/scale/un-rotate keeps this squash axis-aligned with
+            // the push direction while everything drawn below (the paw
+            // mark included) stays upright afterward.
+            val angleDeg = Math.toDegrees(atan2(uy, ux).toDouble()).toFloat()
+            canvas.rotate(angleDeg, knobCx, knobCy)
+            canvas.scale(0.92f, 1.06f, knobCx, knobCy)
+            canvas.rotate(-angleDeg, knobCx, knobCy)
+        }
+
+        val knobFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            shader = RadialGradient(
+                knobCx - knobRadius * 0.3f, knobCy - knobRadius * 0.3f, knobRadius * 1.4f,
+                intArrayOf(Color.rgb(60, 58, 54), Color.rgb(14, 13, 12)),
+                floatArrayOf(0f, 1f),
+                Shader.TileMode.CLAMP
+            )
+        }
+        canvas.drawCircle(knobCx, knobCy, knobRadius, knobFillPaint)
+        canvas.drawCircle(knobCx, knobCy, knobRadius, knobRimPaint)
+
+        // Highlight catching the side facing the push direction (or a
+        // faint neutral sheen near the top-left while idle).
+        val highlightDist = if (pushing) knobRadius * 0.38f else knobRadius * 0.1f
+        val highlightUx = if (pushing) ux else -0.6f
+        val highlightUy = if (pushing) uy else -0.6f
+        val highlightPaint = if (pushing) knobHighlightActivePaint else knobHighlightIdlePaint
+        canvas.drawCircle(
+            knobCx + highlightUx * highlightDist,
+            knobCy + highlightUy * highlightDist,
+            knobRadius * 0.32f,
+            highlightPaint
+        )
+
+        // Gold paw mark, same POI motif as the ACTION button.
+        val pawFill = if (knobActive) pawActiveFillPaint else pawIdleFillPaint
+        PawShape.draw(canvas, knobCx, knobCy, knobRadius * 0.85f, pawFill, pawOutlinePaint)
+
         canvas.restore()
     }
 
@@ -196,6 +310,11 @@ class VirtualStickView @JvmOverloads constructor(
             lockedDirection = direction
             applyKnobOffset(direction, dx, dy)
             listener?.onMoveRequested(direction)
+            // UI-CONTROL-02: one short "tick" exactly here, at the same
+            // instant a lock is newly acquired -- never while a lock is
+            // merely held (the "else" branch below never reaches this
+            // line), so it cannot repeat during a continuous push.
+            StickHaptics.tick(context)
         } else {
             // Still locked: direction does not change no matter how the
             // finger drifts while outside the deadzone (rule 3) -- only

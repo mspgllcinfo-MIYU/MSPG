@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- No <uses-permission> entries: this build needs none (no network,
-         no storage, nothing). -->
+    <!-- UI-CONTROL-02: VIBRATE is a normal (auto-granted, no runtime
+         prompt) permission needed for the virtual stick's single-tick
+         haptic on direction lock (see input/StickHaptics.kt). Nothing
+         else -- still no network/storage/etc. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
         android:allowBackup="true"

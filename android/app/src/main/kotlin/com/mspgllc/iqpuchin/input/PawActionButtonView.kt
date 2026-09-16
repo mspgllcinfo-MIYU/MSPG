@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Typeface
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
@@ -26,6 +27,11 @@ class PawActionButtonView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null
 ) : View(context, attrs) {
+
+    companion object {
+        /** UI-CONTROL-02: the brand mark stamped on the paw's main pad. */
+        private const val BRAND_TEXT = "MIYU × AI"
+    }
 
     private var onActionClick: (() -> Unit)? = null
     fun setOnActionClick(listener: () -> Unit) {
@@ -80,6 +86,16 @@ class PawActionButtonView @JvmOverloads constructor(
         style = Paint.Style.FILL
     }
 
+    /** UI-CONTROL-02: "MIYU × AI" stamped on the main pad -- dark so it
+     * reads against the gold pad without competing with it, auto-shrunk
+     * (see [drawBrandText]) so it always fits regardless of the button's
+     * actual on-screen size. */
+    private val brandTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(35, 22, 8)
+        textAlign = Paint.Align.CENTER
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val cx = width / 2f
@@ -101,7 +117,27 @@ class PawActionButtonView @JvmOverloads constructor(
             canvas.drawCircle(cx, cy + baseRadius * 0.3f, baseRadius * 0.14f, glowCenterPaint)
         }
 
+        drawBrandText(canvas, cx, cy, baseRadius)
+
         canvas.restore()
+    }
+
+    /** Centers [BRAND_TEXT] on the main pad (see PawShape's own main-pad
+     * geometry), shrinking it as needed to stay within the pad's width --
+     * the toe beans above are left untouched, and the text never grows
+     * the button itself since it's confined to a fraction of baseRadius. */
+    private fun drawBrandText(canvas: Canvas, cx: Float, cy: Float, r: Float) {
+        val textCy = cy + r * 0.35f
+        val maxTextWidth = r * 0.95f
+        var textSize = r * 0.20f
+        brandTextPaint.textSize = textSize
+        while (textSize > r * 0.08f && brandTextPaint.measureText(BRAND_TEXT) > maxTextWidth) {
+            textSize -= 1f
+            brandTextPaint.textSize = textSize
+        }
+        val fm = brandTextPaint.fontMetrics
+        val baselineY = textCy - (fm.ascent + fm.descent) / 2f
+        canvas.drawText(BRAND_TEXT, cx, baselineY, brandTextPaint)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
