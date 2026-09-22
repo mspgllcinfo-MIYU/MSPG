@@ -55,8 +55,19 @@ object RenderConfig {
      */
     const val BOARD_AXIS_MINOR_PX_FRONT_ALIGNED = 0f
 
-    /** Baseline (unscaled) player marker diameter. */
-    const val PLAYER_SIZE_PX = 56f
+    /**
+     * AZUSAN-PLAYER-01: baseline (unscaled) on-screen height every Azusan
+     * sprite's own opaque-content bounding box is normalized to (see
+     * [AzusanPose.contentBox] and [PlayerRenderer]) -- each source PNG
+     * has different amounts of transparent padding baked in per pose, so
+     * without this every pose would render at a different apparent size.
+     * Chosen close to one board cell's own on-screen span
+     * ([BOARD_AXIS_MAJOR_PX]) so Azusan reads as roughly cell-sized, with
+     * a modest overshoot deliberately allowed (per spec, a crown/tail
+     * peeking past the cell edge is fine) rather than shrinking her to
+     * fit strictly inside the tile.
+     */
+    const val PLAYER_SPRITE_TARGET_HEIGHT_PX = 108f
 
     /** Fraction of view height reserved above the board -- kept small on
      * purpose so there's no large empty band at the top of the screen. */

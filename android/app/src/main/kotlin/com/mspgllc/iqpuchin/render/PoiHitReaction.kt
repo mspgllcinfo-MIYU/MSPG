@@ -4,14 +4,20 @@ import kotlin.math.PI
 import kotlin.math.sin
 
 /**
- * Pure timing for Poi's brief HIT reaction (a startled flinch/tail
- * flick) -- purely cosmetic, never touches game state or HIT judgement
- * itself (see GameStateController, which this class knows nothing
- * about). GameView is responsible for calling [trigger] exactly once,
- * on the PLAYING -> HIT edge; [PlayerRenderer] reads [progress] every
- * frame to animate the flinch. Nothing else in the game (QUBE motion,
- * input, timers) is paused while this plays -- it is advanced by the
- * same per-frame [update] call as everything else, never blocking.
+ * Pure timing for the PLAYER's brief HIT reaction window -- purely
+ * cosmetic, never touches game state or HIT judgement itself (see
+ * GameStateController, which this class knows nothing about). GameView
+ * is responsible for calling [trigger] exactly once, on the PLAYING ->
+ * HIT edge. Nothing else in the game (QUBE motion, input, timers) is
+ * paused while this plays -- it is advanced by the same per-frame
+ * [update] call as everything else, never blocking.
+ *
+ * AZUSAN-PLAYER-01: since the vector "Poi" design (which used [progress]
+ * directly to drive a squash/tail-flick animation) was replaced by
+ * sprite images, GameView now only reads [progress] as a simple
+ * active/inactive signal (`> 0f`) to gate its own separately-tracked
+ * elapsed-time counter, which PlayerRenderer uses to pick between the
+ * HIT and RECOVER sprites -- this class's own timing/shape is unchanged.
  */
 class PoiHitReaction {
     companion object {

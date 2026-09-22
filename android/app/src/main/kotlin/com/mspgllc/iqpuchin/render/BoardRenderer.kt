@@ -45,7 +45,11 @@ class BoardRenderer {
         val minor = axisMinorPx
         val tileHalfExtentPx = (major + minor) / 2f
         val qubeLiftPx = RenderConfig.QUBE_HEIGHT_SCALE_PX * RenderConfig.QUBE_MAX_LIFT_WORLD_UNITS
-        val topClearancePx = maxOf(RenderConfig.PLAYER_SIZE_PX, qubeLiftPx)
+        // AZUSAN-PLAYER-01: was RenderConfig.PLAYER_SIZE_PX (the old
+        // vector marker's diameter) -- now the sprite's own normalized
+        // on-screen height, so a QUBE toppling through the back row and
+        // Azusan standing there both still stay clear of the screen top.
+        val topClearancePx = maxOf(RenderConfig.PLAYER_SPRITE_TARGET_HEIGHT_PX, qubeLiftPx)
         return BoardBounds(
             leftPx = (gridDepth - 1) * minor + tileHalfExtentPx,
             rightPx = (gridWidth - 1) * major + tileHalfExtentPx,

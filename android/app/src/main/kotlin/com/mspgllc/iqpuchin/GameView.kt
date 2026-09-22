@@ -25,6 +25,7 @@ import com.mspgllc.iqpuchin.render.PlayerRenderer
 import com.mspgllc.iqpuchin.render.PoiHitReaction
 import com.mspgllc.iqpuchin.render.QubeRenderer
 import com.mspgllc.iqpuchin.render.RenderConfig
+import com.mspgllc.iqpuchin.render.TimedCosmeticFlag
 import com.mspgllc.iqpuchin.sound.QubeSoundTracker
 import com.mspgllc.iqpuchin.sound.SoundEvent
 import com.mspgllc.iqpuchin.sound.SoundEventPlayer
@@ -72,7 +73,7 @@ class GameView @JvmOverloads constructor(
     private val captureSystem = CaptureSystem()
     private val gameStateController = GameStateController()
     private val boardRenderer = BoardRenderer()
-    private val playerRenderer = PlayerRenderer()
+    private val playerRenderer = PlayerRenderer(context)
     private val qubeRenderer = QubeRenderer()
 
     // VISUAL-01/SOUND-01/SOUND-02: Poi's brief HIT flinch and the shared
@@ -83,6 +84,20 @@ class GameView @JvmOverloads constructor(
     // CAPTURE, a QUBE's own roll/land) is observed.
     private val hitReaction = PoiHitReaction()
     private val soundEventPlayer = SoundEventPlayer(context)
+
+    // AZUSAN-PLAYER-01: purely cosmetic sprite-selection state, read only
+    // by playerRenderer.draw() below -- none of it feeds back into any
+    // game-logic check. lastMoveDirection starts at SOUTH (facing the
+    // camera) simply as a harmless idle default before the player's
+    // first move; it's never read except while walkVisual is active.
+    private var lastMoveDirection: Direction = Direction.SOUTH
+    private val walkVisual = TimedCosmeticFlag(durationMs = 220L)
+    private val punchVisual = TimedCosmeticFlag(durationMs = 180L)
+    // Tracks elapsed time within hitReaction's own active window (see
+    // checkCollision/frame loop below) purely so PlayerRenderer can pick
+    // HIT vs RECOVER -- never changes hitReaction's own DURATION_MS or
+    // GameStateController's HIT_DURATION_MS.
+    private var hitVisualElapsedMs = 0L
     // CATPUNCH-01: purely cosmetic, like hitReaction above -- reads
     // gameStateController.life each frame, never written back to it.
     private val churuRenderer = ChuruLifeRenderer()
@@ -149,6 +164,7 @@ class GameView @JvmOverloads constructor(
         val isNewHit = gameStateController.checkCollision(boardLogic.playerPosition, qubes.map { it.qube.coord })
         if (isNewHit) {
             hitReaction.trigger()
+            hitVisualElapsedMs = 0L
             soundEventPlayer.play(SoundEvent.POI_HIT)
         }
     }
@@ -169,6 +185,9 @@ class GameView @JvmOverloads constructor(
                     instance.soundTracker.update(soundEventPlayer, boardLogic.playerPosition)
                 }
                 hitReaction.update(deltaMs)
+                if (hitReaction.progress() > 0f) hitVisualElapsedMs += deltaMs
+                walkVisual.update(deltaMs)
+                punchVisual.update(deltaMs)
                 gameStateController.update(deltaMs)
                 checkCollision()
             }
@@ -272,23 +291,39 @@ class GameView @JvmOverloads constructor(
             effectiveAxisMinorPx()
         )
 
-        playerRenderer.draw(
-            canvas,
-            projection,
-            boardLogic.playerPosition,
-            displayScale,
-            hitReaction.progress(),
-            angerLevel()
-        )
-
-        // Painter's algorithm across QUBEs too: farther-back cells
-        // (smaller z) drawn first. gridZ is now the dominant screen-Y
-        // contributor (see IsoProjection), so z alone is the accurate
-        // depth-ordering key -- same ordering principle QubeRenderer
-        // already applies to a single QUBE's own faces.
+        // Painter's algorithm across QUBEs and the player together:
+        // farther-back cells (smaller z) drawn first. gridZ is the
+        // dominant screen-Y contributor (see IsoProjection), so z alone
+        // is the accurate depth-ordering key -- same principle
+        // QubeRenderer already applies to a single QUBE's own faces.
+        // AZUSAN-PLAYER-01: the player is now interleaved into this same
+        // sorted pass (by playerPosition.z) rather than always drawn
+        // first -- with the old, small vector marker, drawing it before
+        // every QUBE never visibly mattered, but the sprite artwork is
+        // large enough that a QUBE in a farther-back row could otherwise
+        // incorrectly paint over Azusan, or Azusan could incorrectly
+        // paint over a nearer QUBE.
+        val playerZ = boardLogic.playerPosition.z
+        var playerDrawn = false
+        fun drawPlayer() {
+            playerRenderer.draw(
+                canvas,
+                projection,
+                boardLogic.playerPosition,
+                displayScale,
+                lastMoveDirection,
+                walkVisual.active,
+                punchVisual.active,
+                hitReaction.progress() > 0f,
+                hitVisualElapsedMs
+            )
+            playerDrawn = true
+        }
         for (instance in qubes.sortedBy { it.qube.coord.z }) {
+            if (!playerDrawn && instance.qube.coord.z >= playerZ) drawPlayer()
             qubeRenderer.draw(canvas, instance.qube, instance.motion, qubeProjection)
         }
+        if (!playerDrawn) drawPlayer()
 
         if (gameStateController.state == GameState.HIT) {
             canvas.drawText("HIT x${gameStateController.hitCount}", width / 2f, 60f * density, hitTextPaint)
@@ -310,18 +345,14 @@ class GameView @JvmOverloads constructor(
         }
     }
 
-    /** CATPUNCH-01: 0 (life 3) / 1 (life 2) / 2 (life 1-0) -- cosmetic
-     * only, read by PlayerRenderer to swap Azusan's expression. Never
-     * consulted by anything gameplay-affecting. */
-    private fun angerLevel(): Int = when {
-        gameStateController.life <= 1 -> 2
-        gameStateController.life == 2 -> 1
-        else -> 0
-    }
-
     override fun onMoveRequested(direction: Direction) {
         if (gameStateController.state == GameState.GAME_OVER) return
         if (boardLogic.movePlayer(direction)) {
+            // AZUSAN-PLAYER-01: cosmetic only -- a brief WALK_<direction>
+            // sprite window, purely reflecting a move that already
+            // happened (movePlayer's own Boolean result is unchanged).
+            lastMoveDirection = direction
+            walkVisual.trigger()
             checkCollision()
             invalidate()
         }
@@ -381,6 +412,11 @@ class GameView @JvmOverloads constructor(
      * whether this punch breaks it, dents it, or the player walks away
      * -- there is no stall and no invented safe window either way. */
     private fun performPunch(index: Int) {
+        // AZUSAN-PLAYER-01: cosmetic only -- a brief CAT_PUNCH sprite
+        // window alongside the existing SE calls below, which are
+        // otherwise unchanged. Fires regardless of destroyed/dented,
+        // matching how PUNCH_HIT itself already always plays.
+        punchVisual.trigger()
         val destroyed = qubes[index].qube.punch()
         if (destroyed) {
             qubes.removeAt(index)
