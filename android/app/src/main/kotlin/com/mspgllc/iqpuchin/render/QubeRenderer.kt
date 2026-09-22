@@ -5,7 +5,6 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import com.mspgllc.iqpuchin.board.Qube
-import com.mspgllc.iqpuchin.board.QubeConfig
 import com.mspgllc.iqpuchin.board.QubeMotion
 import kotlin.math.cos
 import kotlin.math.sin
@@ -48,8 +47,39 @@ import kotlin.math.sin
  * *on top of* the already-computed face quads below -- none of the
  * rotation/face-selection/depth-sort math above is touched, so the
  * QUBE's motion and shape are exactly as before.
+ *
+ * QUBE-DAMAGE-VISUAL-01: [Qube.durability] already existed (CATPUNCH-01)
+ * as pure logic state a cat punch decrements, completely independent of
+ * [coord]/[previousCoord]/rotation -- this round only makes the
+ * durability==1 state read as an obvious "ベコッ" at a glance instead of
+ * the small corner patch CATPUNCH-01 first drew. Everything here is
+ * still decoration layered on the same already-computed corner points
+ * (`s`, `upQuad`/`frontQuad`/`rightQuad`) -- no new state, no change to
+ * the rotation/pivot/normal-selection/depth-sort math, and nothing here
+ * is read anywhere else (durability's own value, movement, collision,
+ * MARK/ACTIVATE/CaptureSystem are all untouched). The one exception is
+ * [DENTED_SQUASH_X]/[DENTED_SQUASH_Y] below, a small *uniform* extra
+ * scale applied to every one of the 8 corner points together (exactly
+ * where [RenderConfig.QUBE_VISUAL_SCALE]'s own cosmetic shrink already
+ * happens) -- since it moves all 8 shared corners together, adjacent
+ * faces never separate/gap, so the cube mesh stays sealed; it reads as
+ * "this box got knocked slightly out of true," not a hole in the shape.
  */
 class QubeRenderer {
+
+    private companion object {
+        /**
+         * QUBE-DAMAGE-VISUAL-01: applied only while [Qube.durability] == 1,
+         * on top of [RenderConfig.QUBE_VISUAL_SCALE]'s existing per-frame
+         * shrink -- a mild, deliberately asymmetric squash (narrower than
+         * tall) so a dented QUBE's whole silhouette reads as slightly
+         * knocked-in even at a glance, not just the front-face patch.
+         * Small enough that the box never reads as broken/unrecognizable
+         * (per the explicit "don't crush it past recognition" limit).
+         */
+        const val DENTED_SQUASH_X = 0.92f
+        const val DENTED_SQUASH_Y = 1.03f
+    }
 
     private enum class Face { TOP, BOTTOM, FRONT, BACK }
 
@@ -74,17 +104,29 @@ class QubeRenderer {
         strokeWidth = 2f
     }
 
-    // CATPUNCH-01: a caved-in patch drawn on a punched-but-not-yet-broken
-    // QUBE's front face (see drawDent). Darker than midPaint so it reads
-    // as a shadowed dent, not a decal.
+    // QUBE-DAMAGE-VISUAL-01: layered to fake real inward depth with flat
+    // 2D fills alone (no actual geometry is pushed inward -- see the
+    // class doc's note on why the mesh itself stays untouched). dentRim
+    // is a lighter ring right at the pit's edge (a punched-up lip
+    // catching light), dentCore is the darkest patch at the pit's
+    // deepest point, and dentFillPaint (kept from CATPUNCH-01) sits
+    // between them as the pit's sloped wall.
+    private val dentRimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(214, 184, 140)
+        style = Paint.Style.FILL
+    }
     private val dentFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.rgb(96, 70, 44)
         style = Paint.Style.FILL
     }
+    private val dentCorePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(58, 40, 24)
+        style = Paint.Style.FILL
+    }
     private val dentCrackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(48, 32, 18)
+        color = Color.rgb(40, 26, 14)
         style = Paint.Style.STROKE
-        strokeWidth = 2.5f
+        strokeWidth = 3f
         strokeCap = Paint.Cap.ROUND
     }
 
@@ -124,12 +166,19 @@ class QubeRenderer {
         val tFR = cornerScreen(half, 2f * half, half)
 
         // Cosmetic-only shrink toward the shared center -- see class doc.
+        // QUBE-DAMAGE-VISUAL-01: while durability==1, an extra small
+        // anisotropic factor rides along on the same transform (applied
+        // to every one of the 8 shared corners together, so the mesh
+        // never gaps) -- see DENTED_SQUASH_X/Y's own doc.
+        val dented = qube.durability == 1
         val raw = arrayOf(bLL, bLR, bFL, bFR, tLL, tLR, tFL, tFR)
         val centerX = raw.sumOf { it[0].toDouble() }.toFloat() / raw.size
         val centerY = raw.sumOf { it[1].toDouble() }.toFloat() / raw.size
         val vScale = RenderConfig.QUBE_VISUAL_SCALE
+        val scaleX = vScale * (if (dented) DENTED_SQUASH_X else 1f)
+        val scaleY = vScale * (if (dented) DENTED_SQUASH_Y else 1f)
         val s = Array(raw.size) { i ->
-            floatArrayOf(centerX + (raw[i][0] - centerX) * vScale, centerY + (raw[i][1] - centerY) * vScale)
+            floatArrayOf(centerX + (raw[i][0] - centerX) * scaleX, centerY + (raw[i][1] - centerY) * scaleY)
         }
         // s indices: 0=bLL 1=bLR 2=bFL 3=bFR 4=tLL 5=tLR 6=tFL 7=tFR
 
@@ -170,16 +219,21 @@ class QubeRenderer {
         // VISUAL-01 cardboard decoration, drawn on top of the already
         // rotated/projected quads above -- purely cosmetic, feeds back
         // into none of the geometry/face-selection/sort logic above.
-        drawTapeBand(canvas, upQuad)
-        drawGrumpyEyes(canvas, frontQuad)
+        // QUBE-DAMAGE-VISUAL-01: the tape band and face swap to damaged
+        // variants while dented; the dent patch itself (drawn last, same
+        // as CATPUNCH-01's placement) is now the large, unmistakable
+        // "ベコッ" -- see drawDent.
+        drawTapeBand(canvas, upQuad, dented)
+        if (dented) drawHurtEyes(canvas, frontQuad) else drawGrumpyEyes(canvas, frontQuad)
         drawShippingMark(canvas, rightQuad)
 
-        // CATPUNCH-01: a first cat punch dents but doesn't destroy --
-        // durability sits strictly between 0 (destroyed, removed from
-        // play before it ever reaches this draw call) and its starting
-        // value. Drawn last, on the front face, so it's readable from
-        // roughly the same angle the player punched from.
-        if (qube.durability in 1 until QubeConfig.NORMAL_QUBE_DURABILITY) {
+        // durability==1 is exactly the state between "just hit, not yet
+        // broken" and "destroyed" (0, which is removed from `qubes`
+        // before ever reaching this draw call again) -- this condition
+        // is true for every single frame durability stays 1, not just
+        // the instant of the hit, so the dent persists through however
+        // many more topples it takes for the second punch to land.
+        if (dented) {
             drawDent(canvas, frontQuad)
         }
     }
@@ -210,12 +264,18 @@ class QubeRenderer {
 
     /** A single tape band across whichever face is currently playing the
      * "up" role -- a simple, always-present "sealed box" cue for this
-     * first static visibility pass. */
-    private fun drawTapeBand(canvas: Canvas, upQuad: Array<FloatArray>) {
-        val a = quadPoint(upQuad, 0f, 0.4f)
-        val b = quadPoint(upQuad, 1f, 0.4f)
-        val c = quadPoint(upQuad, 1f, 0.6f)
-        val d = quadPoint(upQuad, 0f, 0.6f)
+     * first static visibility pass. QUBE-DAMAGE-VISUAL-01: while [dented],
+     * the band's two ends are pulled to different v-heights (still the
+     * same [quadPoint] glue-to-face mechanism, just asymmetric u/v
+     * inputs) so it reads as knocked crooked/half-peeled instead of a
+     * perfectly straight seal. */
+    private fun drawTapeBand(canvas: Canvas, upQuad: Array<FloatArray>, dented: Boolean) {
+        val topV = if (dented) 0.32f else 0.4f
+        val bottomV = if (dented) 0.62f else 0.6f
+        val a = quadPoint(upQuad, 0f, topV)
+        val b = quadPoint(upQuad, 1f, if (dented) 0.46f else topV)
+        val c = quadPoint(upQuad, 1f, if (dented) 0.74f else bottomV)
+        val d = quadPoint(upQuad, 0f, bottomV)
         val path = Path().apply {
             moveTo(a[0], a[1]); lineTo(b[0], b[1]); lineTo(c[0], c[1]); lineTo(d[0], d[1]); close()
         }
@@ -223,10 +283,28 @@ class QubeRenderer {
     }
 
     /** Two short "slightly mean" eye strokes on whichever face is
-     * currently playing the "front" role. */
+     * currently playing the "front" role -- the HP2 default. */
     private fun drawGrumpyEyes(canvas: Canvas, frontQuad: Array<FloatArray>) {
         drawEyeStroke(canvas, frontQuad, 0.26f, 0.7f, 0.42f, 0.58f)
         drawEyeStroke(canvas, frontQuad, 0.74f, 0.7f, 0.58f, 0.58f)
+    }
+
+    /** QUBE-DAMAGE-VISUAL-01: the durability==1 face -- each eye becomes a
+     * small X (two crossed strokes) instead of a single angled line, the
+     * simplest possible "dazed/hurt" read in this same flat-line style,
+     * glued to [frontQuad] the same way every other decoration here is. */
+    private fun drawHurtEyes(canvas: Canvas, frontQuad: Array<FloatArray>) {
+        drawEyeX(canvas, frontQuad, 0.22f, 0.42f, 0.10f)
+        drawEyeX(canvas, frontQuad, 0.78f, 0.42f, 0.10f)
+    }
+
+    private fun drawEyeX(canvas: Canvas, quad: Array<FloatArray>, cu: Float, cv: Float, r: Float) {
+        val p1 = quadPoint(quad, cu - r, cv - r)
+        val p2 = quadPoint(quad, cu + r, cv + r)
+        val p3 = quadPoint(quad, cu - r, cv + r)
+        val p4 = quadPoint(quad, cu + r, cv - r)
+        canvas.drawLine(p1[0], p1[1], p2[0], p2[1], eyePaint)
+        canvas.drawLine(p3[0], p3[1], p4[0], p4[1], eyePaint)
     }
 
     private fun drawEyeStroke(canvas: Canvas, quad: Array<FloatArray>, uOuter: Float, vTop: Float, uInner: Float, vBottom: Float) {
@@ -248,24 +326,50 @@ class QubeRenderer {
         canvas.drawPath(path, markPaint)
     }
 
-    /** A caved-in patch plus a couple of crack lines on the front face --
-     * "ベコッ": the box survived a punch but visibly took the hit. Placed
-     * off-center (not over the grumpy eyes) via the same [quadPoint]
-     * glue-to-face mechanism every other decoration here uses. */
+    /**
+     * QUBE-DAMAGE-VISUAL-01: the durability==1 "ベコッ" -- large enough,
+     * on its own, to read as damage from across the board (per the
+     * explicit "must be obvious at a glance, not a small scratch"
+     * requirement), covering most of the lower front face so it never
+     * competes with [drawHurtEyes] above it. Three nested, progressively
+     * darker quads (rim -> wall -> core, all glued to [frontQuad] via the
+     * same [quadPoint] mechanism every decoration here uses) fake real
+     * inward depth purely with flat 2D fills -- no actual geometry is
+     * pushed inward, so the cube mesh itself (shared corners with the
+     * adjacent top/side faces) never gaps or breaks. Four crease lines
+     * radiate from the pit's center to the rim in a rough asterisk, the
+     * same "impact crack" read the original CATPUNCH-01 version used,
+     * just scaled up to match the much larger dent.
+     */
     private fun drawDent(canvas: Canvas, frontQuad: Array<FloatArray>) {
-        val center = quadPoint(frontQuad, 0.5f, 0.32f)
-        val a = quadPoint(frontQuad, 0.32f, 0.20f)
-        val b = quadPoint(frontQuad, 0.68f, 0.20f)
-        val c = quadPoint(frontQuad, 0.62f, 0.44f)
-        val d = quadPoint(frontQuad, 0.38f, 0.44f)
-        val path = Path().apply {
-            moveTo(a[0], a[1]); lineTo(b[0], b[1]); lineTo(c[0], c[1]); lineTo(d[0], d[1]); close()
-        }
-        canvas.drawPath(path, dentFillPaint)
+        fun ring(inset: Float): Array<FloatArray> = arrayOf(
+            quadPoint(frontQuad, 0.18f + inset, 0.42f + inset * 0.7f),
+            quadPoint(frontQuad, 0.82f - inset, 0.42f + inset * 0.7f),
+            quadPoint(frontQuad, 0.82f - inset, 0.86f - inset * 0.7f),
+            quadPoint(frontQuad, 0.18f + inset, 0.86f - inset * 0.7f)
+        )
 
-        val crack1 = quadPoint(frontQuad, 0.44f, 0.10f)
-        val crack2 = quadPoint(frontQuad, 0.56f, 0.48f)
-        canvas.drawLine(crack1[0], crack1[1], center[0], center[1], dentCrackPaint)
-        canvas.drawLine(center[0], center[1], crack2[0], crack2[1], dentCrackPaint)
+        fun fillQuad(pts: Array<FloatArray>, paint: Paint) {
+            val path = Path().apply {
+                moveTo(pts[0][0], pts[0][1])
+                for (i in 1 until pts.size) lineTo(pts[i][0], pts[i][1])
+                close()
+            }
+            canvas.drawPath(path, paint)
+        }
+
+        fillQuad(ring(0f), dentRimPaint)
+        fillQuad(ring(0.09f), dentFillPaint)
+        fillQuad(ring(0.20f), dentCorePaint)
+
+        val center = quadPoint(frontQuad, 0.5f, 0.64f)
+        val crackEnds = listOf(
+            0.30f to 0.46f, 0.70f to 0.46f,
+            0.24f to 0.80f, 0.76f to 0.80f
+        )
+        for ((u, v) in crackEnds) {
+            val end = quadPoint(frontQuad, u, v)
+            canvas.drawLine(center[0], center[1], end[0], end[1], dentCrackPaint)
+        }
     }
 }
