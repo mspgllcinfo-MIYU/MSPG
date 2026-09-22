@@ -2,19 +2,28 @@ package com.mspgllc.iqpuchin.input
 
 /**
  * STEP 7's single ACTION button, replacing the separate MARK and
- * ACTIVATE buttons. Wires the tap straight through to
- * [InputActionListener.onActionRequested] -- same no-debounce, no-delay
- * philosophy as [VirtualStickView] -- then updates the paw's
+ * ACTIVATE buttons. CONTROL-SIMPLE-01: [PawActionButtonView] now reports
+ * two distinct gestures (see its class doc) instead of one generic
+ * click -- a plain TAP wires straight through to
+ * [InputActionListener.onActionRequested] (MARK/ACTIVATE only), and the
+ * downward slide wires to [InputActionListener.onPunchGestureRequested]
+ * (CAT_PUNCH only) -- same no-debounce, no-delay philosophy as
+ * [VirtualStickView] for both. Either path then updates the paw's
  * gold/glow state from [isAwaitingMark] so the next press's meaning
  * stays visible without any text (UI-CUTE-01 replaced the old
  * MARK/ACTIVATE label with a paw glyph whose glow carries that same
- * information).
+ * information) -- CAT_PUNCH never itself changes MARK state, but this
+ * keeps the glow refresh symmetric/defensive rather than assuming that.
  */
 class ActionInputSource(private val actionButton: PawActionButtonView) {
     fun attach(listener: InputActionListener, isAwaitingMark: () -> Boolean) {
         actionButton.setAwaitingActivate(!isAwaitingMark())
-        actionButton.setOnActionClick {
+        actionButton.setOnTapClick {
             listener.onActionRequested()
+            actionButton.setAwaitingActivate(!isAwaitingMark())
+        }
+        actionButton.setOnPunchGesture {
+            listener.onPunchGestureRequested()
             actionButton.setAwaitingActivate(!isAwaitingMark())
         }
     }

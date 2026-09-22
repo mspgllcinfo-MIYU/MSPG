@@ -8,6 +8,7 @@ import android.graphics.Typeface
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
+import kotlin.math.abs
 
 /**
  * UI-CUTE-01: POI-themed replacement for the old rectangular MARK/
@@ -16,12 +17,23 @@ import android.view.View
  * bounds MainActivity already gave the old button (same position,
  * same size, same touch area -- the whole view is the tap target, same
  * as a Button), so only the paint/shape and the press animation are
- * new. The MARK -> ACTIVATE -> mark-clear game logic itself lives
- * entirely in GameView/MarkController and is untouched by this class;
- * it only *reports* taps via [setOnActionClick] and *displays*
- * whichever state [ActionInputSource] tells it about via
- * [setAwaitingActivate], mirroring how the old Button's
- * onClickListener/text swap worked.
+ * new.
+ *
+ * CONTROL-SIMPLE-01: this view now distinguishes two gestures instead
+ * of reporting every completed press as one generic click -- a plain
+ * TAP (small total displacement) versus a deliberate downward slide
+ * (see [PUNCH_SLIDE_THRESHOLD_DP]), reported via [setOnTapClick] and
+ * [setOnPunchGesture] respectively. Exactly one of the two fires per
+ * touch gesture, decided once at ACTION_UP from the ACTION_DOWN start
+ * point -- never both (see [onTouchEvent]). This is what lets GameView
+ * stop guessing intent from board state (a QUBE happening to be
+ * adjacent no longer changes what a tap does): input method alone now
+ * decides MARK/ACTIVATE (tap) versus CAT_PUNCH (slide). The MARK ->
+ * ACTIVATE -> mark-clear and CAT_PUNCH game logic itself still lives
+ * entirely in GameView/MarkController/CaptureSystem and is untouched by
+ * this class; it only *reports* which gesture happened and *displays*
+ * whichever MARK state [ActionInputSource] tells it about via
+ * [setAwaitingActivate].
  */
 class PawActionButtonView @JvmOverloads constructor(
     context: Context,
@@ -31,11 +43,32 @@ class PawActionButtonView @JvmOverloads constructor(
     companion object {
         /** UI-CONTROL-02: the brand mark stamped on the paw's main pad. */
         private const val BRAND_TEXT = "MIYU × AI"
+
+        /**
+         * CONTROL-SIMPLE-01: minimum downward travel (dp) from
+         * ACTION_DOWN before a release counts as the CAT_PUNCH slide
+         * gesture instead of an ordinary tap. Deliberately smaller than
+         * [SwipeInputView]'s SWIPE_THRESHOLD_DP (26dp, tuned for a
+         * full-screen move gesture) -- this button is only ~130dp
+         * across, and the spec explicitly asks for a light "shut" flick
+         * rather than a deliberate full swipe. 20dp sits comfortably
+         * above ordinary tap jitter/touch-slop (commonly ~8dp on
+         * Android) while staying well short of the move-swipe threshold,
+         * so a real flick registers reliably without the gesture feeling
+         * heavy.
+         */
+        private const val PUNCH_SLIDE_THRESHOLD_DP = 20f
     }
 
-    private var onActionClick: (() -> Unit)? = null
-    fun setOnActionClick(listener: () -> Unit) {
-        onActionClick = listener
+    private val punchSlideThresholdPx = PUNCH_SLIDE_THRESHOLD_DP * resources.displayMetrics.density
+
+    private var onTapClick: (() -> Unit)? = null
+    private var onPunchGesture: (() -> Unit)? = null
+    fun setOnTapClick(listener: () -> Unit) {
+        onTapClick = listener
+    }
+    fun setOnPunchGesture(listener: () -> Unit) {
+        onPunchGesture = listener
     }
 
     /** true once MARK has been placed and the next press will ACTIVATE;
@@ -52,10 +85,21 @@ class PawActionButtonView @JvmOverloads constructor(
         }
     }
 
-    /** True while a finger is down and still over the button -- drives
-     * the "pressed/sinks in" animation; the actual click still fires on
-     * ACTION_UP, same as the Button this replaces. */
+    /** True while a finger is down and still over the button -- purely
+     * cosmetic (drives the "pressed/sinks in" animation). CONTROL-SIMPLE-01:
+     * unlike before, this no longer gates whether ACTION_UP actually
+     * fires anything -- a real downward punch flick will often carry the
+     * finger past the button's own bottom edge before release, and
+     * gating on "still inside bounds" would silently swallow that
+     * gesture. Which of TAP/PUNCH_GESTURE fires (see [onTouchEvent]) is
+     * now decided purely from the ACTION_DOWN/ACTION_UP displacement. */
     private var pressed = false
+
+    /** ACTION_DOWN's position -- the fixed reference point [onTouchEvent]
+     * measures ACTION_UP's displacement from to classify TAP vs the
+     * downward CAT_PUNCH slide. */
+    private var downX = 0f
+    private var downY = 0f
 
     init {
         isClickable = true
@@ -140,9 +184,24 @@ class PawActionButtonView @JvmOverloads constructor(
         canvas.drawText(BRAND_TEXT, cx, baselineY, brandTextPaint)
     }
 
+    /**
+     * CONTROL-SIMPLE-01: ACTION_DOWN records the gesture's start point;
+     * ACTION_UP measures displacement from it and fires exactly one of
+     * [onTapClick]/[onPunchGesture] -- never both, and never neither (a
+     * completed touch that started here always resolves to one of the
+     * two, matching the "TAPかPUNCHのどちらか1つだけ" requirement). A
+     * downward slide is dy past [punchSlideThresholdPx] *and* dominantly
+     * vertical (dy > abs(dx)), the same dominant-axis shape
+     * [SwipeInputView]/[VirtualStickView] already use elsewhere in this
+     * project; everything else -- including a small jitter, or a drag
+     * that isn't dominantly downward -- resolves to TAP, per spec (only
+     * these two buckets exist this round).
+     */
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
+                downX = event.x
+                downY = event.y
                 pressed = true
                 invalidate()
                 return true
@@ -156,11 +215,14 @@ class PawActionButtonView @JvmOverloads constructor(
                 return true
             }
             MotionEvent.ACTION_UP -> {
-                val wasPressed = pressed
                 pressed = false
                 invalidate()
-                if (wasPressed) {
-                    onActionClick?.invoke()
+                val dx = event.x - downX
+                val dy = event.y - downY
+                if (dy >= punchSlideThresholdPx && dy > abs(dx)) {
+                    onPunchGesture?.invoke()
+                } else {
+                    onTapClick?.invoke()
                 }
                 return true
             }

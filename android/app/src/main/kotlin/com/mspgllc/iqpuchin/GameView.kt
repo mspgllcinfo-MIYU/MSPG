@@ -364,14 +364,15 @@ class GameView @JvmOverloads constructor(
      * judging logic) -- only the single ACTION button's dispatch is
      * unified here, based on whether a mark is currently pending.
      *
-     * CATPUNCH-01: adds a third branch, but the priority order the user
-     * asked for is preserved exactly -- a pending MARK always resolves
-     * as ACTIVATE first (unchanged from before), and only when no MARK
-     * is pending does a QUBE within punch range pre-empt placing a new
-     * MARK. No new button/gesture: this is still the single existing
-     * ACTION press, one punch per press -- a 2-hit combo is just two
-     * separate presses while still in range, never anything automatic
-     * from Virtual Stick movement.
+     * CONTROL-SIMPLE-01: this is now fired by a plain TAP only (see
+     * [PawActionButtonView]/[ActionInputSource]) and is unconditionally
+     * MARK/ACTIVATE -- CAT_PUNCH is decided entirely by input method now
+     * (the ACTION paw's distinct downward-slide gesture, see
+     * [onPunchGestureRequested]), never by which QUBEs happen to be
+     * nearby when TAP fires. This removes the CATPUNCH-01-era "a QUBE
+     * happening to be in punch range can steal the tap meant to place a
+     * MARK" interaction entirely, by construction: this method never
+     * looks at punch range at all anymore.
      */
     override fun onActionRequested() {
         if (gameStateController.state == GameState.GAME_OVER) return
@@ -379,7 +380,11 @@ class GameView @JvmOverloads constructor(
         if (currentMark != null) {
             // Logical grid coordinates are unique per QUBE, so at most
             // one entry can ever match -- one MARK captures at most one
-            // QUBE.
+            // QUBE. Unchanged from before CONTROL-SIMPLE-01: an ACTIVATE
+            // attempt against an empty marked cell still clears the mark
+            // with no capture and no sound -- this existing rule is
+            // deliberately preserved as-is, per this round's explicit
+            // "don't change MARK-clear behavior" instruction.
             val index = qubes.indexOfFirst { captureSystem.isCaptured(currentMark, it.qube.coord) }
             if (index >= 0) {
                 qubes.removeAt(index)
@@ -387,13 +392,27 @@ class GameView @JvmOverloads constructor(
             }
             markController.clear()
         } else {
-            val punchIndex = qubes.indexOfFirst { isPunchRange(boardLogic.playerPosition, it.qube.coord) }
-            if (punchIndex >= 0) {
-                performPunch(punchIndex)
-            } else {
-                markController.markAt(boardLogic.playerPosition)
-                soundEventPlayer.play(SoundEvent.MARK_SET)
-            }
+            markController.markAt(boardLogic.playerPosition)
+            soundEventPlayer.play(SoundEvent.MARK_SET)
+        }
+        invalidate()
+    }
+
+    /**
+     * CONTROL-SIMPLE-01: fired only by the ACTION paw's downward-slide
+     * gesture (see [PawActionButtonView]/[ActionInputSource]) -- never
+     * by a plain tap, and never both in the same gesture (see
+     * [PawActionButtonView.onTouchEvent]). Always attempts CAT_PUNCH via
+     * the same, unmodified [isPunchRange]/[performPunch] CATPUNCH-01
+     * already established; unlike the old shared-tap dispatch, this
+     * never falls back to placing/judging a MARK -- if nothing is in
+     * punch range, this is simply a no-op.
+     */
+    override fun onPunchGestureRequested() {
+        if (gameStateController.state == GameState.GAME_OVER) return
+        val punchIndex = qubes.indexOfFirst { isPunchRange(boardLogic.playerPosition, it.qube.coord) }
+        if (punchIndex >= 0) {
+            performPunch(punchIndex)
         }
         invalidate()
     }

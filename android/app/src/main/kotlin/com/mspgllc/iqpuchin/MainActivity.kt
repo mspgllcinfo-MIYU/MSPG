@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.view.Gravity
 import android.widget.FrameLayout
 import com.mspgllc.iqpuchin.input.ActionInputSource
+import com.mspgllc.iqpuchin.input.DirectionalPadView
 import com.mspgllc.iqpuchin.input.PawActionButtonView
 import com.mspgllc.iqpuchin.input.SwipeInputView
 import com.mspgllc.iqpuchin.input.VirtualStickView
@@ -41,16 +42,19 @@ private object UiConfig {
 }
 
 /** SWIPE-TEST-01: which move-input control is actually wired up.
- * [VirtualStickView] is kept fully intact and selectable here (never
- * deleted) specifically so this can be flipped back for comparison;
- * this real-device test build defaults to SWIPE. Neither GameView nor
- * any game-logic file reads this -- both controls only ever reach the
+ * [VirtualStickView]/[SwipeInputView] are kept fully intact and
+ * selectable here (never deleted) specifically so this can be flipped
+ * back for comparison. CONTROL-SIMPLE-01 adds [DPAD] as a third option
+ * -- a classic 4-direction cross pad, this build's new default per the
+ * "don't make the player think about which control does what" goal --
+ * without removing either prior mode. Neither GameView nor any
+ * game-logic file reads this -- all three controls only ever reach the
  * game through the same InputActionListener.onMoveRequested call. */
-private enum class MoveInputMode { SWIPE, VIRTUAL_STICK }
+private enum class MoveInputMode { SWIPE, VIRTUAL_STICK, DPAD }
 
 class MainActivity : Activity() {
 
-    private val moveInputMode = MoveInputMode.SWIPE
+    private val moveInputMode = MoveInputMode.DPAD
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -119,6 +123,27 @@ class MainActivity : Activity() {
                 )
                 virtualStick.translationY = uiVerticalOffsetPx
                 virtualStick.attach(gameView)
+            }
+            MoveInputMode.DPAD -> {
+                // CONTROL-SIMPLE-01: same left-side placement/sizing
+                // convention as VIRTUAL_STICK above (reusing
+                // STICK_SIZE_DP/STICK_MARGIN_DP -- this is a like-for-like
+                // replacement slot for whichever one control is active,
+                // not a new UI region). DirectionalPadView resolves and
+                // fires a direction itself; GameView only ever sees the
+                // same onMoveRequested(Direction) call the other two
+                // controls already produce.
+                val dpadSizePx = (UiConfig.STICK_SIZE_DP * density).toInt()
+                val dpadMarginPx = (UiConfig.STICK_MARGIN_DP * density).toInt()
+                val dpad = DirectionalPadView(this)
+                root.addView(
+                    dpad,
+                    FrameLayout.LayoutParams(dpadSizePx, dpadSizePx, Gravity.CENTER_VERTICAL or Gravity.START).apply {
+                        leftMargin = dpadMarginPx
+                    }
+                )
+                dpad.translationY = uiVerticalOffsetPx
+                dpad.attach(gameView)
             }
         }
 
