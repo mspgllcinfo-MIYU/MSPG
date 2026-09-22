@@ -41,6 +41,13 @@ class SoundEventPlayer(context: Context) {
         // 150-300Hz/300-600Hz content (see the regenerated WAVs; QUBE_LAND
         // sits near SoundPool's ceiling since its own peak is already
         // near-maximal).
+        // SWIPE-TEST-01: "heavier, not yet finished" on real hardware --
+        // both WAVs got one more notch on the same two bands via relative
+        // mix balance (those layers louder relative to the rest of the
+        // mix, same normalize peak as before), so these volumes are
+        // deliberately left unchanged rather than pushed further, per the
+        // explicit instruction not to raise volume to the point of
+        // clipping or burying other SE.
         const val VOLUME_QUBE_ROLL_START = 0.78f
         const val VOLUME_QUBE_LAND = 0.97f
         const val VOLUME_MARK_SET = 0.6f
@@ -53,9 +60,12 @@ class SoundEventPlayer(context: Context) {
         // 1.5-4kHz), but the *level* balance had it backwards: the impact
         // played louder (0.8) than the squeal (0.7) despite the squeal
         // being the signal that must always read clearly. Inverted here.
-        // CATPUNCH-FIX-01: squeal.wav itself was redesigned (see that
-        // asset's own notes) -- this balance still holds, so the volumes
-        // themselves are unchanged.
+        // CATPUNCH-FIX-01/SWIPE-TEST-01: squeal.wav itself has been
+        // redesigned twice since (see the generation script's notes --
+        // SWIPE-TEST-01's version rebuilds it around an actual plosive
+        // "g" burst + bright glide-into-vowel + hard cutoff, aimed at the
+        // syllable "gya!" rather than just its spectrum) -- this level
+        // balance still holds either way, so the volumes are unchanged.
         const val VOLUME_POI_HIT_IMPACT = 0.68f
         const val VOLUME_POI_HIT_SQUEAL = 1.0f
 

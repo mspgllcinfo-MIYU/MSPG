@@ -7,10 +7,11 @@ import android.view.Gravity
 import android.widget.FrameLayout
 import com.mspgllc.iqpuchin.input.ActionInputSource
 import com.mspgllc.iqpuchin.input.PawActionButtonView
+import com.mspgllc.iqpuchin.input.SwipeInputView
 import com.mspgllc.iqpuchin.input.VirtualStickView
 
-/** Sizing for the virtual stick and the single ACTION button, in dp so
- * it reads the same physical size across Galaxy devices at different
+/** Sizing for the move-input controls and the single ACTION button, in dp
+ * so it reads the same physical size across Galaxy devices at different
  * densities. Adjustable independently of anything in render/RenderConfig,
  * which only concerns the board itself. */
 private object UiConfig {
@@ -19,15 +20,37 @@ private object UiConfig {
     const val ACTION_BUTTON_SIZE_DP = 130
     const val ACTION_BUTTON_MARGIN_DP = 16
 
-    /** UI-POSITION: how far below dead-center (vertically) the stick and
-     * ACTION button sit, in dp. Both use the same value so their centers
-     * land at the same height on opposite sides of the screen -- roughly
+    /** SWIPE-TEST-01: the swipe-input zone's width, spanning the left
+     * side of the screen from x=0 -- deliberately a fixed dp value (this
+     * project's existing sizing convention for every other control)
+     * rather than a screen-width fraction, chosen conservatively so it
+     * never reaches the ACTION button's own touch bounds even on the
+     * narrowest common Galaxy width (~360dp): ACTION_BUTTON_SIZE_DP +
+     * 2 * ACTION_BUTTON_MARGIN_DP = 162dp reserved on the right, leaving
+     * at least a ~8dp dead gap between the two zones at 360dp width, and
+     * more on any wider screen. */
+    const val SWIPE_ZONE_WIDTH_DP = 190
+
+    /** UI-POSITION: how far below dead-center (vertically) the ACTION
+     * button (and, when active, the virtual stick) sits, in dp -- roughly
      * where PLAYER starts (BoardConfig.GRID_DEPTH / 2, i.e. mid-board) to
-     * a bit below it, within peripheral view of the board while playing. */
+     * a bit below it, within peripheral view of the board while playing.
+     * SWIPE_ZONE_WIDTH_DP intentionally does NOT use this offset -- its
+     * whole point is "anywhere on the left side", full height. */
     const val UI_VERTICAL_CENTER_OFFSET_DP = 60
 }
 
+/** SWIPE-TEST-01: which move-input control is actually wired up.
+ * [VirtualStickView] is kept fully intact and selectable here (never
+ * deleted) specifically so this can be flipped back for comparison;
+ * this real-device test build defaults to SWIPE. Neither GameView nor
+ * any game-logic file reads this -- both controls only ever reach the
+ * game through the same InputActionListener.onMoveRequested call. */
+private enum class MoveInputMode { SWIPE, VIRTUAL_STICK }
+
 class MainActivity : Activity() {
+
+    private val moveInputMode = MoveInputMode.SWIPE
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -35,16 +58,6 @@ class MainActivity : Activity() {
         val gameView = GameView(this)
 
         val density = resources.displayMetrics.density
-
-        // VIRTUAL-STICK-01: replaces the old 4-button cross D-pad. Its
-        // own knob position is touch/visual feedback only -- internally
-        // it still calls InputActionListener.onMoveRequested with the
-        // same discrete NORTH/SOUTH/EAST/WEST values as before (see
-        // VirtualStickView's class doc for the deadzone/direction-
-        // resolution rules), so PLAYER movement itself is unchanged.
-        val stickSizePx = (UiConfig.STICK_SIZE_DP * density).toInt()
-        val stickMarginPx = (UiConfig.STICK_MARGIN_DP * density).toInt()
-        val virtualStick = VirtualStickView(this)
 
         val actionButtonSizePx = (UiConfig.ACTION_BUTTON_SIZE_DP * density).toInt()
         val actionButtonMarginPx = (UiConfig.ACTION_BUTTON_MARGIN_DP * density).toInt()
@@ -55,27 +68,15 @@ class MainActivity : Activity() {
         // once a MARK is pending) instead of text (see ActionInputSource).
         val actionButton = PawActionButtonView(this)
 
-        // UI-POSITION: both controls sit at vertical-center-plus-a-bit-
-        // lower, level with each other, so they sit in peripheral view of
-        // the board (around where PLAYER starts, mid-board) instead of
-        // below it.
+        // UI-POSITION: the ACTION button (and the virtual stick, when
+        // that's the active mode) sits at vertical-center-plus-a-bit-
+        // lower, so it's in peripheral view of the board (around where
+        // PLAYER starts, mid-board) instead of below it.
         val uiVerticalOffsetPx = UiConfig.UI_VERTICAL_CENTER_OFFSET_DP * density
 
-        // UI-SWAP-03: virtual stick (continuous movement) is now on the
-        // left; ACTION (one-shot MARK/ACTIVATE) is now on the right --
-        // swapped back from the previous round per updated real-device
-        // feedback. Only Gravity/margin sides change below; sizes, the
-        // shared vertical offset, and both views' own drawing/touch/
-        // haptic logic are untouched.
         val root = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
             addView(gameView, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-            addView(
-                virtualStick,
-                FrameLayout.LayoutParams(stickSizePx, stickSizePx, Gravity.CENTER_VERTICAL or Gravity.START).apply {
-                    leftMargin = stickMarginPx
-                }
-            )
             addView(
                 actionButton,
                 FrameLayout.LayoutParams(actionButtonSizePx, actionButtonSizePx, Gravity.CENTER_VERTICAL or Gravity.END).apply {
@@ -83,11 +84,43 @@ class MainActivity : Activity() {
                 }
             )
         }
-        virtualStick.translationY = uiVerticalOffsetPx
         actionButton.translationY = uiVerticalOffsetPx
-
-        virtualStick.attach(gameView)
         ActionInputSource(actionButton).attach(gameView) { gameView.isAwaitingMark() }
+
+        // SWIPE-TEST-01: exactly one of the two move-input controls is
+        // ever added to `root` -- the other's class is untouched and
+        // simply unused this build, so restoring it later is a one-line
+        // mode flip, not a re-implementation.
+        when (moveInputMode) {
+            MoveInputMode.SWIPE -> {
+                val swipeZoneWidthPx = (UiConfig.SWIPE_ZONE_WIDTH_DP * density).toInt()
+                val swipeInput = SwipeInputView(this)
+                root.addView(
+                    swipeInput,
+                    FrameLayout.LayoutParams(swipeZoneWidthPx, FrameLayout.LayoutParams.MATCH_PARENT, Gravity.START)
+                )
+                swipeInput.attach(gameView)
+            }
+            MoveInputMode.VIRTUAL_STICK -> {
+                // VIRTUAL-STICK-01: its own knob position is touch/visual
+                // feedback only -- internally it still calls
+                // InputActionListener.onMoveRequested with the same
+                // discrete NORTH/SOUTH/EAST/WEST values as before (see
+                // VirtualStickView's class doc), so PLAYER movement
+                // itself is unchanged versus this build's SWIPE default.
+                val stickSizePx = (UiConfig.STICK_SIZE_DP * density).toInt()
+                val stickMarginPx = (UiConfig.STICK_MARGIN_DP * density).toInt()
+                val virtualStick = VirtualStickView(this)
+                root.addView(
+                    virtualStick,
+                    FrameLayout.LayoutParams(stickSizePx, stickSizePx, Gravity.CENTER_VERTICAL or Gravity.START).apply {
+                        leftMargin = stickMarginPx
+                    }
+                )
+                virtualStick.translationY = uiVerticalOffsetPx
+                virtualStick.attach(gameView)
+            }
+        }
 
         setContentView(root)
     }
