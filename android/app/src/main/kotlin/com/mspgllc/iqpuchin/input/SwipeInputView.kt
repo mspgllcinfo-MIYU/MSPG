@@ -30,19 +30,26 @@ import kotlin.math.max
  * bounds on the right -- see MainActivity's swipe-zone sizing) starts a
  * gesture; no fixed-position stick graphic is drawn (per spec), just a
  * small dot at the current touch point while a finger is down, purely as
- * touch feedback. A drag past [SWIPE_THRESHOLD_DP] from that gesture's
- * start point resolves to exactly one of the four cardinal directions by
- * dominant axis -- same tie-break rule as [VirtualStickView.updateKnob]
- * (horizontal wins only on strict inequality, else vertical; same
- * dx>0->EAST/dx<0->WEST/dy>0->SOUTH/dy<0->NORTH sign convention) so a
- * player switching between the two controls sees identical direction
- * behavior for the same drag -- and fires
- * [InputActionListener.onMoveRequested] exactly once, plus the same
- * single "kotsu" [StickHaptics] tick VirtualStickView fires on its own
- * direction lock. After that single fire, the rest of this same
- * finger-down gesture is inert -- no matter how far or which way the
- * finger keeps moving -- until it lifts and a new gesture begins. A tap
- * that never crosses the threshold produces no move at all.
+ * touch feedback.
+ *
+ * SWIPE-FORGIVING-TEST-01: direction is judged only once, at
+ * ACTION_UP/ACTION_CANCEL, from the gesture's start point to wherever the
+ * finger actually lifted -- never mid-drag. Real-device feedback was
+ * that a thumb swiping "up" naturally arcs sideways before straightening
+ * out, so judging the instant a threshold is first crossed (the old
+ * behavior) could lock in a direction before the finger ever reached
+ * where the player actually meant to go; waiting for release and reading
+ * the whole start->final vector lets the gesture finish before anything
+ * is decided. See [resolveDirection] for the actual classification (a
+ * dominant-axis test, deliberately given extra horizontal tolerance for
+ * NORTH specifically). This still fires
+ * [InputActionListener.onMoveRequested] at most once per finger-down
+ * gesture (never more, regardless of how far or which way the finger
+ * traveled first) and only when the release point is at least
+ * [SWIPE_THRESHOLD_DP] from the start -- short of that, a tap or small
+ * jitter, it's a no-op. The same single "kotsu" [StickHaptics] tick
+ * VirtualStickView fires on its own direction lock now fires at the
+ * instant a move is actually confirmed, never while still dragging.
  */
 class SwipeInputView @JvmOverloads constructor(
     context: Context,
@@ -50,12 +57,29 @@ class SwipeInputView @JvmOverloads constructor(
 ) : View(context, attrs) {
 
     private companion object {
-        /** How far, in dp, a drag must travel from its gesture's start
-         * point before a direction is resolved and fired -- deliberately
-         * short ("短くスワイプ"), analogous in role to VirtualStickView's
-         * DEADZONE_FRACTION but expressed as an absolute distance since
-         * this view has no fixed base radius to take a fraction of. */
+        /** How far, in dp, the release point must be from the gesture's
+         * start point before any direction is resolved at all -- below
+         * this, ACTION_UP is a no-op (a tap or small jitter). Unchanged
+         * from SWIPE-TEST-01's value. */
         const val SWIPE_THRESHOLD_DP = 26f
+
+        /**
+         * SWIPE-FORGIVING-TEST-01: how much more horizontal drift NORTH
+         * tolerates versus the plain dominant-axis test SOUTH/EAST/WEST
+         * still use. A drag classifies as NORTH whenever
+         * `abs(dy) * NORTH_FORGIVENESS_RATIO >= abs(dx)` (and dy is
+         * upward) -- at 1.0 that's the ordinary +/-45 degree cone every
+         * other direction gets; 1.4 widens NORTH's cone to roughly
+         * +/-54.5 degrees off straight-up (atan(1.4)). Deliberately
+         * NORTH-only and a moderate widening, not applied to SOUTH/EAST/
+         * WEST and not pushed further than this -- per the explicit
+         * "don't overcorrect" instruction, this reflects a real (but not
+         * extreme) allowance for how a thumb's natural upward arc drifts
+         * sideways, without meaningfully eating into EAST/WEST's own
+         * territory for gestures that aren't primarily upward at all
+         * (this ratio only ever applies when dy is already negative).
+         */
+        const val NORTH_FORGIVENESS_RATIO = 1.4f
 
         const val TOUCH_DOT_RADIUS_DP = 22f
     }
@@ -71,12 +95,6 @@ class SwipeInputView @JvmOverloads constructor(
     private var touchX = 0f
     private var touchY = 0f
     private var pointerDown = false
-
-    /** True once this gesture (since the last ACTION_DOWN) has already
-     * fired a move -- the single-fire-per-gesture latch that stops a
-     * long continued drag from producing more than the one cell earned
-     * by crossing the threshold once. Cleared only on ACTION_DOWN. */
-    private var firedThisGesture = false
 
     private val touchDotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.argb(140, 255, 205, 60)
@@ -101,42 +119,62 @@ class SwipeInputView @JvmOverloads constructor(
                 touchX = event.x
                 touchY = event.y
                 pointerDown = true
-                firedThisGesture = false
                 invalidate()
             }
             MotionEvent.ACTION_MOVE -> {
+                // Touch-point feedback only -- no direction is resolved
+                // or fired here anymore; see ACTION_UP.
                 touchX = event.x
                 touchY = event.y
-                if (!firedThisGesture) {
-                    val dx = touchX - startX
-                    val dy = touchY - startY
-                    if (max(abs(dx), abs(dy)) >= thresholdPx) {
-                        // Same dominant-axis resolution as VirtualStickView:
-                        // horizontal wins only on a strict inequality, so an
-                        // exact tie (or anything closer to vertical)
-                        // resolves to up/down -- never diagonal either way.
-                        val direction = if (abs(dx) > abs(dy)) {
-                            if (dx > 0f) Direction.EAST else Direction.WEST
-                        } else {
-                            if (dy > 0f) Direction.SOUTH else Direction.NORTH
-                        }
-                        listener?.onMoveRequested(direction)
-                        StickHaptics.tick(context)
-                        firedThisGesture = true
-                    }
-                }
                 invalidate()
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                // Releasing always ends the gesture -- the next touch-down
-                // starts a fresh one, with its own fresh threshold check.
+            MotionEvent.ACTION_UP -> {
+                val dx = event.x - startX
+                val dy = event.y - startY
+                if (max(abs(dx), abs(dy)) >= thresholdPx) {
+                    val direction = resolveDirection(dx, dy)
+                    listener?.onMoveRequested(direction)
+                    // Fires exactly here -- the instant (and only
+                    // instant) a move is actually confirmed, never
+                    // mid-drag.
+                    StickHaptics.tick(context)
+                }
                 pointerDown = false
-                firedThisGesture = false
+                invalidate()
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                // A cancelled gesture never resolves a direction, no
+                // matter how far it had already moved.
+                pointerDown = false
                 invalidate()
             }
             else -> return false
         }
         return true
+    }
+
+    /**
+     * Start->final dominant-axis classification, with NORTH given a
+     * wider cone than the other three (see [NORTH_FORGIVENESS_RATIO]).
+     * Always resolves to exactly one of the four cardinal directions --
+     * never diagonal -- since the two branches below are a clean,
+     * gap-free partition of every (dx, dy) that isn't (0, 0).
+     */
+    private fun resolveDirection(dx: Float, dy: Float): Direction {
+        val absDx = abs(dx)
+        val absDy = abs(dy)
+        return if (dy < 0f) {
+            // Upward: the widened NORTH cone.
+            if (absDy * NORTH_FORGIVENESS_RATIO >= absDx) {
+                Direction.NORTH
+            } else if (dx > 0f) Direction.EAST else Direction.WEST
+        } else {
+            // Downward (or perfectly horizontal, dy == 0): the ordinary
+            // dominant-axis cone, same as SWIPE-TEST-01/VirtualStickView.
+            if (absDy >= absDx) {
+                Direction.SOUTH
+            } else if (dx > 0f) Direction.EAST else Direction.WEST
+        }
     }
 
     override fun onDraw(canvas: Canvas) {
