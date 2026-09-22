@@ -57,6 +57,18 @@ class GameView @JvmOverloads constructor(
     attrs: AttributeSet? = null
 ) : View(context, attrs), InputActionListener {
 
+    private companion object {
+        /** SCORE-SYSTEM-01: MARK/ACTIVATE scores higher than CAT_PUNCH's
+         * [SCORE_PUNCH_DESTROY] -- reading the QUBE's approach and timing
+         * an ACTIVATE is deliberately worth more than directly punching it
+         * twice, per this round's own "reading beats brute force" design
+         * intent. Both are awarded exactly once per QUBE, only at the
+         * instant it is actually removed from `qubes` -- see
+         * [onActionRequested]/[performPunch]. */
+        const val SCORE_ACTIVATE_CAPTURE = 100
+        const val SCORE_PUNCH_DESTROY = 50
+    }
+
     /** Pairs a [Qube] with the [QubeMotion] that advances it and the
      * [QubeSoundTracker] that watches both for SE purposes. QubeMotion
      * keeps its own Qube reference private, so GameView needs to hold
@@ -102,6 +114,28 @@ class GameView @JvmOverloads constructor(
     // CATPUNCH-01: purely cosmetic, like hitReaction above -- reads
     // gameStateController.life each frame, never written back to it.
     private val churuRenderer = ChuruLifeRenderer()
+
+    // SCORE-SYSTEM-01: the entire score system is this one Int plus the
+    // two `score +=` call sites in onActionRequested/performPunch below
+    // -- per this round's own "avoid over-engineering" instruction, a
+    // dedicated ScoreController class would add indirection with nothing
+    // for it to own yet (no combo/multiplier/high-score exists). Starts
+    // at 0, which is also this app's only "new game" moment: there is no
+    // in-game restart path anywhere in this codebase (confirmed by
+    // reading every file under input/ and this class -- MainActivity
+    // constructs exactly one GameView per process launch and never
+    // recreates it), so a fresh process launch is currently the only time
+    // this field's initial value is what matters.
+    private var score: Int = 0
+
+    // SCORE-SYSTEM-01: a brief "+100"/"+50" popup, same TimedCosmeticFlag
+    // shape as walkVisual/punchVisual above (no fade, just present-then-
+    // gone -- matching this codebase's existing convention for these
+    // short cosmetic windows) plus the text to show while active. Purely
+    // decorative: never read by any score/game-logic check, only by
+    // onDraw below.
+    private val scorePopup = TimedCosmeticFlag(durationMs = 400L)
+    private var scorePopupText: String = ""
 
     // STEP 6: every NORMAL QUBE lives in this one collection -- no
     // qube1/qube2/qube3 style variables. Each entry owns its own GridCoord
@@ -159,6 +193,36 @@ class GameView @JvmOverloads constructor(
         textAlign = Paint.Align.CENTER
         isFakeBoldText = true
     }
+    // SCORE-SYSTEM-01: gold-on-black, matching the paw button's existing
+    // gold (Color.rgb(255, 205, 60), see PawActionButtonView) -- this
+    // round's own "black/pink/gold/white" palette instruction reuses a
+    // color already established in this game's world rather than
+    // inventing a new one. Right-aligned so it sits in the header row
+    // opposite churuRenderer's left-aligned icons (see onDraw) without
+    // ever needing to know how wide the digits are.
+    private val scoreTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(255, 205, 60)
+        textSize = 28f * density
+        textAlign = Paint.Align.RIGHT
+        isFakeBoldText = true
+    }
+    // SCORE-SYSTEM-01: the brief "+100"/"+50" popup -- pink, per the same
+    // palette instruction, so it reads as a distinct transient event next
+    // to the steady gold SCORE line rather than a duplicate of it.
+    private val scorePopupPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(235, 90, 150)
+        textSize = 24f * density
+        textAlign = Paint.Align.RIGHT
+        isFakeBoldText = true
+    }
+    // SCORE-SYSTEM-01: same gold as scoreTextPaint, smaller and centered,
+    // for the one line added to the existing GAME OVER overlay.
+    private val gameOverScorePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(255, 205, 60)
+        textSize = 32f * density
+        textAlign = Paint.Align.CENTER
+        isFakeBoldText = true
+    }
 
     /**
      * Judges collision purely from logical GridCoords -- PLAYER's current
@@ -202,6 +266,7 @@ class GameView @JvmOverloads constructor(
                 if (hitReaction.progress() > 0f) hitVisualElapsedMs += deltaMs
                 walkVisual.update(deltaMs)
                 punchVisual.update(deltaMs)
+                scorePopup.update(deltaMs)
                 // QUBE-BREAK-VISUAL-01: plain elapsed-time bookkeeping
                 // only, the same shape TimedCosmeticFlag.update already
                 // uses elsewhere -- BrokenQubeVisual has no game-logic
@@ -369,11 +434,30 @@ class GameView @JvmOverloads constructor(
             40f * density
         )
 
+        // SCORE-SYSTEM-01: right-aligned at the same y as churuRenderer's
+        // left-aligned icons above -- same established header row/overlay
+        // band this game already draws HUD elements in (churu itself
+        // draws directly over the board, not in a separate reserved
+        // margin), just the opposite horizontal side, so it can never
+        // overlap the life icons.
+        canvas.drawText("SCORE ${scoreText()}", width - 16f * density, 48f * density, scoreTextPaint)
+        if (scorePopup.active) {
+            canvas.drawText(scorePopupText, width - 16f * density, 80f * density, scorePopupPaint)
+        }
+
         if (gameStateController.state == GameState.GAME_OVER) {
             canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), gameOverDimPaint)
             canvas.drawText("GAME OVER", width / 2f, height / 2f, gameOverTextPaint)
+            // SCORE-SYSTEM-01: the run's final score, minimal addition to
+            // the existing overlay rather than a GAME OVER redesign.
+            canvas.drawText("SCORE ${scoreText()}", width / 2f, height / 2f + 56f * density, gameOverScorePaint)
         }
     }
+
+    /** SCORE-SYSTEM-01: zero-padded to at least 6 digits for display only
+     * -- [score] itself stays a plain Int, never reformatted/stored as a
+     * String anywhere else. */
+    private fun scoreText(): String = score.toString().padStart(6, '0')
 
     override fun onMoveRequested(direction: Direction) {
         if (gameStateController.state == GameState.GAME_OVER) return
@@ -419,6 +503,14 @@ class GameView @JvmOverloads constructor(
             if (index >= 0) {
                 qubes.removeAt(index)
                 soundEventPlayer.play(SoundEvent.CAPTURE_SUCCESS)
+                // SCORE-SYSTEM-01: scored exactly once, right here -- this
+                // branch only ever runs when isCaptured just matched and
+                // the QUBE was just removed from `qubes`, i.e. exactly the
+                // "QUBE actually processed via MARK/ACTIVATE" instant the
+                // spec requires. An ACTIVATE against an empty marked cell
+                // (index < 0, existing behavior, unchanged below) never
+                // reaches this line.
+                awardScore(SCORE_ACTIVATE_CAPTURE, "+$SCORE_ACTIVATE_CAPTURE")
             }
             markController.clear()
         } else {
@@ -492,9 +584,27 @@ class GameView @JvmOverloads constructor(
             )
             qubes.removeAt(index)
             soundEventPlayer.play(SoundEvent.QUBE_BREAK)
+            // SCORE-SYSTEM-01: scored exactly once, only in this
+            // `destroyed` branch (durability just hit 0 above) -- the
+            // first punch (the `else` branch below, durability 2->1)
+            // never reaches this line, so it is always 0 points, per the
+            // spec's explicit "1st hit = 0, 2nd hit = +50" requirement.
+            // BrokenQubeVisual (added above) is never consulted for
+            // scoring -- this line runs before that object even exists on
+            // screen for a single frame.
+            awardScore(SCORE_PUNCH_DESTROY, "+$SCORE_PUNCH_DESTROY")
         } else {
             soundEventPlayer.play(SoundEvent.PUNCH_HIT)
         }
+    }
+
+    /** SCORE-SYSTEM-01: the one place [score] is ever mutated -- both
+     * scoring call sites above go through this so "add points" and "show
+     * the brief popup" can never drift apart. */
+    private fun awardScore(points: Int, popupText: String) {
+        score += points
+        scorePopupText = popupText
+        scorePopup.trigger()
     }
 
     /** Read by [com.mspgllc.iqpuchin.input.ActionInputSource] to decide
