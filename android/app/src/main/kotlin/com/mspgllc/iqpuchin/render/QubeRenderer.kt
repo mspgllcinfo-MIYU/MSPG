@@ -7,6 +7,7 @@ import android.graphics.Path
 import com.mspgllc.iqpuchin.board.Qube
 import com.mspgllc.iqpuchin.board.QubeMotion
 import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.sin
 
 /**
@@ -107,6 +108,46 @@ class QubeRenderer {
         const val DENT_NOTCH_BOTTOM_V = 0.16f
         const val DENT_NOTCH_MID_V = 0.40f
         const val DENT_NOTCH_TOP_V = 0.64f
+
+        /**
+         * QUBE-BREAK-VISUAL-01: [drawBroken]'s crumble tuning. All
+         * fractions are relative to the broken QUBE's own on-screen front-
+         * face width at the instant of the break (see `unit` in
+         * [drawBroken]), never a fixed px value -- so the effect scales
+         * automatically with [RenderConfig.QUBE_VISUAL_SCALE]/displayScale
+         * exactly like every other QubeRenderer decoration already does,
+         * with no new dependency on either constant.
+         */
+        /** How far the left/right halves of the box pull apart (the
+         * "split down the middle" read), as a fraction of `unit`, at
+         * progress==1. */
+        const val BREAK_SPLIT_GAP_FRACTION = 0.30f
+        /** How much the whole silhouette shrinks toward its own center by
+         * progress==1 -- the "crumples" part of "少し潰れる". */
+        const val BREAK_SHRINK_MAX = 0.30f
+        /** Extra downward collapse applied only to the top corners (on top
+         * of the uniform shrink above) -- the "上下にも少し崩れる" cue,
+         * read as the lid caving in rather than a uniform squash. */
+        const val BREAK_TOP_CRUSH_FRACTION = 0.18f
+
+        /** Exactly the five directions the spec lists: upper-left, upper-
+         * right, left, right, slightly down. Each pair is (dxUnit, dyUnit)
+         * in screen space, not normalized to length 1 -- their magnitude
+         * already encodes "slightly down" being a shorter/shallower throw
+         * than the four corner pieces. */
+        val FRAGMENT_DIRECTIONS = arrayOf(
+            floatArrayOf(-0.8f, -0.9f),
+            floatArrayOf(0.8f, -0.9f),
+            floatArrayOf(-1f, -0.1f),
+            floatArrayOf(1f, -0.1f),
+            floatArrayOf(0.2f, 0.6f)
+        )
+        const val FRAGMENT_TRAVEL_FRACTION = 0.55f
+        const val FRAGMENT_SIZE_FRACTION = 0.16f
+        const val FRAGMENT_ROTATION_DEG = 100f
+        /** A different base rotation per fragment purely so they don't all
+         * spin in visual lockstep -- cosmetic variety only. */
+        val FRAGMENT_BASE_ROTATION_DEG = floatArrayOf(-20f, 15f, -35f, 25f, 5f)
     }
 
     private enum class Face { TOP, BOTTOM, FRONT, BACK }
@@ -157,6 +198,23 @@ class QubeRenderer {
         strokeWidth = 3f
         strokeCap = Paint.Cap.ROUND
     }
+
+    // QUBE-BREAK-VISUAL-01: dedicated Paint instances for [drawBroken],
+    // distinct from brightPaint/midPaint/darkPaint/outline above -- this
+    // effect fades its alpha every frame, and those paints are shared,
+    // mutable Paint objects also used to draw every still-alive QUBE in
+    // the same frame; mutating their alpha here would visibly (and
+    // wrongly) fade every other QUBE on the board too. Same cardboard
+    // colors as the live paints, just a private copy each.
+    private val breakBrightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(196, 164, 118) }
+    private val breakMidPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(168, 128, 82) }
+    private val breakDarkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(128, 94, 58) }
+    private val breakOutlinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(58, 40, 24)
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+    }
+    private val breakFragmentPaints = arrayOf(breakBrightPaint, breakMidPaint, breakDarkPaint)
 
     /** Cosine-based ease-in-out: slow start, fast middle, slow finish. */
     private fun easeInOut(linearT: Float): Float =
@@ -274,6 +332,181 @@ class QubeRenderer {
         if (dented) {
             drawDent(canvas, frontQuad)
         }
+    }
+
+    /**
+     * QUBE-BREAK-VISUAL-01: the HP1->HP0 break flash. [broken] is a
+     * render-only snapshot GameView captured at the exact instant the
+     * second cat punch destroyed the QUBE -- by the time this is called
+     * every frame, the real [Qube]/[QubeMotion] are already gone from
+     * GameView's `qubes` list (this function never touches either class
+     * or receives a durability value; it only ever reads [broken]'s own
+     * frozen fields and [BrokenQubeVisual.progress]). GameView removes
+     * [broken] from its own list once [BrokenQubeVisual.finished] is
+     * true, so this never needs to guard against progress reaching 1.
+     *
+     * The corner math in the first half of this function intentionally
+     * duplicates (rather than shares/refactors) [draw]'s own corner
+     * computation -- this round's spec explicitly requires HP1/HP2's
+     * already-verified-on-device look stay byte-for-byte unchanged, and
+     * the safest way to guarantee that is to never modify [draw] itself,
+     * even to extract a shared helper.
+     *
+     * On top of the frozen pose, this applies three purely cosmetic
+     * transforms driven by [BrokenQubeVisual.progress] (0f at the instant
+     * of the break, 1f ~200ms later): the left/right corners pull apart
+     * (the "split down the middle" read), the whole shape shrinks toward
+     * its own center with extra downward collapse on the top corners (the
+     * "潰れる/崩れる" read), and everything fades out -- plus five small
+     * cardboard-colored fragments thrown outward per the spec's own
+     * "progress = elapsed/duration; position = start + direction*progress"
+     * recommendation. No physics engine, no new geometry pushed into any
+     * logical/collision structure -- this is Canvas drawing only.
+     */
+    fun drawBroken(canvas: Canvas, broken: BrokenQubeVisual, projection: IsoProjection) {
+        val t = broken.progress()
+
+        val easedT = easeInOut(broken.rotationProgressAtBreak.coerceIn(0f, 1f))
+        val dz = broken.direction.dz.toFloat()
+        val theta = easedT * (Math.PI.toFloat() / 2f) * dz
+
+        val half = 0.5f
+        val fromX = broken.previousCoordX.toFloat()
+        val fromZ = broken.previousCoordZ.toFloat()
+        val pivotZ = half * dz
+        val cosT = cos(theta)
+        val sinT = sin(theta)
+
+        fun cornerScreen(localX: Float, localY: Float, localZ: Float): FloatArray {
+            val relY = localY
+            val relZ = localZ - pivotZ
+            val worldY = cosT * relY - sinT * relZ
+            val relZ2 = sinT * relY + cosT * relZ
+            val worldZ = fromZ + pivotZ + relZ2
+            val worldX = fromX + localX
+            return projection.toScreen(worldX, worldZ, worldY)
+        }
+
+        val bLL = cornerScreen(-half, 0f, -half)
+        val bLR = cornerScreen(half, 0f, -half)
+        val bFL = cornerScreen(-half, 0f, half)
+        val bFR = cornerScreen(half, 0f, half)
+        val tLL = cornerScreen(-half, 2f * half, -half)
+        val tLR = cornerScreen(half, 2f * half, -half)
+        val tFL = cornerScreen(-half, 2f * half, half)
+        val tFR = cornerScreen(half, 2f * half, half)
+
+        val raw = arrayOf(bLL, bLR, bFL, bFR, tLL, tLR, tFL, tFR)
+        // s indices: 0=bLL 1=bLR 2=bFL 3=bFR 4=tLL 5=tLR 6=tFL 7=tFR
+        val vScale = RenderConfig.QUBE_VISUAL_SCALE
+        val scaled = Array(raw.size) { i -> floatArrayOf(raw[i][0] * vScale, raw[i][1] * vScale) }
+        // Re-center after the uniform vScale (applied the same way [draw]
+        // applies it -- around the raw centroid, not the origin).
+        val rawCenterX = raw.sumOf { it[0].toDouble() }.toFloat() / raw.size
+        val rawCenterY = raw.sumOf { it[1].toDouble() }.toFloat() / raw.size
+        val scaledCenterX = scaled.sumOf { it[0].toDouble() }.toFloat() / scaled.size
+        val scaledCenterY = scaled.sumOf { it[1].toDouble() }.toFloat() / scaled.size
+        for (p in scaled) {
+            p[0] += rawCenterX - scaledCenterX
+            p[1] += rawCenterY - scaledCenterY
+        }
+
+        // Reference length for every fraction-based tuning constant below
+        // -- the box's own front-face width at this exact pose, so the
+        // whole effect scales with displayScale/QUBE_VISUAL_SCALE
+        // automatically, the same way every existing QubeRenderer
+        // decoration is glued to face-relative u/v rather than a fixed px
+        // size.
+        val unit = hypot((scaled[3][0] - scaled[2][0]).toDouble(), (scaled[3][1] - scaled[2][1]).toDouble()).toFloat()
+
+        val gapPx = unit * BREAK_SPLIT_GAP_FRACTION * t
+        val shrink = 1f - BREAK_SHRINK_MAX * t
+        val topCrushPx = unit * BREAK_TOP_CRUSH_FRACTION * t
+
+        val centerX = scaledCenterX
+        val centerY = scaledCenterY
+        val s = Array(scaled.size) { i ->
+            val leftHalf = i == 0 || i == 2 || i == 4 || i == 6 // bLL,bFL,tLL,tFL
+            val isTop = i >= 4
+            var x = scaled[i][0] + (if (leftHalf) -gapPx / 2f else gapPx / 2f)
+            var y = scaled[i][1] + (if (isTop) topCrushPx else 0f)
+            x = centerX + (x - centerX) * shrink
+            y = centerY + (y - centerY) * shrink
+            floatArrayOf(x, y)
+        }
+
+        val normalY = mapOf(Face.TOP to cosT, Face.BOTTOM to -cosT, Face.FRONT to -sinT, Face.BACK to sinT)
+        val normalZ = mapOf(Face.TOP to sinT, Face.BOTTOM to -sinT, Face.FRONT to cosT, Face.BACK to -cosT)
+        val upFace = normalY.maxByOrNull { it.value }!!.key
+        val frontFace = normalZ.filterKeys { it != upFace }.maxByOrNull { it.value }!!.key
+
+        fun quadOf(face: Face): Array<FloatArray> = when (face) {
+            Face.TOP -> arrayOf(s[4], s[5], s[7], s[6])
+            Face.BOTTOM -> arrayOf(s[0], s[1], s[3], s[2])
+            Face.FRONT -> arrayOf(s[2], s[3], s[7], s[6])
+            Face.BACK -> arrayOf(s[1], s[0], s[4], s[5])
+        }
+
+        val rightQuad = arrayOf(s[1], s[5], s[7], s[3])
+        val upQuad = quadOf(upFace)
+        val frontQuad = quadOf(frontFace)
+
+        fun avgScreenY(quad: Array<FloatArray>) = quad.sumOf { it[1].toDouble() }.toFloat() / quad.size
+        val alpha = ((1f - t) * 255f).toInt().coerceIn(0, 255)
+        breakBrightPaint.alpha = alpha
+        breakMidPaint.alpha = alpha
+        breakDarkPaint.alpha = alpha
+        breakOutlinePaint.alpha = alpha
+
+        val drawOrder = listOf(
+            breakBrightPaint to upQuad,
+            breakMidPaint to frontQuad,
+            breakDarkPaint to rightQuad
+        ).sortedBy { (_, quad) -> avgScreenY(quad) }
+        for ((paint, quad) in drawOrder) {
+            drawFaceAlpha(canvas, paint, quad)
+        }
+
+        val fragmentCenter = quadPoint(frontQuad, 0.5f, 0.5f)
+        val fragmentAlpha = ((1f - t) * 255f).toInt().coerceIn(0, 255)
+        for (i in FRAGMENT_DIRECTIONS.indices) {
+            val dir = FRAGMENT_DIRECTIONS[i]
+            val travel = unit * FRAGMENT_TRAVEL_FRACTION * t
+            val fx = fragmentCenter[0] + dir[0] * travel
+            val fy = fragmentCenter[1] + dir[1] * travel
+            val rotationDeg = FRAGMENT_BASE_ROTATION_DEG[i] + FRAGMENT_ROTATION_DEG * t
+            val size = unit * FRAGMENT_SIZE_FRACTION
+            val paint = breakFragmentPaints[i % breakFragmentPaints.size]
+            paint.alpha = fragmentAlpha
+            drawFragment(canvas, fx, fy, size, rotationDeg, paint)
+        }
+    }
+
+    /** Same shape as [drawFace] but uses [breakOutlinePaint] (its own
+     * alpha-faded instance) instead of the shared, non-fading [outline]
+     * -- see [breakOutlinePaint]'s doc for why a separate instance is
+     * required here. */
+    private fun drawFaceAlpha(canvas: Canvas, paint: Paint, pts: Array<FloatArray>) {
+        val path = Path().apply {
+            moveTo(pts[0][0], pts[0][1])
+            for (i in 1 until pts.size) lineTo(pts[i][0], pts[i][1])
+            close()
+        }
+        canvas.drawPath(path, paint)
+        canvas.drawPath(path, breakOutlinePaint)
+    }
+
+    /** One small square cardboard fragment, centered at ([cx],[cy]),
+     * rotated by [rotationDeg] -- [canvas.rotate] handles the rotation so
+     * this never needs its own trig, matching this class's existing
+     * preference for letting the platform do transform math wherever
+     * possible. */
+    private fun drawFragment(canvas: Canvas, cx: Float, cy: Float, size: Float, rotationDeg: Float, paint: Paint) {
+        val half = size / 2f
+        canvas.save()
+        canvas.rotate(rotationDeg, cx, cy)
+        canvas.drawRect(cx - half, cy - half, cx + half, cy + half, paint)
+        canvas.restore()
     }
 
     private fun drawFace(canvas: Canvas, paint: Paint, pts: Array<FloatArray>) {

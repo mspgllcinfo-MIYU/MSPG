@@ -13,9 +13,9 @@ android {
         targetSdk = 34
         // AZUSAN-SIZE-TEST-01 established bumping these every round purely
         // for on-device identification (they're read by nothing in game
-        // logic). QUBE-DAMAGE-VISUAL-02 continues that.
-        versionCode = 6
-        versionName = "0.1-QUBE_DAMAGE_VISUAL_02"
+        // logic). QUBE-BREAK-VISUAL-01 continues that.
+        versionCode = 7
+        versionName = "0.1-QUBE_BREAK_VISUAL_01"
     }
 
     // Pinned debug signing key (app/debug.keystore), checked into the repo

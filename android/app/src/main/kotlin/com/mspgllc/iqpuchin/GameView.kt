@@ -19,6 +19,7 @@ import com.mspgllc.iqpuchin.board.Qube
 import com.mspgllc.iqpuchin.board.QubeMotion
 import com.mspgllc.iqpuchin.input.InputActionListener
 import com.mspgllc.iqpuchin.render.BoardRenderer
+import com.mspgllc.iqpuchin.render.BrokenQubeVisual
 import com.mspgllc.iqpuchin.render.ChuruLifeRenderer
 import com.mspgllc.iqpuchin.render.IsoProjection
 import com.mspgllc.iqpuchin.render.PlayerRenderer
@@ -113,6 +114,19 @@ class GameView @JvmOverloads constructor(
     // are unmodified.
     private val qubes: MutableList<QubeInstance> = createInitialQubes()
 
+    // QUBE-BREAK-VISUAL-01: completely separate from `qubes` above on
+    // purpose -- a QUBE is moved here (see performPunch) at the exact
+    // moment its second punch destroys it, and that move already *is*
+    // its removal from `qubes`. Every existing game-logic read
+    // (GameStateController.checkCollision, isPunchRange,
+    // captureSystem.isCaptured, MarkController, the "how many QUBEs
+    // remain" question) only ever iterates `qubes`, so nothing here can
+    // be hit by the player, marked, activated, or counted as a live QUBE
+    // -- this list exists solely so GameView's draw loop can render a
+    // short (~200ms) break flash for something that, logically, is
+    // already gone.
+    private val brokenQubes: MutableList<BrokenQubeVisual> = mutableListOf()
+
     private fun createInitialQubes(): MutableList<QubeInstance> {
         val startXs = listOf(1, 3, 5)
         return startXs.map { x ->
@@ -188,6 +202,13 @@ class GameView @JvmOverloads constructor(
                 if (hitReaction.progress() > 0f) hitVisualElapsedMs += deltaMs
                 walkVisual.update(deltaMs)
                 punchVisual.update(deltaMs)
+                // QUBE-BREAK-VISUAL-01: plain elapsed-time bookkeeping
+                // only, the same shape TimedCosmeticFlag.update already
+                // uses elsewhere -- BrokenQubeVisual has no game-logic
+                // meaning, so pruning finished entries here never affects
+                // anything checkCollision/gameStateController.update read.
+                for (broken in brokenQubes) broken.elapsedMs += deltaMs
+                brokenQubes.removeAll { it.finished() }
                 gameStateController.update(deltaMs)
                 checkCollision()
             }
@@ -319,9 +340,18 @@ class GameView @JvmOverloads constructor(
             )
             playerDrawn = true
         }
-        for (instance in qubes.sortedBy { it.qube.coord.z }) {
-            if (!playerDrawn && instance.qube.coord.z >= playerZ) drawPlayer()
-            qubeRenderer.draw(canvas, instance.qube, instance.motion, qubeProjection)
+        // QUBE-BREAK-VISUAL-01: brokenQubes is merged into the same
+        // depth-sorted pass by its own frozen coordZ, so a break flash
+        // never pops in front of/behind a QUBE or Azusan it shouldn't --
+        // no change to how `qubes`/player are sorted or drawn among
+        // themselves, this only adds a second, short-lived source of
+        // entries to the same single sorted-by-z draw pass.
+        val depthEntries: List<Pair<Int, () -> Unit>> =
+            qubes.map { instance -> instance.qube.coord.z to { qubeRenderer.draw(canvas, instance.qube, instance.motion, qubeProjection) } } +
+                brokenQubes.map { broken -> broken.coordZ to { qubeRenderer.drawBroken(canvas, broken, qubeProjection) } }
+        for ((z, drawEntry) in depthEntries.sortedBy { it.first }) {
+            if (!playerDrawn && z >= playerZ) drawPlayer()
+            drawEntry()
         }
         if (!playerDrawn) drawPlayer()
 
@@ -436,8 +466,30 @@ class GameView @JvmOverloads constructor(
         // otherwise unchanged. Fires regardless of destroyed/dented,
         // matching how PUNCH_HIT itself already always plays.
         punchVisual.trigger()
-        val destroyed = qubes[index].qube.punch()
+        val instance = qubes[index]
+        val destroyed = instance.qube.punch()
         if (destroyed) {
+            // QUBE-BREAK-VISUAL-01: capture the exact pose (previous/
+            // current cell, direction, and the toppling rotation the
+            // instant this hit landed) into a render-only snapshot
+            // *before* removeAt below -- durability itself already hit 0
+            // one line above, so the QUBE is already logically destroyed
+            // (Qube.punch() already applied that; this call never re-reads
+            // or changes durability, coord, or collision in any way).
+            // Once removeAt runs, `qubes` -- and therefore every existing
+            // collision/MARK/ACTIVATE/movement check that only iterates
+            // `qubes` -- has no record of this QUBE at all; brokenQubes is
+            // purely a second, separate list the draw loop also reads.
+            brokenQubes.add(
+                BrokenQubeVisual(
+                    previousCoordX = instance.qube.previousCoord.x,
+                    previousCoordZ = instance.qube.previousCoord.z,
+                    coordX = instance.qube.coord.x,
+                    coordZ = instance.qube.coord.z,
+                    direction = instance.qube.direction,
+                    rotationProgressAtBreak = instance.motion.rotationProgress()
+                )
+            )
             qubes.removeAt(index)
             soundEventPlayer.play(SoundEvent.QUBE_BREAK)
         } else {
