@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.util.AttributeSet
 import android.view.Choreographer
+import android.view.MotionEvent
 import android.view.View
 import com.mspgllc.iqpuchin.board.BoardConfig
 import com.mspgllc.iqpuchin.board.BoardLogic
@@ -30,6 +31,7 @@ import com.mspgllc.iqpuchin.render.TimedCosmeticFlag
 import com.mspgllc.iqpuchin.sound.QubeSoundTracker
 import com.mspgllc.iqpuchin.sound.SoundEvent
 import com.mspgllc.iqpuchin.sound.SoundEventPlayer
+import kotlin.math.hypot
 import kotlin.math.min
 
 /**
@@ -67,6 +69,32 @@ class GameView @JvmOverloads constructor(
          * [onActionRequested]/[performPunch]. */
         const val SCORE_ACTIVATE_CAPTURE = 100
         const val SCORE_PUNCH_DESTROY = 50
+
+        // RESTART-SYSTEM-01
+        /** Durations for the three TimedCosmeticFlag windows -- named here
+         * (rather than only inline at each `= TimedCosmeticFlag(...)`)
+         * purely so [restartGame] can reconstruct fresh instances with
+         * the exact same durations without duplicating a bare numeric
+         * literal in two places. */
+        const val WALK_VISUAL_DURATION_MS = 220L
+        const val PUNCH_VISUAL_DURATION_MS = 180L
+        const val SCORE_POPUP_DURATION_MS = 400L
+
+        /** How long after entering GAME_OVER before [onTouchEvent] will
+         * accept a RETRY tap -- see that method and the frame loop's
+         * [gameOverElapsedMs] tracking. Short on purpose (this round's own
+         * "don't make it wait unnecessarily long" instruction), just
+         * enough to guarantee the tap/gesture that caused GAME OVER (on a
+         * completely different sibling view, SwipeInputView or
+         * PawActionButtonView) has already fully resolved before a new
+         * ACTION_DOWN on GameView itself can count. */
+        const val RETRY_INPUT_LOCKOUT_MS = 400L
+
+        /** Same tap-vs-drag displacement idea as PawActionButtonView's own
+         * GESTURE_THRESHOLD_DP, sized the same, so a RETRY tap uses the
+         * same "how far is still a tap" feel already established
+         * elsewhere in this app rather than a new invented value. */
+        const val RETRY_TAP_SLOP_DP = 24f
     }
 
     /** Pairs a [Qube] with the [QubeMotion] that advances it and the
@@ -81,10 +109,19 @@ class GameView @JvmOverloads constructor(
     // effectiveAxisMinorPx() below.
     private val renderMode = RenderMode.FRONT_ALIGNED
 
-    private val boardLogic = BoardLogic()
+    // RESTART-SYSTEM-01: boardLogic/gameStateController are `var`, not
+    // `val`, so restartGame() can swap in a freshly-constructed instance
+    // of each -- neither class exposes a public reset of its own, and
+    // both BoardLogic.kt and GameStateController's own collision-
+    // judgement logic are on this round's fixed-spec list, so this is
+    // deliberately never done by adding a reset method to either file;
+    // only GameView's own reference is ever replaced. markController
+    // stays `val` -- it already exposes a safe public clear() (see
+    // restartGame), so no reassignment is needed for it.
+    private var boardLogic: BoardLogic = BoardLogic()
     private val markController = MarkController()
     private val captureSystem = CaptureSystem()
-    private val gameStateController = GameStateController()
+    private var gameStateController: GameStateController = GameStateController()
     private val boardRenderer = BoardRenderer()
     private val playerRenderer = PlayerRenderer(context)
     private val qubeRenderer = QubeRenderer()
@@ -95,7 +132,12 @@ class GameView @JvmOverloads constructor(
     // neither is consulted by any game-logic check below, only
     // triggered once a logic result (a new HIT, a MARK placed, a
     // CAPTURE, a QUBE's own roll/land) is observed.
-    private val hitReaction = PoiHitReaction()
+    // RESTART-SYSTEM-01: `var`, reconstructed fresh by restartGame() --
+    // PoiHitReaction has no public reset of its own. soundEventPlayer
+    // stays `val`/never reconstructed -- it wraps a SoundPool that should
+    // keep its already-loaded samples across a restart, and it holds no
+    // per-QUBE or per-run state that a restart would need to clear.
+    private var hitReaction: PoiHitReaction = PoiHitReaction()
     private val soundEventPlayer = SoundEventPlayer(context)
 
     // AZUSAN-PLAYER-01: purely cosmetic sprite-selection state, read only
@@ -104,8 +146,10 @@ class GameView @JvmOverloads constructor(
     // camera) simply as a harmless idle default before the player's
     // first move; it's never read except while walkVisual is active.
     private var lastMoveDirection: Direction = Direction.SOUTH
-    private val walkVisual = TimedCosmeticFlag(durationMs = 220L)
-    private val punchVisual = TimedCosmeticFlag(durationMs = 180L)
+    // RESTART-SYSTEM-01: `var`, reconstructed fresh by restartGame() --
+    // TimedCosmeticFlag has no public reset of its own.
+    private var walkVisual: TimedCosmeticFlag = TimedCosmeticFlag(durationMs = WALK_VISUAL_DURATION_MS)
+    private var punchVisual: TimedCosmeticFlag = TimedCosmeticFlag(durationMs = PUNCH_VISUAL_DURATION_MS)
     // Tracks elapsed time within hitReaction's own active window (see
     // checkCollision/frame loop below) purely so PlayerRenderer can pick
     // HIT vs RECOVER -- never changes hitReaction's own DURATION_MS or
@@ -134,7 +178,7 @@ class GameView @JvmOverloads constructor(
     // short cosmetic windows) plus the text to show while active. Purely
     // decorative: never read by any score/game-logic check, only by
     // onDraw below.
-    private val scorePopup = TimedCosmeticFlag(durationMs = 400L)
+    private var scorePopup: TimedCosmeticFlag = TimedCosmeticFlag(durationMs = SCORE_POPUP_DURATION_MS)
     private var scorePopupText: String = ""
 
     // STEP 6: every NORMAL QUBE lives in this one collection -- no
@@ -146,7 +190,12 @@ class GameView @JvmOverloads constructor(
     // A successful CAPTURE removes exactly the matching entry from this
     // list (see onActionRequested) -- Qube.kt/QubeMotion.kt themselves
     // are unmodified.
-    private val qubes: MutableList<QubeInstance> = createInitialQubes()
+    // RESTART-SYSTEM-01: `var`, not `val` -- restartGame() reassigns this
+    // to a brand new createInitialQubes() result (the exact same factory
+    // this field's own initial value already uses), so every QUBE after
+    // a restart is a fresh Qube/QubeMotion/QubeSoundTracker with no
+    // leftover reference to anything from the previous run.
+    private var qubes: MutableList<QubeInstance> = createInitialQubes()
 
     // QUBE-BREAK-VISUAL-01: completely separate from `qubes` above on
     // purpose -- a QUBE is moved here (see performPunch) at the exact
@@ -175,6 +224,16 @@ class GameView @JvmOverloads constructor(
     private var displayScale = 1f
 
     private val density = resources.displayMetrics.density
+
+    // RESTART-SYSTEM-01: tracks how long GameView has continuously been
+    // in GAME_OVER (see the frame loop), gating both [onTouchEvent]'s
+    // RETRY tap and the "TAP TO RETRY" prompt's own visibility on
+    // [RETRY_INPUT_LOCKOUT_MS] -- see that constant's doc for why.
+    private var wasGameOver = false
+    private var gameOverElapsedMs = 0L
+    private var retryDownX = 0f
+    private var retryDownY = 0f
+    private val retryTapSlopPx = RETRY_TAP_SLOP_DP * density
     // STEP 7 placeholder-only "HIT" banner -- not part of any real HUD.
     private val hitTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.RED
@@ -220,6 +279,15 @@ class GameView @JvmOverloads constructor(
     private val gameOverScorePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.rgb(255, 205, 60)
         textSize = 32f * density
+        textAlign = Paint.Align.CENTER
+        isFakeBoldText = true
+    }
+    // RESTART-SYSTEM-01: pink, matching scorePopupPaint's palette choice,
+    // smaller than gameOverTextPaint/gameOverScorePaint per this round's
+    // own "not too big" instruction.
+    private val retryPromptPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(235, 90, 150)
+        textSize = 26f * density
         textAlign = Paint.Align.CENTER
         isFakeBoldText = true
     }
@@ -276,6 +344,18 @@ class GameView @JvmOverloads constructor(
                 brokenQubes.removeAll { it.finished() }
                 gameStateController.update(deltaMs)
                 checkCollision()
+                wasGameOver = false
+            } else {
+                // RESTART-SYSTEM-01: gameOverElapsedMs resets to 0 the
+                // instant GAME_OVER is first observed (the `!wasGameOver`
+                // branch below), then counts up every frame after that --
+                // see RETRY_INPUT_LOCKOUT_MS/onTouchEvent.
+                if (!wasGameOver) {
+                    wasGameOver = true
+                    gameOverElapsedMs = 0L
+                } else {
+                    gameOverElapsedMs += deltaMs
+                }
             }
 
             invalidate()
@@ -451,7 +531,93 @@ class GameView @JvmOverloads constructor(
             // SCORE-SYSTEM-01: the run's final score, minimal addition to
             // the existing overlay rather than a GAME OVER redesign.
             canvas.drawText("SCORE ${scoreText()}", width / 2f, height / 2f + 56f * density, gameOverScorePaint)
+            // RESTART-SYSTEM-01: only shown once onTouchEvent will
+            // actually accept the tap (see RETRY_INPUT_LOCKOUT_MS) -- so
+            // the prompt never invites a tap that the lockout would then
+            // silently ignore.
+            if (gameOverElapsedMs >= RETRY_INPUT_LOCKOUT_MS) {
+                canvas.drawText("TAP TO RETRY", width / 2f, height / 2f + 100f * density, retryPromptPaint)
+            }
         }
+    }
+
+    /**
+     * RESTART-SYSTEM-01: the only touch handling GameView itself does --
+     * everywhere else, movement/MARK/ACTIVATE/CAT_PUNCH come from the
+     * separate SwipeInputView/PawActionButtonView sibling views (see
+     * MainActivity), completely untouched by this round; this override
+     * never affects them and is a no-op (returns false, exactly as if it
+     * didn't exist) outside GAME_OVER. Note SwipeInputView/
+     * PawActionButtonView are positioned on top of GameView and
+     * unconditionally claim touches inside their own bounds, so this
+     * only ever actually receives a touch that lands outside both of
+     * those zones -- in practice this still covers most of the screen
+     * (including, on typical/wider Galaxy widths, the centered "TAP TO
+     * RETRY" text itself), but on some narrower screens the exact center
+     * can sit inside SwipeInputView's own left-side zone; see this
+     * round's completion report for why this was implemented as-is
+     * (entirely within GameView.kt, touching none of CONTROL-SIMPLE-02's
+     * own files) rather than widened into those sibling views.
+     */
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (gameStateController.state != GameState.GAME_OVER) return false
+        if (gameOverElapsedMs < RETRY_INPUT_LOCKOUT_MS) return false
+        return when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                retryDownX = event.x
+                retryDownY = event.y
+                true
+            }
+            MotionEvent.ACTION_UP -> {
+                val dx = event.x - retryDownX
+                val dy = event.y - retryDownY
+                if (hypot(dx, dy) <= retryTapSlopPx) {
+                    restartGame()
+                    invalidate()
+                }
+                true
+            }
+            else -> true
+        }
+    }
+
+    /**
+     * RESTART-SYSTEM-01: returns every piece of per-run state to exactly
+     * what a fresh process launch starts with. Reconstructs a brand new
+     * instance of any class with no public reset API of its own
+     * (BoardLogic, GameStateController, PoiHitReaction, every
+     * TimedCosmeticFlag) rather than adding a reset method to those
+     * classes -- BoardLogic and GameStateController's own collision-
+     * judgement logic are both on this round's fixed-spec list, so
+     * neither file is ever touched, only GameView's own reference to
+     * each is replaced. `qubes` is rebuilt via the same
+     * [createInitialQubes] factory the very first launch already uses,
+     * so durability/rotation/movement progress and every QubeSoundTracker
+     * are back to a genuinely fresh state with zero references to any
+     * pre-restart QUBE. MarkController is the one exception to "replace
+     * the whole object" -- it already exposes a safe public [MarkController.clear],
+     * so that's used directly instead, per this round's own "use the
+     * existing API, don't touch MarkController internals" instruction.
+     */
+    private fun restartGame() {
+        boardLogic = BoardLogic()
+        gameStateController = GameStateController()
+        qubes = createInitialQubes()
+        brokenQubes.clear()
+        markController.clear()
+
+        hitReaction = PoiHitReaction()
+        walkVisual = TimedCosmeticFlag(durationMs = WALK_VISUAL_DURATION_MS)
+        punchVisual = TimedCosmeticFlag(durationMs = PUNCH_VISUAL_DURATION_MS)
+        scorePopup = TimedCosmeticFlag(durationMs = SCORE_POPUP_DURATION_MS)
+        scorePopupText = ""
+
+        lastMoveDirection = Direction.SOUTH
+        hitVisualElapsedMs = 0L
+        score = 0
+
+        wasGameOver = false
+        gameOverElapsedMs = 0L
     }
 
     /** SCORE-SYSTEM-01: zero-padded to at least 6 digits for display only
