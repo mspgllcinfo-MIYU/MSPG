@@ -32,6 +32,29 @@ object RenderConfig {
     const val BOARD_AXIS_MAJOR_PX = 90f
     const val BOARD_AXIS_MINOR_PX = 6.3f
 
+    /**
+     * FRONT-ALIGNED-TEST-01: the alternative "minor" value used when
+     * GameView's RenderMode is FRONT_ALIGNED instead of
+     * CURRENT_ISOMETRIC -- zero, so [IsoProjection]'s basis vectors
+     * become gridX -> (+MAJOR, 0) and gridZ -> (0, +MAJOR): a plain
+     * axis-aligned grid with no diagonal lean, so "up/down/left/right on
+     * screen" reads as exactly "up/down/left/right on the board" with no
+     * mental rotation required.
+     *
+     * Trade-off, accepted deliberately per this round's own priority
+     * (direction clarity over 3D polish): [IsoProjection]'s own class doc
+     * already explains that a QUBE's dark "right" side face only varies
+     * in gridZ/worldHeight, so it needs a non-zero minor contribution to
+     * screen X to have any width at all -- at [BOARD_AXIS_MINOR_PX] = 0
+     * that face collapses to a zero-width line (in practice invisible).
+     * The top and front faces are unaffected (their own varying axes are
+     * gridX and worldHeight, both still fully in effect), so a QUBE still
+     * reads as a raised block with real depth from its front face plus
+     * the height-driven topple lift -- just without a rendered third
+     * side face.
+     */
+    const val BOARD_AXIS_MINOR_PX_FRONT_ALIGNED = 0f
+
     /** Baseline (unscaled) player marker diameter. */
     const val PLAYER_SIZE_PX = 56f
 

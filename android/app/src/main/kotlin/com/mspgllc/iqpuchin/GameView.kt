@@ -31,6 +31,19 @@ import com.mspgllc.iqpuchin.sound.SoundEventPlayer
 import kotlin.math.min
 
 /**
+ * FRONT-ALIGNED-TEST-01: which camera GameView draws the board with.
+ * CURRENT_ISOMETRIC is the existing small-lean camera (kept fully
+ * intact and selectable, never deleted); FRONT_ALIGNED zeroes the
+ * lean (see [RenderConfig.BOARD_AXIS_MINOR_PX_FRONT_ALIGNED]) so
+ * screen up/down/left/right reads as board up/down/left/right with no
+ * mental rotation. Purely a rendering choice -- GridCoord, BoardLogic,
+ * QubeMotion, and every input-direction mapping are completely
+ * unaware this exists; see [GameView.effectiveAxisMinorPx] for the
+ * one place it's actually read.
+ */
+private enum class RenderMode { CURRENT_ISOMETRIC, FRONT_ALIGNED }
+
+/**
  * Owns the board's logical state (player + every NORMAL QUBE) and draws
  * it. Player movement stays purely event-driven (see [onMoveRequested])
  * with zero added delay, but each QUBE's toppling is time-based, so this
@@ -48,6 +61,11 @@ class GameView @JvmOverloads constructor(
      * these together to hand each QUBE to the renderer -- this is a
      * plain data holder for a list element, not a per-QUBE variable. */
     private data class QubeInstance(val qube: Qube, val motion: QubeMotion, val soundTracker: QubeSoundTracker)
+
+    // FRONT-ALIGNED-TEST-01 default -- flip to RenderMode.CURRENT_ISOMETRIC
+    // to restore the original diagonal camera. Read only by
+    // effectiveAxisMinorPx() below.
+    private val renderMode = RenderMode.FRONT_ALIGNED
 
     private val boardLogic = BoardLogic()
     private val markController = MarkController()
@@ -184,9 +202,19 @@ class GameView @JvmOverloads constructor(
      * portrait screen as possible instead of leaving a large blank band
      * at the top.
      */
+    /** FRONT-ALIGNED-TEST-01: the one place [renderMode] is actually
+     * read -- everything downstream (both IsoProjection instances,
+     * BoardRenderer's tile shape, and its boardBounds screen-fit
+     * calculation) takes this same unscaled value, so they can never
+     * drift out of sync with each other within one frame. */
+    private fun effectiveAxisMinorPx(): Float = when (renderMode) {
+        RenderMode.CURRENT_ISOMETRIC -> RenderConfig.BOARD_AXIS_MINOR_PX
+        RenderMode.FRONT_ALIGNED -> RenderConfig.BOARD_AXIS_MINOR_PX_FRONT_ALIGNED
+    }
+
     private fun recomputeLayout(w: Int, h: Int) {
         if (w <= 0 || h <= 0) return
-        val bounds = boardRenderer.boardBounds(BoardConfig.GRID_WIDTH, BoardConfig.GRID_DEPTH)
+        val bounds = boardRenderer.boardBounds(BoardConfig.GRID_WIDTH, BoardConfig.GRID_DEPTH, effectiveAxisMinorPx())
 
         val topMargin = h * RenderConfig.TOP_MARGIN_FRACTION
         val bottomMargin = h * RenderConfig.BOTTOM_MARGIN_FRACTION
@@ -222,8 +250,14 @@ class GameView @JvmOverloads constructor(
         // constant's doc) purely so a QUBE reads as a cube rather than an
         // elongated slab under this camera, without touching the shared
         // axis geometry (board footprint / floor tile size) at all.
+        // FRONT-ALIGNED-TEST-01: axisMinor now comes from
+        // effectiveAxisMinorPx() (see its own doc) instead of reading
+        // RenderConfig.BOARD_AXIS_MINOR_PX directly, so both projections
+        // -- and boardRenderer.draw's own tile-shape copy of this same
+        // value, passed explicitly below -- always agree on which camera
+        // is active this frame.
         val axisMajor = RenderConfig.BOARD_AXIS_MAJOR_PX * displayScale
-        val axisMinor = RenderConfig.BOARD_AXIS_MINOR_PX * displayScale
+        val axisMinor = effectiveAxisMinorPx() * displayScale
         val projection = IsoProjection(axisMajor, axisMinor, originX, originY)
         val qubeHeightScale = RenderConfig.QUBE_VISUAL_HEIGHT_SCALE_PX * displayScale
         val qubeProjection = IsoProjection(axisMajor, axisMinor, originX, originY, qubeHeightScale)
@@ -234,7 +268,8 @@ class GameView @JvmOverloads constructor(
             BoardConfig.GRID_WIDTH,
             BoardConfig.GRID_DEPTH,
             markController.markedCoord,
-            displayScale
+            displayScale,
+            effectiveAxisMinorPx()
         )
 
         playerRenderer.draw(

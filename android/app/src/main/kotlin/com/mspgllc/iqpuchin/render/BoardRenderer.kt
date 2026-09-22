@@ -31,10 +31,18 @@ class BoardRenderer {
      * screen direction) works out to (MAJOR+MINOR)/2 -- see the class doc
      * on [drawTile] for the corner derivation -- which is added at each
      * extreme cell so nothing is clipped.
+     *
+     * FRONT-ALIGNED-TEST-01: [axisMinorPx] defaults to the isometric
+     * camera's own constant so every existing caller is unaffected;
+     * GameView passes [RenderConfig.BOARD_AXIS_MINOR_PX_FRONT_ALIGNED]
+     * (0f) instead when its RenderMode is FRONT_ALIGNED, so these bounds
+     * always match whatever axis lean the projection GameView actually
+     * builds this frame is using -- otherwise the screen-fit scale/
+     * origin computed from this would assume a lean that isn't there.
      */
-    fun boardBounds(gridWidth: Int, gridDepth: Int): BoardBounds {
+    fun boardBounds(gridWidth: Int, gridDepth: Int, axisMinorPx: Float = RenderConfig.BOARD_AXIS_MINOR_PX): BoardBounds {
         val major = RenderConfig.BOARD_AXIS_MAJOR_PX
-        val minor = RenderConfig.BOARD_AXIS_MINOR_PX
+        val minor = axisMinorPx
         val tileHalfExtentPx = (major + minor) / 2f
         val qubeLiftPx = RenderConfig.QUBE_HEIGHT_SCALE_PX * RenderConfig.QUBE_MAX_LIFT_WORLD_UNITS
         val topClearancePx = maxOf(RenderConfig.PLAYER_SIZE_PX, qubeLiftPx)
@@ -65,6 +73,14 @@ class BoardRenderer {
      * [projection] is built once per frame by GameView and shared with
      * PlayerRenderer/QubeRenderer, so the floor grid and everything on
      * it are guaranteed to line up -- this never builds its own.
+     *
+     * FRONT-ALIGNED-TEST-01: [axisMinorPx] (unscaled -- multiplied by
+     * [scale] below, same as the major axis already was) defaults to the
+     * isometric constant so existing callers are unaffected; GameView
+     * passes the same per-frame value here as it used to build
+     * [projection] itself, so each tile's own drawn shape (see
+     * [drawTile]) never drifts out of sync with where [projection]
+     * actually places that tile's center.
      */
     fun draw(
         canvas: Canvas,
@@ -72,10 +88,11 @@ class BoardRenderer {
         gridWidth: Int,
         gridDepth: Int,
         markedCoord: GridCoord?,
-        scale: Float
+        scale: Float,
+        axisMinorPx: Float = RenderConfig.BOARD_AXIS_MINOR_PX
     ) {
         val axisMajor = RenderConfig.BOARD_AXIS_MAJOR_PX * scale
-        val axisMinor = RenderConfig.BOARD_AXIS_MINOR_PX * scale
+        val axisMinor = axisMinorPx * scale
 
         for (x in 0 until gridWidth) {
             for (z in 0 until gridDepth) {
