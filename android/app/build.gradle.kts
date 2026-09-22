@@ -13,9 +13,9 @@ android {
         targetSdk = 34
         // AZUSAN-SIZE-TEST-01 established bumping these every round purely
         // for on-device identification (they're read by nothing in game
-        // logic). CONTROL-SIMPLE-01 continues that.
-        versionCode = 3
-        versionName = "0.1-CONTROL_SIMPLE_01"
+        // logic). CONTROL-SIMPLE-02 continues that.
+        versionCode = 4
+        versionName = "0.1-CONTROL_SIMPLE_02"
     }
 
     // Pinned debug signing key (app/debug.keystore), checked into the repo

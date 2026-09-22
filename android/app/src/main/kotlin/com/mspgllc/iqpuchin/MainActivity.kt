@@ -42,19 +42,21 @@ private object UiConfig {
 }
 
 /** SWIPE-TEST-01: which move-input control is actually wired up.
- * [VirtualStickView]/[SwipeInputView] are kept fully intact and
- * selectable here (never deleted) specifically so this can be flipped
- * back for comparison. CONTROL-SIMPLE-01 adds [DPAD] as a third option
- * -- a classic 4-direction cross pad, this build's new default per the
- * "don't make the player think about which control does what" goal --
- * without removing either prior mode. Neither GameView nor any
- * game-logic file reads this -- all three controls only ever reach the
- * game through the same InputActionListener.onMoveRequested call. */
+ * [VirtualStickView]/[SwipeInputView]/[DirectionalPadView] are kept
+ * fully intact and selectable here (never deleted) specifically so this
+ * can be flipped back for comparison. CONTROL-SIMPLE-01 added [DPAD] (a
+ * classic 4-direction cross pad); real-device feedback preferred the
+ * feel of a free-anywhere swipe gesture over needing to land a touch on
+ * a fixed arm, so CONTROL-SIMPLE-02 moves the default back to [SWIPE]
+ * without deleting DPAD's code or this enum entry -- it stays fully
+ * selectable for future comparison. Neither GameView nor any game-logic
+ * file reads this -- all three controls only ever reach the game
+ * through the same InputActionListener.onMoveRequested call. */
 private enum class MoveInputMode { SWIPE, VIRTUAL_STICK, DPAD }
 
 class MainActivity : Activity() {
 
-    private val moveInputMode = MoveInputMode.DPAD
+    private val moveInputMode = MoveInputMode.SWIPE
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

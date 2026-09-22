@@ -19,21 +19,30 @@ import kotlin.math.abs
  * as a Button), so only the paint/shape and the press animation are
  * new.
  *
- * CONTROL-SIMPLE-01: this view now distinguishes two gestures instead
- * of reporting every completed press as one generic click -- a plain
- * TAP (small total displacement) versus a deliberate downward slide
- * (see [PUNCH_SLIDE_THRESHOLD_DP]), reported via [setOnTapClick] and
- * [setOnPunchGesture] respectively. Exactly one of the two fires per
- * touch gesture, decided once at ACTION_UP from the ACTION_DOWN start
- * point -- never both (see [onTouchEvent]). This is what lets GameView
- * stop guessing intent from board state (a QUBE happening to be
- * adjacent no longer changes what a tap does): input method alone now
- * decides MARK/ACTIVATE (tap) versus CAT_PUNCH (slide). The MARK ->
- * ACTIVATE -> mark-clear and CAT_PUNCH game logic itself still lives
- * entirely in GameView/MarkController/CaptureSystem and is untouched by
- * this class; it only *reports* which gesture happened and *displays*
- * whichever MARK state [ActionInputSource] tells it about via
- * [setAwaitingActivate].
+ * CONTROL-SIMPLE-01 first split this view's single generic click into
+ * distinct gestures so GameView never has to guess intent from board
+ * state (a QUBE happening to be adjacent no longer changes what a tap
+ * does): input method alone decides MARK/ACTIVATE versus CAT_PUNCH.
+ * CONTROL-SIMPLE-02 changes which slide direction means CAT_PUNCH (real-
+ * device feedback: a horizontal "shut" flick reads more naturally on
+ * this button than a downward one) and adds a third, deliberately inert
+ * bucket for an up/down slide -- see [classifyGesture]. Three outcomes
+ * per gesture, decided once at ACTION_UP from the ACTION_DOWN start
+ * point:
+ * - TAP (small total displacement): [setOnTapClick].
+ * - HORIZONTAL_PUNCH (dominant, past-threshold horizontal movement,
+ *   either direction -- left and right are treated identically, no
+ *   punch-direction concept exists): [setOnPunchGesture].
+ * - IGNORED_GESTURE (dominant, past-threshold *vertical* movement): it
+ *   fires neither callback. This is what stops an up/down slide from
+ *   ever being misread as a TAP (which would incorrectly place/judge a
+ *   MARK) or as a punch.
+ * Exactly one of these three outcomes per touch gesture, never two (see
+ * [onTouchEvent]). The MARK -> ACTIVATE -> mark-clear and CAT_PUNCH game
+ * logic itself still lives entirely in GameView/MarkController/
+ * CaptureSystem and is untouched by this class; it only *reports* which
+ * gesture happened and *displays* whichever MARK state
+ * [ActionInputSource] tells it about via [setAwaitingActivate].
  */
 class PawActionButtonView @JvmOverloads constructor(
     context: Context,
@@ -45,22 +54,31 @@ class PawActionButtonView @JvmOverloads constructor(
         private const val BRAND_TEXT = "MIYU × AI"
 
         /**
-         * CONTROL-SIMPLE-01: minimum downward travel (dp) from
-         * ACTION_DOWN before a release counts as the CAT_PUNCH slide
-         * gesture instead of an ordinary tap. Deliberately smaller than
-         * [SwipeInputView]'s SWIPE_THRESHOLD_DP (26dp, tuned for a
-         * full-screen move gesture) -- this button is only ~130dp
-         * across, and the spec explicitly asks for a light "shut" flick
-         * rather than a deliberate full swipe. 20dp sits comfortably
-         * above ordinary tap jitter/touch-slop (commonly ~8dp on
-         * Android) while staying well short of the move-swipe threshold,
-         * so a real flick registers reliably without the gesture feeling
-         * heavy.
+         * Minimum travel (dp), on whichever axis is dominant, from
+         * ACTION_DOWN before a release counts as a deliberate slide
+         * (HORIZONTAL_PUNCH or IGNORED_GESTURE) rather than an ordinary
+         * TAP -- see [classifyGesture]. Carried over unchanged from
+         * CONTROL-SIMPLE-01's PUNCH_SLIDE_THRESHOLD_DP (still 20dp,
+         * still deliberately smaller than [SwipeInputView]'s
+         * SWIPE_THRESHOLD_DP of 26dp, which is tuned for a full-screen
+         * move gesture -- this button is only ~130dp across, and the
+         * spec asks for a light "shut" flick rather than a deliberate
+         * full swipe). 20dp sits comfortably above ordinary tap jitter/
+         * touch-slop (commonly ~8dp on Android) while staying well short
+         * of the move-swipe threshold, so a real flick registers
+         * reliably without the gesture feeling heavy. CONTROL-SIMPLE-02
+         * starts real-device retuning from this same value rather than
+         * guessing a new one, since the underlying "how far is a light
+         * flick" answer shouldn't depend on which axis it's measured on.
          */
-        private const val PUNCH_SLIDE_THRESHOLD_DP = 20f
+        private const val GESTURE_THRESHOLD_DP = 20f
     }
 
-    private val punchSlideThresholdPx = PUNCH_SLIDE_THRESHOLD_DP * resources.displayMetrics.density
+    private val gestureThresholdPx = GESTURE_THRESHOLD_DP * resources.displayMetrics.density
+
+    /** The three possible outcomes of one ACTION paw touch gesture -- see
+     * [classifyGesture]. */
+    private enum class PawGesture { TAP, HORIZONTAL_PUNCH, IGNORED_GESTURE }
 
     private var onTapClick: (() -> Unit)? = null
     private var onPunchGesture: (() -> Unit)? = null
@@ -86,18 +104,17 @@ class PawActionButtonView @JvmOverloads constructor(
     }
 
     /** True while a finger is down and still over the button -- purely
-     * cosmetic (drives the "pressed/sinks in" animation). CONTROL-SIMPLE-01:
-     * unlike before, this no longer gates whether ACTION_UP actually
-     * fires anything -- a real downward punch flick will often carry the
-     * finger past the button's own bottom edge before release, and
+     * cosmetic (drives the "pressed/sinks in" animation). This does not
+     * gate whether ACTION_UP actually fires anything -- a real flick can
+     * carry the finger past the button's own edge before release, and
      * gating on "still inside bounds" would silently swallow that
-     * gesture. Which of TAP/PUNCH_GESTURE fires (see [onTouchEvent]) is
-     * now decided purely from the ACTION_DOWN/ACTION_UP displacement. */
+     * gesture. Which [PawGesture] fires (see [onTouchEvent]) is decided
+     * purely from the ACTION_DOWN/ACTION_UP displacement. */
     private var pressed = false
 
     /** ACTION_DOWN's position -- the fixed reference point [onTouchEvent]
-     * measures ACTION_UP's displacement from to classify TAP vs the
-     * downward CAT_PUNCH slide. */
+     * measures ACTION_UP's displacement from to classify the gesture (see
+     * [classifyGesture]). */
     private var downX = 0f
     private var downY = 0f
 
@@ -185,17 +202,35 @@ class PawActionButtonView @JvmOverloads constructor(
     }
 
     /**
-     * CONTROL-SIMPLE-01: ACTION_DOWN records the gesture's start point;
-     * ACTION_UP measures displacement from it and fires exactly one of
-     * [onTapClick]/[onPunchGesture] -- never both, and never neither (a
-     * completed touch that started here always resolves to one of the
-     * two, matching the "TAPかPUNCHのどちらか1つだけ" requirement). A
-     * downward slide is dy past [punchSlideThresholdPx] *and* dominantly
-     * vertical (dy > abs(dx)), the same dominant-axis shape
-     * [SwipeInputView]/[VirtualStickView] already use elsewhere in this
-     * project; everything else -- including a small jitter, or a drag
-     * that isn't dominantly downward -- resolves to TAP, per spec (only
-     * these two buckets exist this round).
+     * CONTROL-SIMPLE-02: classifies one gesture's ACTION_DOWN->ACTION_UP
+     * displacement into exactly one of [PawGesture]'s three outcomes --
+     * HORIZONTAL_PUNCH requires the horizontal component to both clear
+     * [gestureThresholdPx] *and* dominate the vertical one; IGNORED_GESTURE
+     * is the mirror image (vertical clears the threshold and is
+     * dominant-or-tied); anything short of either threshold, on any axis,
+     * is TAP. A tie at exactly equal |dx|/|dy| (both past threshold)
+     * resolves to IGNORED_GESTURE rather than a punch -- deliberately the
+     * safer default for an ambiguous diagonal-ish drag, since it fires
+     * nothing rather than guessing.
+     */
+    private fun classifyGesture(dx: Float, dy: Float): PawGesture {
+        val absDx = abs(dx)
+        val absDy = abs(dy)
+        return when {
+            absDx >= gestureThresholdPx && absDx > absDy -> PawGesture.HORIZONTAL_PUNCH
+            absDy >= gestureThresholdPx && absDy >= absDx -> PawGesture.IGNORED_GESTURE
+            else -> PawGesture.TAP
+        }
+    }
+
+    /**
+     * ACTION_DOWN records the gesture's start point; ACTION_UP classifies
+     * the displacement via [classifyGesture] and fires at most one of
+     * [onTapClick]/[onPunchGesture] -- TAP fires the former, HORIZONTAL_
+     * PUNCH the latter, and IGNORED_GESTURE fires neither. Exactly one
+     * outcome per gesture, decided once -- never two, and an up/down
+     * slide can never be misread as a TAP (which would otherwise
+     * incorrectly place/judge a MARK).
      */
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.action) {
@@ -219,10 +254,10 @@ class PawActionButtonView @JvmOverloads constructor(
                 invalidate()
                 val dx = event.x - downX
                 val dy = event.y - downY
-                if (dy >= punchSlideThresholdPx && dy > abs(dx)) {
-                    onPunchGesture?.invoke()
-                } else {
-                    onTapClick?.invoke()
+                when (classifyGesture(dx, dy)) {
+                    PawGesture.HORIZONTAL_PUNCH -> onPunchGesture?.invoke()
+                    PawGesture.TAP -> onTapClick?.invoke()
+                    PawGesture.IGNORED_GESTURE -> Unit
                 }
                 return true
             }
