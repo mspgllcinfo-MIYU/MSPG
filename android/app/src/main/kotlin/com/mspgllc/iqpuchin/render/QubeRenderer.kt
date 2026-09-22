@@ -76,9 +76,37 @@ class QubeRenderer {
          * knocked-in even at a glance, not just the front-face patch.
          * Small enough that the box never reads as broken/unrecognizable
          * (per the explicit "don't crush it past recognition" limit).
+         * QUBE-DAMAGE-VISUAL-02 keeps this as a supplementary effect --
+         * see [DENT_NOTCH_DEPTH] below for the actual silhouette-breaking
+         * change this round adds on top of it.
          */
         const val DENTED_SQUASH_X = 0.92f
         const val DENTED_SQUASH_Y = 1.03f
+
+        /**
+         * QUBE-DAMAGE-VISUAL-02: real-device feedback on VISUAL-01 was
+         * that a uniform squash plus front-face decals still left the
+         * QUBE's actual outline rectangular, reading as "a box with a
+         * different pattern" rather than "a caved-in box" at a glance.
+         * This is the fix: [drawDentedFace] cuts a genuine concave notch
+         * into the front face's own filled Path (not a decoration drawn
+         * on top of it) -- the left edge, normally a straight line from
+         * (u=0,v=0) to (u=0,v=1), instead routes through
+         * [DENT_NOTCH_BOTTOM_V]/[DENT_NOTCH_MID_V]/[DENT_NOTCH_TOP_V],
+         * with the middle point pulled inward to u=[DENT_NOTCH_DEPTH] --
+         * 0.30 means that point sits 30% of the way across the face's own
+         * width, a deliberately large bite (per the explicit "20-30%"
+         * ask) chosen so the notch reads at a glance without needing to
+         * inspect texture/color. Still entirely a [quadPoint] sampling of
+         * the same already-rotated/projected frontQuad every other
+         * decoration here reads from -- no new corner/rotation math, and
+         * the logical Qube/collision/durability are completely unaware
+         * this exists.
+         */
+        const val DENT_NOTCH_DEPTH = 0.30f
+        const val DENT_NOTCH_BOTTOM_V = 0.16f
+        const val DENT_NOTCH_MID_V = 0.40f
+        const val DENT_NOTCH_TOP_V = 0.64f
     }
 
     private enum class Face { TOP, BOTTOM, FRONT, BACK }
@@ -212,8 +240,18 @@ class QubeRenderer {
             darkPaint to rightQuad
         ).sortedBy { (_, quad) -> avgScreenY(quad) } // farther/higher (smaller screen Y) drawn first
 
+        // QUBE-DAMAGE-VISUAL-02: only the front face's own fill swaps to
+        // the notched Path while dented -- upQuad/rightQuad (and
+        // frontQuad on every other frame) still go through the original
+        // plain-rectangle drawFace, untouched. Reference equality against
+        // `frontQuad` is safe here: drawOrder holds the exact same array
+        // instance built above, never a copy.
         for ((paint, quad) in drawOrder) {
-            drawFace(canvas, paint, quad)
+            if (dented && quad === frontQuad) {
+                drawDentedFace(canvas, paint, quad)
+            } else {
+                drawFace(canvas, paint, quad)
+            }
         }
 
         // VISUAL-01 cardboard decoration, drawn on top of the already
@@ -242,6 +280,45 @@ class QubeRenderer {
         val path = Path().apply {
             moveTo(pts[0][0], pts[0][1])
             for (i in 1 until pts.size) lineTo(pts[i][0], pts[i][1])
+            close()
+        }
+        canvas.drawPath(path, paint)
+        canvas.drawPath(path, outline)
+    }
+
+    /**
+     * QUBE-DAMAGE-VISUAL-02: the durability==1 replacement for [drawFace]
+     * on the front face only -- instead of the plain 4-corner rectangle,
+     * the left edge (u=0, running from the bottom corner at v=0 up to the
+     * top corner at v=1) is routed through three extra points
+     * ([DENT_NOTCH_BOTTOM_V]/[DENT_NOTCH_MID_V]/[DENT_NOTCH_TOP_V]) with
+     * the middle one pulled inward to u=[DENT_NOTCH_DEPTH]. That is the
+     * entire mechanism: a rectangle with one large triangular bite cut
+     * out of the middle of one edge, built from ordinary [quadPoint]
+     * samples of [quad] the same way every decoration below already
+     * builds shapes glued to a face -- so it is still a single flat Path
+     * fill+outline, no different in kind from [drawFace], just seven
+     * points connected instead of four. This is what actually breaks the
+     * QUBE's rectangular outline (the goal this round exists for), as
+     * opposed to VISUAL-01's uniform whole-cube squash, which never
+     * changed the fact that every face was still a perfect rectangle.
+     */
+    private fun drawDentedFace(canvas: Canvas, paint: Paint, quad: Array<FloatArray>) {
+        val bFL = quadPoint(quad, 0f, 0f)
+        val bFR = quadPoint(quad, 1f, 0f)
+        val tFR = quadPoint(quad, 1f, 1f)
+        val tFL = quadPoint(quad, 0f, 1f)
+        val notchTop = quadPoint(quad, 0f, DENT_NOTCH_TOP_V)
+        val notchInner = quadPoint(quad, DENT_NOTCH_DEPTH, DENT_NOTCH_MID_V)
+        val notchBottom = quadPoint(quad, 0f, DENT_NOTCH_BOTTOM_V)
+        val path = Path().apply {
+            moveTo(bFL[0], bFL[1])
+            lineTo(bFR[0], bFR[1])
+            lineTo(tFR[0], tFR[1])
+            lineTo(tFL[0], tFL[1])
+            lineTo(notchTop[0], notchTop[1])
+            lineTo(notchInner[0], notchInner[1])
+            lineTo(notchBottom[0], notchBottom[1])
             close()
         }
         canvas.drawPath(path, paint)
@@ -292,10 +369,15 @@ class QubeRenderer {
     /** QUBE-DAMAGE-VISUAL-01: the durability==1 face -- each eye becomes a
      * small X (two crossed strokes) instead of a single angled line, the
      * simplest possible "dazed/hurt" read in this same flat-line style,
-     * glued to [frontQuad] the same way every other decoration here is. */
+     * glued to [frontQuad] the same way every other decoration here is.
+     * QUBE-DAMAGE-VISUAL-02: raised from v=0.42 to v=0.80 -- the original
+     * height sat inside [DENT_NOTCH_BOTTOM_V]..[DENT_NOTCH_TOP_V], which
+     * would now be a hole in the actual silhouette on the left eye's side
+     * (see [drawDentedFace]); v=0.80 keeps both eyes safely above the
+     * notch band, still clearly on the box. */
     private fun drawHurtEyes(canvas: Canvas, frontQuad: Array<FloatArray>) {
-        drawEyeX(canvas, frontQuad, 0.22f, 0.42f, 0.10f)
-        drawEyeX(canvas, frontQuad, 0.78f, 0.42f, 0.10f)
+        drawEyeX(canvas, frontQuad, 0.22f, 0.80f, 0.10f)
+        drawEyeX(canvas, frontQuad, 0.78f, 0.80f, 0.10f)
     }
 
     private fun drawEyeX(canvas: Canvas, quad: Array<FloatArray>, cu: Float, cv: Float, r: Float) {
@@ -330,23 +412,33 @@ class QubeRenderer {
      * QUBE-DAMAGE-VISUAL-01: the durability==1 "ベコッ" -- large enough,
      * on its own, to read as damage from across the board (per the
      * explicit "must be obvious at a glance, not a small scratch"
-     * requirement), covering most of the lower front face so it never
-     * competes with [drawHurtEyes] above it. Three nested, progressively
-     * darker quads (rim -> wall -> core, all glued to [frontQuad] via the
-     * same [quadPoint] mechanism every decoration here uses) fake real
-     * inward depth purely with flat 2D fills -- no actual geometry is
-     * pushed inward, so the cube mesh itself (shared corners with the
-     * adjacent top/side faces) never gaps or breaks. Four crease lines
-     * radiate from the pit's center to the rim in a rough asterisk, the
-     * same "impact crack" read the original CATPUNCH-01 version used,
-     * just scaled up to match the much larger dent.
+     * requirement). Three nested, progressively darker quads (rim ->
+     * wall -> core, all glued to [frontQuad] via the same [quadPoint]
+     * mechanism every decoration here uses) fake real inward depth purely
+     * with flat 2D fills -- no actual geometry is pushed inward here, so
+     * the cube mesh itself (shared corners with the adjacent top/side
+     * faces) never gaps or breaks. Four crease lines radiate from the
+     * pit's center to the rim in a rough asterisk, the same "impact
+     * crack" read the original CATPUNCH-01 version used, just scaled up
+     * to match the much larger dent.
+     *
+     * QUBE-DAMAGE-VISUAL-02: shifted right/down from its VISUAL-01
+     * position -- the notch [drawDentedFace] cuts into the left edge
+     * (u up to [DENT_NOTCH_DEPTH], v [DENT_NOTCH_BOTTOM_V]..
+     * [DENT_NOTCH_TOP_V]) now occupies part of what used to be this
+     * patch's own left portion, and drawing this decal there would paint
+     * it partly into the now-missing silhouette. This patch now sits
+     * entirely to the right of and below the notch (and below
+     * [drawHurtEyes]'s new raised position), reading as a second, softer
+     * impact bruise alongside the sharp structural bite -- not
+     * duplicating it.
      */
     private fun drawDent(canvas: Canvas, frontQuad: Array<FloatArray>) {
         fun ring(inset: Float): Array<FloatArray> = arrayOf(
-            quadPoint(frontQuad, 0.18f + inset, 0.42f + inset * 0.7f),
-            quadPoint(frontQuad, 0.82f - inset, 0.42f + inset * 0.7f),
-            quadPoint(frontQuad, 0.82f - inset, 0.86f - inset * 0.7f),
-            quadPoint(frontQuad, 0.18f + inset, 0.86f - inset * 0.7f)
+            quadPoint(frontQuad, 0.36f + inset, 0.06f + inset * 0.7f),
+            quadPoint(frontQuad, 0.90f - inset, 0.06f + inset * 0.7f),
+            quadPoint(frontQuad, 0.90f - inset, 0.58f - inset * 0.7f),
+            quadPoint(frontQuad, 0.36f + inset, 0.58f - inset * 0.7f)
         )
 
         fun fillQuad(pts: Array<FloatArray>, paint: Paint) {
@@ -362,10 +454,10 @@ class QubeRenderer {
         fillQuad(ring(0.09f), dentFillPaint)
         fillQuad(ring(0.20f), dentCorePaint)
 
-        val center = quadPoint(frontQuad, 0.5f, 0.64f)
+        val center = quadPoint(frontQuad, 0.63f, 0.32f)
         val crackEnds = listOf(
-            0.30f to 0.46f, 0.70f to 0.46f,
-            0.24f to 0.80f, 0.76f to 0.80f
+            0.45f to 0.16f, 0.81f to 0.16f,
+            0.41f to 0.50f, 0.85f to 0.50f
         )
         for ((u, v) in crackEnds) {
             val end = quadPoint(frontQuad, u, v)
