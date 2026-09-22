@@ -11,8 +11,14 @@ android {
         applicationId = "com.mspgllc.iqpuchin"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1"
+        // AZUSAN-SIZE-TEST-01: versionCode/versionName had never changed
+        // across any prior round (all shared "1"/"0.1"), which is exactly
+        // why a stale APK on a real device was indistinguishable from a
+        // fresh one in Android's own "App info" screen last round. Bumped
+        // here purely for that identification purpose -- unrelated to,
+        // and does not gate, any game logic.
+        versionCode = 2
+        versionName = "0.1-AZUSAN_SIZE_TEST_01"
     }
 
     // Pinned debug signing key (app/debug.keystore), checked into the repo

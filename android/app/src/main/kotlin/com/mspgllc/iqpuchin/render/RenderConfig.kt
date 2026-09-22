@@ -56,18 +56,36 @@ object RenderConfig {
     const val BOARD_AXIS_MINOR_PX_FRONT_ALIGNED = 0f
 
     /**
-     * AZUSAN-PLAYER-01: baseline (unscaled) on-screen height every Azusan
-     * sprite's own opaque-content bounding box is normalized to (see
-     * [AzusanPose.contentBox] and [PlayerRenderer]) -- each source PNG
-     * has different amounts of transparent padding baked in per pose, so
-     * without this every pose would render at a different apparent size.
-     * Chosen close to one board cell's own on-screen span
-     * ([BOARD_AXIS_MAJOR_PX]) so Azusan reads as roughly cell-sized, with
-     * a modest overshoot deliberately allowed (per spec, a crown/tail
-     * peeking past the cell edge is fine) rather than shrinking her to
-     * fit strictly inside the tile.
+     * AZUSAN-SIZE-TEST-01: baseline (unscaled) on-screen height every
+     * Azusan sprite's own opaque-content bounding box is normalized to
+     * (see [AzusanPose.contentBox] and [PlayerRenderer]) -- each source
+     * PNG has different amounts of transparent padding baked in per pose,
+     * so without this every pose would render at a different apparent
+     * size.
+     *
+     * AZUSAN-PLAYER-01 originally set this to 108f (=1.2x
+     * [BOARD_AXIS_MAJOR_PX], "roughly cell-sized"), but real-Galaxy
+     * testing showed that reads too small -- 1.2x a tile leaves too
+     * little absolute screen area for the face/eyes/crown detail the
+     * artwork actually carries. Not simply multiplied by feel: derived
+     * from the measured on-screen relationship between a tile
+     * ([BOARD_AXIS_MAJOR_PX] * displayScale) and this constant, which
+     * stayed proportional across every screen size tested (a 7x12 board
+     * is width-constrained on typical Galaxy portrait aspect ratios, so
+     * displayScale itself is unaffected by this constant -- raising it
+     * only grows the character, never shrinks the board). Retuned to 2.0x
+     * [BOARD_AXIS_MAJOR_PX] (180f) instead of 1.2x: doubles the
+     * character-to-tile ratio, which puts the face/crown region at a
+     * legible absolute size while the widest pose (HIT, which spreads
+     * horizontally -- see [AzusanPose.contentBox]'s aspect ratio) still
+     * spans under 3 tile-widths even at its extreme, and every other pose
+     * stays under ~2.5 -- deliberately allowed to spill into neighboring
+     * cells (per spec) without covering enough of the 7-wide board to
+     * obscure play. Hit-box/logical position ([GridCoord],
+     * [com.mspgllc.iqpuchin.board.BoardLogic]) are untouched by this --
+     * see [PlayerRenderer] for why this is purely a display-size knob.
      */
-    const val PLAYER_SPRITE_TARGET_HEIGHT_PX = 108f
+    const val PLAYER_SPRITE_TARGET_HEIGHT_PX = 180f
 
     /** Fraction of view height reserved above the board -- kept small on
      * purpose so there's no large empty band at the top of the screen. */
