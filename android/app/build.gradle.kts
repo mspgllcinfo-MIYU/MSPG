@@ -14,7 +14,10 @@ android {
         // AZUSAN-SIZE-TEST-01 established bumping these every round purely
         // for on-device identification (they're read by nothing in game
         // logic). PRESENTATION-01 continues that.
-        versionCode = 18
+        // ICON-SIZE-01: versionCode bumped so this build is installable
+        // over/distinguishable from versionCode 18 -- versionName stays
+        // "0.1-PRESENTATION_01" (icon sizing is still part of that round).
+        versionCode = 19
         versionName = "0.1-PRESENTATION_01"
     }
 
