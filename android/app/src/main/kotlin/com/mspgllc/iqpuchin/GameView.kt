@@ -443,7 +443,6 @@ class GameView @JvmOverloads constructor(
         0L to SoundEvent.AZUSAN_STEP,
         LifeLossAzusanEffect.RUN_FRAME_MS to SoundEvent.AZUSAN_STEP,
         LifeLossAzusanEffect.RUN_FRAME_MS * 2 to SoundEvent.AZUSAN_STEP,
-        LifeLossAzusanEffect.IMPACT_START_MS to SoundEvent.AZUSAN_PUNCH,
         LifeLossAzusanEffect.IMPACT_START_MS to SoundEvent.GLASS_CRACK
     ).sortedBy { it.first }
     private var lifeLossSoundIndex = 0

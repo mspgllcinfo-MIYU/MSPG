@@ -51,14 +51,13 @@ enum class SoundEvent {
      * life-loss HIT, once per RUN_FRAME_MS step. */
     AZUSAN_STEP,
 
-    /** EFFECT-01C: the life-loss punch overlay's own impact frame begins
-     * showing (LifeLossAzusanEffect.IMPACT_START_MS) -- fires once per
-     * life-loss HIT, the same instant as [GLASS_CRACK]. */
-    AZUSAN_PUNCH,
-
     /** EFFECT-01A: GlassCrackEffect's crack pattern for this HIT starts
-     * growing in -- fires once per life-loss HIT, synchronized with
-     * [AZUSAN_PUNCH] (see LifeLossAzusanEffect.IMPACT_START_MS). */
+     * growing in -- fires once per life-loss HIT, the same instant the
+     * life-loss punch overlay's own impact frame begins showing (see
+     * LifeLossAzusanEffect.IMPACT_START_MS). SOUND-01A-FIX-01: the
+     * current spec has あずさん's life-loss overlay make contact without
+     * a distinct "punch" motion of its own, so this is the only event
+     * fired at that instant -- there is no AZUSAN_PUNCH. */
     GLASS_CRACK,
 
     /** EFFECT-01B: one of まり/あんこ/あずさん's 3 running frames during

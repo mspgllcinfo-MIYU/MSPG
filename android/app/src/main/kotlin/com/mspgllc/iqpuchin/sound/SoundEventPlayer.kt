@@ -143,7 +143,6 @@ class SoundEventPlayer(context: Context) {
             // above) without touching any call site, exactly like
             // SOUND-02 once did for this file's original SOUND-01 funnel.
             SoundEvent.AZUSAN_STEP -> {}
-            SoundEvent.AZUSAN_PUNCH -> {}
             SoundEvent.GLASS_CRACK -> {}
             SoundEvent.GAMEOVER_CAT_STEP -> {}
             SoundEvent.GAMEOVER_CAT_IMPACT -> {}
