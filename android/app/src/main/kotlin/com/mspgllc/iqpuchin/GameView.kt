@@ -31,8 +31,10 @@ import com.mspgllc.iqpuchin.render.TimedCosmeticFlag
 import com.mspgllc.iqpuchin.sound.QubeSoundTracker
 import com.mspgllc.iqpuchin.sound.SoundEvent
 import com.mspgllc.iqpuchin.sound.SoundEventPlayer
+import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.min
+import kotlin.math.sin
 
 /**
  * FRONT-ALIGNED-TEST-01: which camera GameView draws the board with.
@@ -244,7 +246,57 @@ class GameView @JvmOverloads constructor(
          * soon the *next* wave becomes visible changes.
          */
         const val EARLY_SPAWN_DEPTH_THRESHOLD = 1
+
+        // PRESENTATION-01
+        /** How long the centered "STAGE n / READY" display freezes play
+         * for at the start of every stage -- fresh launch, RETRY, PLAY
+         * AGAIN, and every NEXT all go through the single shared
+         * [beginStageWaves] call site, so this one constant covers all
+         * four. Chosen within this round's own 0.6-1.0s spec range; play
+         * is fully frozen for this whole window (see the frame loop's
+         * `stageStartActive` branch), so QUBE speed/Wave timing/
+         * EARLY_SPAWN_DEPTH_THRESHOLD are all completely unaffected --
+         * this just delays when the frozen board starts moving, never
+         * how it moves once it does. */
+        const val STAGE_START_DISPLAY_MS = 800L
+
+        /** STAGE CLEAR/ALL CLEAR's brief scale-in-to-fixed-position text
+         * animation -- within this round's own ~100-200ms spec. Drives a
+         * canvas.scale() pivoted at screen center, wrapped only around the
+         * result text itself (never the dim rect), so the existing TAP TO
+         * NEXT/TAP TO PLAY AGAIN input logic in onTouchEvent -- untouched
+         * by this round -- has nothing to do with how the text is drawn. */
+        const val RESULT_TEXT_ANIM_DURATION_MS = 160L
+        const val RESULT_TEXT_ANIM_START_SCALE = 0.85f
+
+        /** GAME OVER's own dim-overlay fade -- deliberately slower and
+         * monotonic (a single fade-in, never a pulse/flash) than
+         * [RESULT_TEXT_ANIM_DURATION_MS]'s snappier scale-in, so GAME OVER
+         * reads calmer than STAGE CLEAR per this round's spec, without
+         * touching the overlay's judgment or RETRY_INPUT_LOCKOUT_MS's own
+         * mis-tap guard at all. */
+        const val GAME_OVER_DIM_FADE_MS = 350L
+        const val GAME_OVER_DIM_MAX_ALPHA = 170
+
+        /** ALL CLEAR's small gold QUBE-like particle burst -- brief and
+         * self-terminating (never loops, never re-triggers), purely
+         * additive drawing with zero effect on restartGame()/the TAP TO
+         * PLAY AGAIN tap. */
+        const val ALL_CLEAR_PARTICLE_DURATION_MS = 700L
+        const val ALL_CLEAR_PARTICLE_START_RADIUS_DP = 40f
+        const val ALL_CLEAR_PARTICLE_END_RADIUS_DP = 140f
+        const val ALL_CLEAR_PARTICLE_SIZE_DP = 10f
     }
+
+    /** ALL CLEAR's particle burst: a fixed ring of small gold squares, each
+     * with a slight stagger (delayMs) so they don't all pop/fade in
+     * perfect unison -- positions/timing are deterministic (derived from
+     * [stageClearElapsedMs] in onDraw), never random-per-frame, so nothing
+     * flickers. */
+    private data class AllClearParticle(val angleDeg: Float, val delayMs: Long)
+
+    private val allClearParticles: List<AllClearParticle> =
+        List(8) { i -> AllClearParticle(angleDeg = i * 45f, delayMs = (i % 4) * 40L) }
 
     /** Pairs a [Qube] with the [QubeMotion] that advances it and the
      * [QubeSoundTracker] that watches both for SE purposes. QubeMotion
@@ -455,6 +507,13 @@ class GameView @JvmOverloads constructor(
         stageWaveIndex = 0
         stageClear = false
         pendingStageClearAfterBreak = false
+        // PRESENTATION-01: the single shared "a stage's wave 0 just
+        // started" instant -- fresh launch (init below), RETRY/PLAY AGAIN
+        // (restartGame -> resetBoardAndVisuals), and NEXT
+        // (advanceToNextStage -> resetBoardAndVisuals) all reach this line,
+        // so one flag flip here covers all four required occasions.
+        stageStartActive = true
+        stageStartElapsedMs = 0L
         resolveWaveBoundary()
     }
 
@@ -496,6 +555,19 @@ class GameView @JvmOverloads constructor(
     // already been spawned into `qubes` (0 = none yet). Reset to 0 by
     // [beginStageWaves] at the start of every stage.
     private var stageWaveIndex = 0
+
+    // PRESENTATION-01: a third GameView-only freeze state, same pattern as
+    // stageClear/wasGameOver above -- never merged into GameState/
+    // GameStateController. Set true by [beginStageWaves] (the one shared
+    // call site fresh launch/RETRY/PLAY AGAIN/NEXT all already go
+    // through), cleared by the frame loop once STAGE_START_DISPLAY_MS has
+    // elapsed. While true, the frame loop's normal-update branch (QUBE
+    // motion, collision, every cosmetic timer) doesn't run at all -- see
+    // that branch's own guard -- and onMoveRequested/onActionRequested/
+    // onPunchGestureRequested all early-return, so the player can't move,
+    // MARK, ACTIVATE, or CAT_PUNCH while "STAGE n / READY" is on screen.
+    private var stageStartActive = false
+    private var stageStartElapsedMs = 0L
 
     // STAGE-DESIGN-01: spawns Stage 1's own wave 0 -- replaces the old
     // `qubes = createInitialQubes()` field initializer. Placed here
@@ -574,6 +646,29 @@ class GameView @JvmOverloads constructor(
         textAlign = Paint.Align.LEFT
         isFakeBoldText = true
     }
+    // PRESENTATION-01: "STAGE n" (gold, large, matching scoreTextPaint's
+    // gold) plus a smaller white "READY" line underneath -- same overall
+    // shape as the GAME OVER/STAGE CLEAR overlays' two-line layout, but
+    // deliberately no dim rect behind it (see onDraw), since this is a
+    // brief transition, not a results screen.
+    private val stageStartTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(255, 205, 60)
+        textSize = 52f * density
+        textAlign = Paint.Align.CENTER
+        isFakeBoldText = true
+    }
+    private val stageStartReadyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = 26f * density
+        textAlign = Paint.Align.CENTER
+        isFakeBoldText = true
+    }
+    // PRESENTATION-01: ALL CLEAR's small gold QUBE-like particle squares --
+    // alpha is set per-particle per-frame in onDraw (see
+    // allClearParticles), so only the base color is fixed here.
+    private val allClearParticlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(255, 205, 60)
+    }
 
     /**
      * Judges collision purely from logical GridCoords -- PLAYER's current
@@ -615,7 +710,20 @@ class GameView @JvmOverloads constructor(
             // non-empty qubes list) -- the two conditions are mutually
             // exclusive, not prioritized against each other.
             val isGameOver = gameStateController.state == GameState.GAME_OVER
-            if (!isGameOver && !stageClear) {
+            // PRESENTATION-01: stageStartActive freezes play before either
+            // of the other two checks even run -- QUBE motion, collision,
+            // and every cosmetic timer below are completely skipped for
+            // STAGE_START_DISPLAY_MS, so the player can never be hit or
+            // lose a QUBE while "STAGE n / READY" is on screen. Nothing
+            // about QUBE speed/Wave timing/EARLY_SPAWN_DEPTH_THRESHOLD
+            // changes -- this only delays when the already-frozen board
+            // starts advancing.
+            if (stageStartActive) {
+                stageStartElapsedMs += deltaMs
+                if (stageStartElapsedMs >= STAGE_START_DISPLAY_MS) {
+                    stageStartActive = false
+                }
+            } else if (!isGameOver && !stageClear) {
                 for (instance in qubes) {
                     instance.motion.update(deltaMs)
                     instance.soundTracker.update(soundEventPlayer, boardLogic.playerPosition)
@@ -852,6 +960,13 @@ class GameView @JvmOverloads constructor(
         canvas.drawText("STAGE $stageNumber", 16f * density, 66f * density, stageTextPaint)
 
         if (gameStateController.state == GameState.GAME_OVER) {
+            // PRESENTATION-01: a calm, monotonic dim fade-in (never a
+            // pulse/flash) -- deliberately slower than STAGE CLEAR/ALL
+            // CLEAR's snappier text scale-in below, per this round's own
+            // "calmer than STAGE CLEAR" spec. Judgment, RETRY_INPUT_LOCKOUT_MS,
+            // and the TAP TO RETRY prompt/tap logic below are all untouched.
+            val dimFadeProgress = (gameOverElapsedMs.toFloat() / GAME_OVER_DIM_FADE_MS).coerceIn(0f, 1f)
+            gameOverDimPaint.alpha = (GAME_OVER_DIM_MAX_ALPHA * dimFadeProgress).toInt()
             canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), gameOverDimPaint)
             canvas.drawText("GAME OVER", width / 2f, height / 2f, gameOverTextPaint)
             // SCORE-SYSTEM-01: the run's final score, minimal addition to
@@ -874,7 +989,22 @@ class GameView @JvmOverloads constructor(
         // instead of STAGE CLEAR/SCORE/TAP TO NEXT -- see onTouchEvent for
         // where the tap goes (restartGame(), same as GAME OVER's RETRY).
         if (stageClear) {
+            // PRESENTATION-01: STAGE CLEAR/ALL CLEAR's dim rect stays at
+            // full alpha immediately (only GAME OVER's fades in -- see
+            // above), so the scale-in below is this overlay's whole "polish"
+            // signature.
+            gameOverDimPaint.alpha = GAME_OVER_DIM_MAX_ALPHA
             canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), gameOverDimPaint)
+
+            // PRESENTATION-01: brief scale-in-to-fixed-position, pivoted at
+            // screen center -- wraps only the text below, never the dim
+            // rect just drawn above, and never touches onTouchEvent's
+            // existing TAP TO NEXT/TAP TO PLAY AGAIN tap logic at all.
+            val textAnimProgress = (stageClearElapsedMs.toFloat() / RESULT_TEXT_ANIM_DURATION_MS).coerceIn(0f, 1f)
+            val textScale = RESULT_TEXT_ANIM_START_SCALE + (1f - RESULT_TEXT_ANIM_START_SCALE) * textAnimProgress
+            canvas.save()
+            canvas.scale(textScale, textScale, width / 2f, height / 2f)
+
             if (stageNumber >= CURRENT_RELEASE_FINAL_STAGE) {
                 canvas.drawText("ALL CLEAR", width / 2f, height / 2f, gameOverTextPaint)
                 canvas.drawText("FINAL SCORE ${scoreText()}", width / 2f, height / 2f + 56f * density, gameOverScorePaint)
@@ -888,6 +1018,50 @@ class GameView @JvmOverloads constructor(
                     canvas.drawText("TAP TO NEXT", width / 2f, height / 2f + 100f * density, retryPromptPaint)
                 }
             }
+            canvas.restore()
+
+            // PRESENTATION-01: ALL CLEAR's own brief gold particle burst --
+            // makes it read as "slightly more special than STAGE CLEAR"
+            // per this round's spec, self-terminating after
+            // ALL_CLEAR_PARTICLE_DURATION_MS with zero effect on the tap
+            // logic above.
+            if (stageNumber >= CURRENT_RELEASE_FINAL_STAGE) {
+                drawAllClearParticles(canvas)
+            }
+        }
+
+        // PRESENTATION-01: brief centered "STAGE n / READY" at the start
+        // of every stage -- deliberately drawn last (on top of everything
+        // else, including the board underneath) and with no dim rect,
+        // since it's a short transition rather than a results screen. The
+        // frame loop's own stageStartActive branch is what actually keeps
+        // play frozen for this whole window; this is purely the display.
+        if (stageStartActive) {
+            canvas.drawText("STAGE $stageNumber", width / 2f, height / 2f, stageStartTextPaint)
+            canvas.drawText("READY", width / 2f, height / 2f + 56f * density, stageStartReadyPaint)
+        }
+    }
+
+    /** PRESENTATION-01: draws [allClearParticles] as small gold squares
+     * radiating outward from screen center and fading out, each on its own
+     * [AllClearParticle.delayMs]-staggered schedule driven by
+     * [stageClearElapsedMs] -- deterministic, not random-per-frame, so
+     * nothing flickers, and it simply stops drawing once every particle's
+     * own window has elapsed rather than looping. */
+    private fun drawAllClearParticles(canvas: Canvas) {
+        val centerX = width / 2f
+        val centerY = height / 2f
+        val half = ALL_CLEAR_PARTICLE_SIZE_DP * density / 2f
+        for (particle in allClearParticles) {
+            val localElapsedMs = stageClearElapsedMs - particle.delayMs
+            if (localElapsedMs < 0L || localElapsedMs >= ALL_CLEAR_PARTICLE_DURATION_MS) continue
+            val t = localElapsedMs.toFloat() / ALL_CLEAR_PARTICLE_DURATION_MS
+            val radiusPx = (ALL_CLEAR_PARTICLE_START_RADIUS_DP + (ALL_CLEAR_PARTICLE_END_RADIUS_DP - ALL_CLEAR_PARTICLE_START_RADIUS_DP) * t) * density
+            val angleRad = Math.toRadians(particle.angleDeg.toDouble())
+            val px = centerX + radiusPx * cos(angleRad).toFloat()
+            val py = centerY + radiusPx * sin(angleRad).toFloat()
+            allClearParticlePaint.alpha = ((1f - t) * 255f).toInt().coerceIn(0, 255)
+            canvas.drawRect(px - half, py - half, px + half, py + half, allClearParticlePaint)
         }
     }
 
@@ -1054,7 +1228,7 @@ class GameView @JvmOverloads constructor(
     private fun scoreText(): String = score.toString().padStart(6, '0')
 
     override fun onMoveRequested(direction: Direction) {
-        if (gameStateController.state == GameState.GAME_OVER || stageClear) return
+        if (gameStateController.state == GameState.GAME_OVER || stageClear || stageStartActive) return
         if (boardLogic.movePlayer(direction)) {
             // AZUSAN-PLAYER-01: cosmetic only -- a brief WALK_<direction>
             // sprite window, purely reflecting a move that already
@@ -1083,7 +1257,7 @@ class GameView @JvmOverloads constructor(
      * looks at punch range at all anymore.
      */
     override fun onActionRequested() {
-        if (gameStateController.state == GameState.GAME_OVER || stageClear) return
+        if (gameStateController.state == GameState.GAME_OVER || stageClear || stageStartActive) return
         val currentMark = markController.markedCoord
         if (currentMark != null) {
             // Logical grid coordinates are unique per QUBE, so at most
@@ -1132,7 +1306,7 @@ class GameView @JvmOverloads constructor(
      * punch range, this is simply a no-op.
      */
     override fun onPunchGestureRequested() {
-        if (gameStateController.state == GameState.GAME_OVER || stageClear) return
+        if (gameStateController.state == GameState.GAME_OVER || stageClear || stageStartActive) return
         val punchIndex = qubes.indexOfFirst { isPunchRange(boardLogic.playerPosition, it.qube.coord) }
         if (punchIndex >= 0) {
             performPunch(punchIndex)
