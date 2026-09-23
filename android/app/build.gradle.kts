@@ -13,8 +13,12 @@ android {
         targetSdk = 34
         // AZUSAN-SIZE-TEST-01 established bumping these every round purely
         // for on-device identification (they're read by nothing in game
-        // logic). STAGE-DESIGN-01C continues that.
-        versionCode = 14
+        // logic). This STAGE-DESIGN-01C revision (0-row wave gap,
+        // superseding the prior 01C's 2-row-gap build at versionCode 14)
+        // continues that -- versionCode still bumped even though
+        // versionName is reused verbatim, since Android requires a
+        // strictly increasing versionCode to install as an upgrade.
+        versionCode = 15
         versionName = "0.1-STAGE_DESIGN_01C"
     }
 

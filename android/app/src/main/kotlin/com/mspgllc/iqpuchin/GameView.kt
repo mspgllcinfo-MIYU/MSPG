@@ -165,18 +165,29 @@ class GameView @JvmOverloads constructor(
          * z=[EARLY_SPAWN_DEPTH_THRESHOLD]) and the new wave's spawn row
          * (z=0) is [EARLY_SPAWN_DEPTH_THRESHOLD]-1 rows (the strictly-
          * between rows z=1..threshold-1). STAGE-DESIGN-01B originally used
-         * 4 (a 3-row gap) -- real-device testing (STAGE-DESIGN-01C) found
-         * that read as too large a blank stretch, so this is now 3 (a
-         * 2-row gap, this round's own explicit "最大2段まで" ceiling).
-         * Still deliberately not 0/1 (would spawn instantly or almost so,
-         * defeating the whole "avoid overlap" point) -- 3 keeps the new
-         * wave's z=0 spawn cell guaranteed clear of the old wave (which is
-         * always at z>=3 the instant this fires), while the new wave still
-         * gets a full traverse of the board's own front half before
-         * reaching the player -- comfortably more than the "2-3 moves of
-         * judgment time" this round's own spec asks for.
+         * 4 (a 3-row gap); a first STAGE-DESIGN-01C pass lowered it to 3
+         * (a 2-row gap). Real-device feedback wanted tighter still: a
+         * *default* 0-row gap (the two waves visibly adjacent, reading as
+         * one continuous column), with any larger gap only as a fallback
+         * if 0 were ever provably unsafe. It never is, so this now sits at
+         * the lowest value that still guarantees zero coordinate overlap:
+         * 1 -- gap = 1-1 = 0 rows. The reasoning: every QUBE in one wave
+         * moves in perfect lockstep (same spawn instant, same
+         * QubeConfig.CYCLE_DURATION_MS pacing -- unchanged), so
+         * `qubes.all { z >= 1 }` only ever becomes true the instant the
+         * *entire* current wave has completed its first topple and moved
+         * off z=0 onto z=1 -- at that exact moment z=0 is guaranteed
+         * empty, so the new wave can occupy it with zero risk of landing
+         * on an existing QUBE. Threshold 0 would be unsafe by contrast
+         * (a wave's own just-spawned members already satisfy z>=0
+         * trivially, which would let the very same frame's spawn
+         * immediately trigger *another* spawn on top of it); 1 is the
+         * smallest threshold that avoids that. The new wave still gets a
+         * full traverse of the board's own front half before reaching the
+         * player, so individual reaction time is unaffected -- only how
+         * soon the *next* wave becomes visible changes.
          */
-        const val EARLY_SPAWN_DEPTH_THRESHOLD = 3
+        const val EARLY_SPAWN_DEPTH_THRESHOLD = 1
     }
 
     /** Pairs a [Qube] with the [QubeMotion] that advances it and the
