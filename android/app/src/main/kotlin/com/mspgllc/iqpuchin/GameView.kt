@@ -234,6 +234,24 @@ class GameView @JvmOverloads constructor(
     private var retryDownX = 0f
     private var retryDownY = 0f
     private val retryTapSlopPx = RETRY_TAP_SLOP_DP * density
+
+    // STAGE-CLEAR-01: a second, GameView-only result state, deliberately
+    // never added to GameState/GameStateController (that file's own
+    // collision-judgement logic is fixed-spec this round) -- `stageClear`
+    // is checked alongside `gameStateController.state == GAME_OVER`
+    // everywhere a freeze/input-gate is needed, exactly the same pattern
+    // wasGameOver/gameOverElapsedMs already established for GAME_OVER,
+    // reused here rather than duplicated into a new mechanism.
+    private var stageClear = false
+    private var wasStageClear = false
+    private var stageClearElapsedMs = 0L
+    // Set the instant a CAT_PUNCH destroys the last QUBE; only flips
+    // `stageClear` true once brokenQubes has fully drained on its own
+    // (see the frame loop) -- this reuses BrokenQubeVisual's own
+    // DURATION_MS/finished() lifecycle as the wait, rather than a second,
+    // duplicate ~200ms timer. Never set for the MARK/ACTIVATE path, which
+    // has no BrokenQubeVisual and transitions immediately.
+    private var pendingStageClearAfterBreak = false
     // STEP 7 placeholder-only "HIT" banner -- not part of any real HUD.
     private val hitTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.RED
@@ -324,8 +342,15 @@ class GameView @JvmOverloads constructor(
             // CATPUNCH-01: GAME_OVER freezes the board (QUBE motion, SE
             // tracking, collision checks) instead of continuing to play
             // out underneath the overlay. Nothing else in this block's
-            // own timing/order changed.
-            if (gameStateController.state != GameState.GAME_OVER) {
+            // own timing/order changed. STAGE-CLEAR-01: `stageClear`
+            // freezes the same way -- by construction it can only ever
+            // become true while `qubes` is already empty (see
+            // onActionRequested/performPunch), so it can never coincide
+            // with a GAME_OVER-causing collision (which requires a
+            // non-empty qubes list) -- the two conditions are mutually
+            // exclusive, not prioritized against each other.
+            val isGameOver = gameStateController.state == GameState.GAME_OVER
+            if (!isGameOver && !stageClear) {
                 for (instance in qubes) {
                     instance.motion.update(deltaMs)
                     instance.soundTracker.update(soundEventPlayer, boardLogic.playerPosition)
@@ -344,8 +369,16 @@ class GameView @JvmOverloads constructor(
                 brokenQubes.removeAll { it.finished() }
                 gameStateController.update(deltaMs)
                 checkCollision()
+                // STAGE-CLEAR-01: only flips once the last QUBE's break
+                // flash has fully drained -- see pendingStageClearAfterBreak's
+                // own doc.
+                if (pendingStageClearAfterBreak && brokenQubes.isEmpty()) {
+                    pendingStageClearAfterBreak = false
+                    stageClear = true
+                }
                 wasGameOver = false
-            } else {
+                wasStageClear = false
+            } else if (isGameOver) {
                 // RESTART-SYSTEM-01: gameOverElapsedMs resets to 0 the
                 // instant GAME_OVER is first observed (the `!wasGameOver`
                 // branch below), then counts up every frame after that --
@@ -355,6 +388,15 @@ class GameView @JvmOverloads constructor(
                     gameOverElapsedMs = 0L
                 } else {
                     gameOverElapsedMs += deltaMs
+                }
+            } else {
+                // STAGE-CLEAR-01: identical lockout bookkeeping, reusing
+                // RETRY_INPUT_LOCKOUT_MS -- see onTouchEvent.
+                if (!wasStageClear) {
+                    wasStageClear = true
+                    stageClearElapsedMs = 0L
+                } else {
+                    stageClearElapsedMs += deltaMs
                 }
             }
 
@@ -539,6 +581,18 @@ class GameView @JvmOverloads constructor(
                 canvas.drawText("TAP TO RETRY", width / 2f, height / 2f + 100f * density, retryPromptPaint)
             }
         }
+
+        // STAGE-CLEAR-01: same overlay shape as GAME OVER above, reusing
+        // the same Paints (white/gold/pink) rather than new ones, per
+        // this round's own "don't change the look-and-feel" instruction.
+        if (stageClear) {
+            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), gameOverDimPaint)
+            canvas.drawText("STAGE CLEAR", width / 2f, height / 2f, gameOverTextPaint)
+            canvas.drawText("SCORE ${scoreText()}", width / 2f, height / 2f + 56f * density, gameOverScorePaint)
+            if (stageClearElapsedMs >= RETRY_INPUT_LOCKOUT_MS) {
+                canvas.drawText("TAP TO NEXT", width / 2f, height / 2f + 100f * density, retryPromptPaint)
+            }
+        }
     }
 
     /**
@@ -560,8 +614,14 @@ class GameView @JvmOverloads constructor(
      * own files) rather than widened into those sibling views.
      */
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (gameStateController.state != GameState.GAME_OVER) return false
-        if (gameOverElapsedMs < RETRY_INPUT_LOCKOUT_MS) return false
+        val isGameOver = gameStateController.state == GameState.GAME_OVER
+        if (!isGameOver && !stageClear) return false
+        // STAGE-CLEAR-01: same lockout constant, same tap-slop fields --
+        // only one of the two result screens is ever active at once (see
+        // the frame loop's own mutual-exclusion note), so reusing
+        // retryDownX/Y/retryTapSlopPx here is safe.
+        val lockoutElapsedMs = if (isGameOver) gameOverElapsedMs else stageClearElapsedMs
+        if (lockoutElapsedMs < RETRY_INPUT_LOCKOUT_MS) return false
         return when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 retryDownX = event.x
@@ -572,13 +632,24 @@ class GameView @JvmOverloads constructor(
                 val dx = event.x - retryDownX
                 val dy = event.y - retryDownY
                 if (hypot(dx, dy) <= retryTapSlopPx) {
-                    restartGame()
+                    if (isGameOver) restartGame() else onTapToNextStage()
                     invalidate()
                 }
                 true
             }
             else -> true
         }
+    }
+
+    /**
+     * STAGE-CLEAR-01: Stage 2 doesn't exist yet, so this is intentionally
+     * a no-op -- the tap path exists (per this round's own "build the
+     * entrance, don't build Stage 2" instruction) but changes nothing:
+     * no QUBE count/speed change, no new QUBE generation, no score/life
+     * reset. A future STAGE-2 round wires real behavior in here without
+     * touching onTouchEvent/the frame loop again.
+     */
+    private fun onTapToNextStage() {
     }
 
     /**
@@ -618,6 +689,15 @@ class GameView @JvmOverloads constructor(
 
         wasGameOver = false
         gameOverElapsedMs = 0L
+
+        // STAGE-CLEAR-01: not currently reachable from stageClear (TAP TO
+        // NEXT never calls restartGame -- see onTapToNextStage), but
+        // restartGame's own contract is "exactly fresh-launch state," and
+        // a fresh launch has stageClear false -- kept here defensively.
+        stageClear = false
+        pendingStageClearAfterBreak = false
+        wasStageClear = false
+        stageClearElapsedMs = 0L
     }
 
     /** SCORE-SYSTEM-01: zero-padded to at least 6 digits for display only
@@ -626,7 +706,7 @@ class GameView @JvmOverloads constructor(
     private fun scoreText(): String = score.toString().padStart(6, '0')
 
     override fun onMoveRequested(direction: Direction) {
-        if (gameStateController.state == GameState.GAME_OVER) return
+        if (gameStateController.state == GameState.GAME_OVER || stageClear) return
         if (boardLogic.movePlayer(direction)) {
             // AZUSAN-PLAYER-01: cosmetic only -- a brief WALK_<direction>
             // sprite window, purely reflecting a move that already
@@ -655,7 +735,7 @@ class GameView @JvmOverloads constructor(
      * looks at punch range at all anymore.
      */
     override fun onActionRequested() {
-        if (gameStateController.state == GameState.GAME_OVER) return
+        if (gameStateController.state == GameState.GAME_OVER || stageClear) return
         val currentMark = markController.markedCoord
         if (currentMark != null) {
             // Logical grid coordinates are unique per QUBE, so at most
@@ -677,6 +757,10 @@ class GameView @JvmOverloads constructor(
                 // (index < 0, existing behavior, unchanged below) never
                 // reaches this line.
                 awardScore(SCORE_ACTIVATE_CAPTURE, "+$SCORE_ACTIVATE_CAPTURE")
+                // STAGE-CLEAR-01: no BrokenQubeVisual is involved on this
+                // path, so the transition is immediate -- score is already
+                // awarded above, satisfying "score first, then CLEAR."
+                if (qubes.isEmpty()) stageClear = true
             }
             markController.clear()
         } else {
@@ -697,7 +781,7 @@ class GameView @JvmOverloads constructor(
      * punch range, this is simply a no-op.
      */
     override fun onPunchGestureRequested() {
-        if (gameStateController.state == GameState.GAME_OVER) return
+        if (gameStateController.state == GameState.GAME_OVER || stageClear) return
         val punchIndex = qubes.indexOfFirst { isPunchRange(boardLogic.playerPosition, it.qube.coord) }
         if (punchIndex >= 0) {
             performPunch(punchIndex)
@@ -759,6 +843,11 @@ class GameView @JvmOverloads constructor(
             // scoring -- this line runs before that object even exists on
             // screen for a single frame.
             awardScore(SCORE_PUNCH_DESTROY, "+$SCORE_PUNCH_DESTROY")
+            // STAGE-CLEAR-01: score is already awarded above. Unlike the
+            // ACTIVATE path, this doesn't flip stageClear immediately --
+            // brokenQubes (just added above) must finish its ~200ms flash
+            // first; see pendingStageClearAfterBreak's own doc.
+            if (qubes.isEmpty()) pendingStageClearAfterBreak = true
         } else {
             soundEventPlayer.play(SoundEvent.PUNCH_HIT)
         }
