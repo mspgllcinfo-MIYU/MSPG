@@ -131,6 +131,26 @@ class SoundEventPlayer(context: Context) {
                 playSample(punchHitId, VOLUME_PUNCH_HIT)
                 playSample(qubeBreakId, VOLUME_QUBE_BREAK)
             }
+
+            // SOUND-01A: the funnel/trigger plumbing for these nine is now
+            // fully wired from GameView (see lifeLossSoundSchedule/
+            // catEffectSoundSchedule there) at the exact instants their
+            // own class docs describe, but no asset exists for any of
+            // them yet -- per this round's own explicit "don't fetch
+            // external material" instruction, each is a deliberate no-op
+            // for now. A future SOUND round fills these in one at a time
+            // (synthesize/load + playSample(), same shape as every event
+            // above) without touching any call site, exactly like
+            // SOUND-02 once did for this file's original SOUND-01 funnel.
+            SoundEvent.AZUSAN_STEP -> {}
+            SoundEvent.AZUSAN_PUNCH -> {}
+            SoundEvent.GLASS_CRACK -> {}
+            SoundEvent.GAMEOVER_CAT_STEP -> {}
+            SoundEvent.GAMEOVER_CAT_IMPACT -> {}
+            SoundEvent.BB_STOMP -> {}
+            SoundEvent.BB_FINAL_IMPACT -> {}
+            SoundEvent.GLASS_SHATTER -> {}
+            SoundEvent.GAME_OVER -> {}
         }
     }
 

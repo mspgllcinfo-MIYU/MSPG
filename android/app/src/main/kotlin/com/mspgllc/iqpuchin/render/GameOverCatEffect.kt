@@ -52,30 +52,35 @@ class GameOverCatEffect(context: Context) {
         // so ANKO/AZUSAN's start-time offsets shift automatically only
         // because CHARACTER_MS grew, preserving the same relative
         // structure).
-        private const val RUN_FRAME_MS = 180L
-        private const val RUN_MS = RUN_FRAME_MS * 3 // 540ms
+        // SOUND-01A: the following constants were made public (visibility
+        // only, same values) so GameView's own catEffectSoundSchedule can
+        // derive every GAMEOVER_CAT_STEP/IMPACT/BB_STOMP/BB_FINAL_IMPACT/
+        // GLASS_SHATTER instant directly from them, instead of a second,
+        // hardcoded copy of these millisecond values.
+        const val RUN_FRAME_MS = 180L
+        const val RUN_MS = RUN_FRAME_MS * 3 // 540ms
         private const val IMPACT_MS = 300L
         private const val GAP_MS = 80L
         private const val CHARACTER_MS = RUN_MS + IMPACT_MS // 840ms
 
-        private const val MARI_START_MS = 0L
-        private const val ANKO_START_MS = MARI_START_MS + CHARACTER_MS + GAP_MS // 920ms
-        private const val AZUSAN_START_MS = ANKO_START_MS + CHARACTER_MS + GAP_MS // 1840ms
+        const val MARI_START_MS = 0L
+        const val ANKO_START_MS = MARI_START_MS + CHARACTER_MS + GAP_MS // 920ms
+        const val AZUSAN_START_MS = ANKO_START_MS + CHARACTER_MS + GAP_MS // 1840ms
 
         // The deliberate "did it end?" hush before BB -- this round's own
         // explicitly named 1100ms baseline (within its stated 1000-1200ms
         // range), replacing the previous 600ms.
         private const val PRE_BB_PAUSE_MS = 1100L
-        private const val BB_START_MS = AZUSAN_START_MS + CHARACTER_MS + PRE_BB_PAUSE_MS // 3780ms
+        const val BB_START_MS = AZUSAN_START_MS + CHARACTER_MS + PRE_BB_PAUSE_MS // 3780ms
 
         // BB: 4 distinct heavy stomps (now 520ms each -- still a fixed
         // pose-and-scale step per stomp, never a smooth/fast slide),
         // then a longer hold on the final-impact pose before the shatter
         // takes over.
-        private const val BB_STOMP_MS = 520L
-        private const val BB_RUN_MS = BB_STOMP_MS * 4 // 2080ms
+        const val BB_STOMP_MS = 520L
+        const val BB_RUN_MS = BB_STOMP_MS * 4 // 2080ms
         private const val BB_IMPACT_HOLD_MS = 440L
-        private const val SHATTER_START_MS = BB_START_MS + BB_RUN_MS + BB_IMPACT_HOLD_MS // 6300ms
+        const val SHATTER_START_MS = BB_START_MS + BB_RUN_MS + BB_IMPACT_HOLD_MS // 6300ms
 
         private const val SHATTER_BURST_MS = 280L
         private const val SHATTER_SHARD_MS = 840L

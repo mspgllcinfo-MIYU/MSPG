@@ -33,7 +33,11 @@ class LifeLossAzusanEffect(context: Context) {
         // "base it on EFFECT-01B's already-tuned speed" instruction --
         // a separate copy, not a shared constant, so changing this can
         // never affect GameOverCatEffect's own timeline.
-        private const val RUN_FRAME_MS = 180L
+        // SOUND-01A: made public (visibility only, same value) so
+        // GameView's own lifeLossSoundSchedule can derive its AZUSAN_STEP
+        // instants (0/RUN_FRAME_MS/RUN_FRAME_MS*2) from this single
+        // constant instead of a second, hardcoded copy of 180L.
+        const val RUN_FRAME_MS = 180L
         private const val RUN_MS = RUN_FRAME_MS * 3 // 540ms
 
         /** The instant the punch frame begins showing -- GameView calls

@@ -390,6 +390,32 @@ class GameView @JvmOverloads constructor(
     private var catEffectElapsedMs = 0L
     private var catEffectDone = false
 
+    // SOUND-01A: same schedule-plus-index-pointer approach as
+    // lifeLossSoundSchedule below, built entirely from GameOverCatEffect's
+    // own now-public timing constants -- every まり/あんこ/あずさん
+    // step+impact, all 4 BB stomps, BB's final impact, the glass-shatter
+    // instant, and the GAME_OVER instant itself (TOTAL_DURATION_MS, the
+    // same instant GameView starts allowing the existing GAME OVER text
+    // to show) -- so this list can never drift out of sync with the
+    // visual timeline it's describing.
+    private val catEffectSoundSchedule: List<Pair<Long, SoundEvent>> = run {
+        val characterStarts = listOf(
+            GameOverCatEffect.MARI_START_MS,
+            GameOverCatEffect.ANKO_START_MS,
+            GameOverCatEffect.AZUSAN_START_MS
+        )
+        val steps = characterStarts.flatMap { start ->
+            (0 until 3).map { i -> (start + i * GameOverCatEffect.RUN_FRAME_MS) to SoundEvent.GAMEOVER_CAT_STEP }
+        }
+        val impacts = characterStarts.map { start -> (start + GameOverCatEffect.RUN_MS) to SoundEvent.GAMEOVER_CAT_IMPACT }
+        val bbStomps = (0 until 4).map { i -> (GameOverCatEffect.BB_START_MS + i * GameOverCatEffect.BB_STOMP_MS) to SoundEvent.BB_STOMP }
+        val bbFinalImpact = listOf((GameOverCatEffect.BB_START_MS + GameOverCatEffect.BB_RUN_MS) to SoundEvent.BB_FINAL_IMPACT)
+        val glassShatter = listOf(GameOverCatEffect.SHATTER_START_MS to SoundEvent.GLASS_SHATTER)
+        val gameOver = listOf(GameOverCatEffect.TOTAL_DURATION_MS to SoundEvent.GAME_OVER)
+        (steps + impacts + bbStomps + bbFinalImpact + glassShatter + gameOver).sortedBy { it.first }
+    }
+    private var catEffectSoundIndex = 0
+
     // EFFECT-01C: a short, freeze-the-board あずさん-punch overlay shown
     // on every life-loss HIT (1..3), replacing the old "the crack just
     // appears the instant life decrements" behavior -- GlassCrackEffect
@@ -404,6 +430,23 @@ class GameView @JvmOverloads constructor(
     private var lifeLossAzusanElapsedMs = 0L
     private var lifeLossPendingHitNumber = 0
     private var lifeLossCrackFired = false
+
+    // SOUND-01A: (elapsedMs, event) pairs for the life-loss punch overlay,
+    // derived directly from LifeLossAzusanEffect's own RUN_FRAME_MS/
+    // IMPACT_START_MS constants (never a second, hardcoded copy of those
+    // millisecond values) and sorted once at construction. The frame
+    // loop's own lifeLossAzusanActive branch walks this with a plain
+    // index pointer (lifeLossSoundIndex) that only ever moves forward, so
+    // each entry plays exactly once even if a slow frame steps past
+    // several thresholds at once, and never replays on its own.
+    private val lifeLossSoundSchedule: List<Pair<Long, SoundEvent>> = listOf(
+        0L to SoundEvent.AZUSAN_STEP,
+        LifeLossAzusanEffect.RUN_FRAME_MS to SoundEvent.AZUSAN_STEP,
+        LifeLossAzusanEffect.RUN_FRAME_MS * 2 to SoundEvent.AZUSAN_STEP,
+        LifeLossAzusanEffect.IMPACT_START_MS to SoundEvent.AZUSAN_PUNCH,
+        LifeLossAzusanEffect.IMPACT_START_MS to SoundEvent.GLASS_CRACK
+    ).sortedBy { it.first }
+    private var lifeLossSoundIndex = 0
 
     // SCORE-SYSTEM-01: the entire score system is this one Int plus the
     // two `score +=` call sites in onActionRequested/performPunch below
@@ -758,6 +801,9 @@ class GameView @JvmOverloads constructor(
         lifeLossAzusanElapsedMs = 0L
         lifeLossPendingHitNumber = hitNumber
         lifeLossCrackFired = false
+        // SOUND-01A: fresh instance of this overlay replays its own SE
+        // schedule from the start.
+        lifeLossSoundIndex = 0
     }
 
     /** EFFECT-01A: starts HIT [hitNumber]'s crack pattern growing in.
@@ -815,6 +861,16 @@ class GameView @JvmOverloads constructor(
                 // anyway). checkCollision() never runs here, so this can
                 // never re-trigger itself mid-overlay.
                 lifeLossAzusanElapsedMs += deltaMs
+                // SOUND-01A: a while loop (not if) so a single slow frame
+                // that steps past more than one scheduled instant still
+                // plays every one of them exactly once, in order, rather
+                // than skipping any.
+                while (lifeLossSoundIndex < lifeLossSoundSchedule.size &&
+                    lifeLossAzusanElapsedMs >= lifeLossSoundSchedule[lifeLossSoundIndex].first
+                ) {
+                    soundEventPlayer.play(lifeLossSoundSchedule[lifeLossSoundIndex].second)
+                    lifeLossSoundIndex++
+                }
                 if (!lifeLossCrackFired && lifeLossAzusanElapsedMs >= LifeLossAzusanEffect.IMPACT_START_MS) {
                     lifeLossCrackFired = true
                     // The exact fix this round makes: the crack now
@@ -933,9 +989,21 @@ class GameView @JvmOverloads constructor(
             ) {
                 catEffectStarted = true
                 catEffectElapsedMs = 0L
+                // SOUND-01A: fresh GAME OVER sequence replays its own SE
+                // schedule from the start.
+                catEffectSoundIndex = 0
             }
             if (catEffectStarted && !catEffectDone) {
                 catEffectElapsedMs += deltaMs
+                // SOUND-01A: same while-loop-with-index-pointer approach
+                // as lifeLossSoundSchedule above -- see that block's own
+                // comment for why a while loop.
+                while (catEffectSoundIndex < catEffectSoundSchedule.size &&
+                    catEffectElapsedMs >= catEffectSoundSchedule[catEffectSoundIndex].first
+                ) {
+                    soundEventPlayer.play(catEffectSoundSchedule[catEffectSoundIndex].second)
+                    catEffectSoundIndex++
+                }
                 if (gameOverCatEffect.isDone(catEffectElapsedMs)) {
                     catEffectDone = true
                 }
@@ -1361,6 +1429,10 @@ class GameView @JvmOverloads constructor(
         catEffectStarted = false
         catEffectElapsedMs = 0L
         catEffectDone = false
+        // SOUND-01A: same reasoning -- a RETRY that happens to land
+        // mid-sequence never leaves this pointer stranded partway through
+        // the schedule for the next GAME OVER.
+        catEffectSoundIndex = 0
 
         // EFFECT-01C: same reasoning -- RETRY/PLAY AGAIN clears any
         // in-flight あずさん-punch overlay too, so a RETRY that happens to
@@ -1370,6 +1442,8 @@ class GameView @JvmOverloads constructor(
         lifeLossAzusanElapsedMs = 0L
         lifeLossPendingHitNumber = 0
         lifeLossCrackFired = false
+        // SOUND-01A: same reasoning as catEffectSoundIndex above.
+        lifeLossSoundIndex = 0
     }
 
     /**
