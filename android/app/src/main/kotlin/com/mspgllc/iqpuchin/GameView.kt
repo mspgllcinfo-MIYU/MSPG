@@ -869,14 +869,18 @@ class GameView @JvmOverloads constructor(
         // STAGE-CLEAR-01: same overlay shape as GAME OVER above, reusing
         // the same Paints (white/gold/pink) rather than new ones, per
         // this round's own "don't change the look-and-feel" instruction.
-        // STAGE-DESIGN-01: Stage CURRENT_RELEASE_FINAL_STAGE's own clear
-        // shows "ALL CLEAR" with no TAP TO NEXT line instead -- this
-        // release has nothing to advance to yet (see onTouchEvent).
+        // STAGE-DESIGN-01/GAME-FLOW-01: Stage CURRENT_RELEASE_FINAL_STAGE's
+        // own clear shows "ALL CLEAR"/"FINAL SCORE"/"TAP TO PLAY AGAIN"
+        // instead of STAGE CLEAR/SCORE/TAP TO NEXT -- see onTouchEvent for
+        // where the tap goes (restartGame(), same as GAME OVER's RETRY).
         if (stageClear) {
             canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), gameOverDimPaint)
             if (stageNumber >= CURRENT_RELEASE_FINAL_STAGE) {
                 canvas.drawText("ALL CLEAR", width / 2f, height / 2f, gameOverTextPaint)
-                canvas.drawText("SCORE ${scoreText()}", width / 2f, height / 2f + 56f * density, gameOverScorePaint)
+                canvas.drawText("FINAL SCORE ${scoreText()}", width / 2f, height / 2f + 56f * density, gameOverScorePaint)
+                if (stageClearElapsedMs >= RETRY_INPUT_LOCKOUT_MS) {
+                    canvas.drawText("TAP TO PLAY AGAIN", width / 2f, height / 2f + 100f * density, retryPromptPaint)
+                }
             } else {
                 canvas.drawText("STAGE CLEAR", width / 2f, height / 2f, gameOverTextPaint)
                 canvas.drawText("SCORE ${scoreText()}", width / 2f, height / 2f + 56f * density, gameOverScorePaint)
@@ -924,13 +928,17 @@ class GameView @JvmOverloads constructor(
                 val dx = event.x - retryDownX
                 val dy = event.y - retryDownY
                 if (hypot(dx, dy) <= retryTapSlopPx) {
-                    // STAGE-DESIGN-01: on the ALL CLEAR screen (stageNumber
-                    // >= CURRENT_RELEASE_FINAL_STAGE) a tap does nothing --
-                    // this release has no Stage 11 to advance to yet.
-                    if (isGameOver) {
-                        restartGame()
-                    } else if (stageNumber < CURRENT_RELEASE_FINAL_STAGE) {
-                        onTapToNextStage()
+                    // GAME-FLOW-01: ALL CLEAR's tap (stageNumber >=
+                    // CURRENT_RELEASE_FINAL_STAGE) now goes through the
+                    // exact same restartGame() GAME OVER's RETRY already
+                    // uses -- it already resets everything PLAY AGAIN
+                    // needs (stageNumber=1, score=0, fresh lives, wave
+                    // state, MARK, every visual timer), so this is pure
+                    // reuse, no new reset logic.
+                    when {
+                        isGameOver -> restartGame()
+                        stageNumber >= CURRENT_RELEASE_FINAL_STAGE -> restartGame()
+                        else -> onTapToNextStage()
                     }
                     invalidate()
                 }
