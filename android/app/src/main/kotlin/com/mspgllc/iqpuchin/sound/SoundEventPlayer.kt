@@ -72,6 +72,17 @@ class SoundEventPlayer(context: Context) {
         // CATPUNCH-01
         const val VOLUME_PUNCH_HIT = 0.8f
         const val VOLUME_QUBE_BREAK = 0.85f
+
+        // SOUND-01B: azusan_step.wav (~120ms, soft low-mid paw-thump +
+        // low-passed noise click, no sharp high transient) plays quietly
+        // -- it fires 3 times per life-loss HIT (see GameView's
+        // lifeLossSoundSchedule), so it must read as a light running
+        // footstep, not compete with the impact SE that follows.
+        // glass_crack.wav (~380ms, high-passed snap + decaying high-
+        // frequency micro-crackle) plays closer to full volume so its
+        // sharp attack reads clearly on a phone speaker.
+        const val VOLUME_AZUSAN_STEP = 0.5f
+        const val VOLUME_GLASS_CRACK = 0.85f
     }
 
     private val appContext = context.applicationContext
@@ -110,6 +121,15 @@ class SoundEventPlayer(context: Context) {
     private val punchHitId = load(R.raw.punch_hit)
     private val qubeBreakId = load(R.raw.qube_break)
 
+    // SOUND-01B: same procedurally-synthesized-only method every existing
+    // asset above uses (numpy sine/noise oscillators + hand-authored
+    // envelopes, no sampled or third-party material) -- azusan_step.wav
+    // and glass_crack.wav are the first two of SOUND-01A's nine no-op
+    // events to get a real asset; the other seven remain deliberate
+    // no-ops below, unchanged.
+    private val azusanStepId = load(R.raw.azusan_step)
+    private val glassCrackId = load(R.raw.glass_crack)
+
     private fun load(resId: Int): Int {
         val id = soundPool.load(appContext, resId, 1)
         loaded[id] = false
@@ -132,18 +152,20 @@ class SoundEventPlayer(context: Context) {
                 playSample(qubeBreakId, VOLUME_QUBE_BREAK)
             }
 
-            // SOUND-01A: the funnel/trigger plumbing for these nine is now
-            // fully wired from GameView (see lifeLossSoundSchedule/
-            // catEffectSoundSchedule there) at the exact instants their
-            // own class docs describe, but no asset exists for any of
-            // them yet -- per this round's own explicit "don't fetch
-            // external material" instruction, each is a deliberate no-op
-            // for now. A future SOUND round fills these in one at a time
-            // (synthesize/load + playSample(), same shape as every event
-            // above) without touching any call site, exactly like
-            // SOUND-02 once did for this file's original SOUND-01 funnel.
-            SoundEvent.AZUSAN_STEP -> {}
-            SoundEvent.GLASS_CRACK -> {}
+            // SOUND-01B: the first two of SOUND-01A's originally-nine
+            // no-op events now play a real, procedurally-synthesized
+            // asset -- the funnel/trigger plumbing itself (GameView's
+            // lifeLossSoundSchedule) is unchanged, exactly as SOUND-01A's
+            // own comment predicted this would work.
+            SoundEvent.AZUSAN_STEP -> playSample(azusanStepId, VOLUME_AZUSAN_STEP)
+            SoundEvent.GLASS_CRACK -> playSample(glassCrackId, VOLUME_GLASS_CRACK)
+
+            // SOUND-01A: the remaining six GAME OVER-side events stay
+            // deliberate no-ops for now -- out of scope this round, which
+            // is explicitly life-loss-overlay-only (AZUSAN_STEP/
+            // GLASS_CRACK above). A future SOUND round fills these in the
+            // same way (synthesize/load + playSample()) without touching
+            // any call site.
             SoundEvent.GAMEOVER_CAT_STEP -> {}
             SoundEvent.GAMEOVER_CAT_IMPACT -> {}
             SoundEvent.BB_STOMP -> {}
