@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.util.AttributeSet
+import android.util.Log
 import android.view.Choreographer
 import android.view.MotionEvent
 import android.view.View
@@ -100,6 +101,20 @@ class GameView @JvmOverloads constructor(
          * same "how far is still a tap" feel already established
          * elsewhere in this app rather than a new invented value. */
         const val RETRY_TAP_SLOP_DP = 24f
+
+        // CAT-PUNCH-TRACE-01: diagnostic-build-only instrumentation added
+        // to trace a real-device CAT_PUNCH regression (reported: 2-hit
+        // durability destroy no longer fires) that a full static diff
+        // against the last confirmed-working commit could not explain --
+        // every file in the input-to-destroy path (onPunchGestureRequested,
+        // performPunch, isPunchRange, Qube.kt, QubeConfig.kt, the whole
+        // input/ package, MainActivity.kt) was found byte-identical. This
+        // TAG/duration pair, [CAT_PUNCH_TRACE_TAG]/[DIAG_MESSAGE_DURATION_MS],
+        // and every Log.d/diagnostic-overlay call site they gate are purely
+        // additive logging -- no blocking condition, no punch/durability
+        // calculation, and no input dispatch logic is changed by this round.
+        const val CAT_PUNCH_TRACE_TAG = "CAT_PUNCH_TRACE"
+        const val DIAG_MESSAGE_DURATION_MS = 3000L
 
         // STAGE-DESIGN-01
         /**
@@ -477,6 +492,17 @@ class GameView @JvmOverloads constructor(
     private var scorePopup: TimedCosmeticFlag = TimedCosmeticFlag(durationMs = SCORE_POPUP_DURATION_MS)
     private var scorePopupText: String = ""
 
+    // CAT-PUNCH-TRACE-01: diagnostic-build-only on-screen readout for
+    // onPunchGestureRequested's own outcome (blocked/no-QUBE-in-range/
+    // punch result) -- shown for DIAG_MESSAGE_DURATION_MS then cleared,
+    // same shape as scorePopup above but driven by [showDiagMessage]
+    // rather than TimedCosmeticFlag since it needs a variable message
+    // string, not just an on/off window. Purely decorative, never read
+    // by any game-logic check -- exists only to make this round's own
+    // diagnostic traceable on-device without a Logcat connection.
+    private var diagPunchMessage: String? = null
+    private var diagPunchMessageElapsedMs = 0L
+
     // STEP 6: every NORMAL QUBE lives in this one collection -- no
     // qube1/qube2/qube3 style variables. Each entry owns its own GridCoord
     // (via its Qube) and its own rotation/timing state (via its
@@ -705,6 +731,16 @@ class GameView @JvmOverloads constructor(
         textAlign = Paint.Align.RIGHT
         isFakeBoldText = true
     }
+    // CAT-PUNCH-TRACE-01: diagnostic-build-only, centered at the very top
+    // of the screen (clear of the STAGE/SCORE HUD text and the board
+    // itself) so it never obstructs normal play while still being easy
+    // to read on-device.
+    private val diagPunchTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(255, 255, 0)
+        textSize = 22f * density
+        textAlign = Paint.Align.CENTER
+        isFakeBoldText = true
+    }
     // SCORE-SYSTEM-01: same gold as scoreTextPaint, smaller and centered,
     // for the one line added to the existing GAME OVER overlay.
     private val gameOverScorePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -823,6 +859,17 @@ class GameView @JvmOverloads constructor(
         override fun doFrame(frameTimeNanos: Long) {
             val deltaMs = if (lastFrameTimeNanos == 0L) 0L else (frameTimeNanos - lastFrameTimeNanos) / 1_000_000L
             lastFrameTimeNanos = frameTimeNanos
+
+            // CAT-PUNCH-TRACE-01: diagnostic message tick-down, unconditional
+            // and independent of every gate below so it always clears on
+            // schedule regardless of game state. Purely additive -- reads/
+            // writes only the two diagPunchMessage* fields this round added.
+            if (diagPunchMessage != null) {
+                diagPunchMessageElapsedMs += deltaMs
+                if (diagPunchMessageElapsedMs >= DIAG_MESSAGE_DURATION_MS) {
+                    diagPunchMessage = null
+                }
+            }
 
             // CATPUNCH-01: GAME_OVER freezes the board (QUBE motion, SE
             // tracking, collision checks) instead of continuing to play
@@ -1308,6 +1355,15 @@ class GameView @JvmOverloads constructor(
             canvas.drawText("STAGE $stageNumber", width / 2f, height / 2f, stageStartTextPaint)
             canvas.drawText("READY", width / 2f, height / 2f + 56f * density, stageStartReadyPaint)
         }
+
+        // CAT-PUNCH-TRACE-01: diagnostic-build-only overlay, drawn last (on
+        // top of everything) so it's always visible during on-device
+        // tracing. Purely additive display of diagPunchMessage, which the
+        // frame loop already clears after DIAG_MESSAGE_DURATION_MS -- no
+        // effect on any other draw call above.
+        diagPunchMessage?.let { message ->
+            canvas.drawText(message, width / 2f, 28f * density, diagPunchTextPaint)
+        }
     }
 
     /** PRESENTATION-01: draws [allClearParticles] as small gold squares
@@ -1613,14 +1669,64 @@ class GameView @JvmOverloads constructor(
      * restoring this method's pre-EFFECT-01C (commit 01b647d) condition
      * exactly; onMoveRequested/onActionRequested deliberately keep the
      * clause, per this round's own explicit scope.
+     *
+     * CAT-PUNCH-TRACE-01: the single `if (A || B || C) return` guard is
+     * decomposed below into three separate branches purely so each one
+     * can log which specific condition fired -- the set of blocking
+     * conditions, their left-to-right evaluation order, and `||`'s own
+     * short-circuit behavior (stageClear only ever checked when state !=
+     * GAME_OVER, stageStartActive only when neither of the first two is
+     * true) are all IDENTICAL to before. No condition added, removed, or
+     * reordered.
      */
     override fun onPunchGestureRequested() {
-        if (gameStateController.state == GameState.GAME_OVER || stageClear || stageStartActive) return
+        Log.d(CAT_PUNCH_TRACE_TAG, "ON_PUNCH_ENTER")
+        Log.d(
+            CAT_PUNCH_TRACE_TAG,
+            "STATE state=${gameStateController.state} stageClear=$stageClear " +
+                "stageStartActive=$stageStartActive lifeLossAzusanActive=$lifeLossAzusanActive " +
+                "catEffectStarted=$catEffectStarted catEffectDone=$catEffectDone"
+        )
+        if (gameStateController.state == GameState.GAME_OVER) {
+            Log.d(CAT_PUNCH_TRACE_TAG, "PUNCH_BLOCKED reason=GAME_OVER")
+            showDiagMessage("BLOCKED: GAME_OVER")
+            return
+        }
+        if (stageClear) {
+            Log.d(CAT_PUNCH_TRACE_TAG, "PUNCH_BLOCKED reason=STAGE_CLEAR")
+            showDiagMessage("BLOCKED: STAGE_CLEAR")
+            return
+        }
+        if (stageStartActive) {
+            Log.d(CAT_PUNCH_TRACE_TAG, "PUNCH_BLOCKED reason=STAGE_START")
+            showDiagMessage("BLOCKED: STAGE_START")
+            return
+        }
+        Log.d(CAT_PUNCH_TRACE_TAG, "PLAYER_POS=${boardLogic.playerPosition}")
+        for ((i, instance) in qubes.withIndex()) {
+            val inRange = isPunchRange(boardLogic.playerPosition, instance.qube.coord)
+            Log.d(
+                CAT_PUNCH_TRACE_TAG,
+                "QUBE index=$i coord=${instance.qube.coord} durability=${instance.qube.durability} inRange=$inRange"
+            )
+        }
         val punchIndex = qubes.indexOfFirst { isPunchRange(boardLogic.playerPosition, it.qube.coord) }
+        Log.d(CAT_PUNCH_TRACE_TAG, "PUNCH_INDEX=$punchIndex")
         if (punchIndex >= 0) {
             performPunch(punchIndex)
+        } else {
+            showDiagMessage("NO QUBE IN RANGE")
         }
         invalidate()
+    }
+
+    /** CAT-PUNCH-TRACE-01: diagnostic-build-only on-screen readout, drawn
+     * near the top of the screen by [onDraw] and cleared automatically
+     * after [DIAG_MESSAGE_DURATION_MS] by the frame loop -- purely
+     * decorative, never read by any game-logic check. */
+    private fun showDiagMessage(message: String) {
+        diagPunchMessage = message
+        diagPunchMessageElapsedMs = 0L
     }
 
     /** CATPUNCH-01: orthogonally adjacent (one cell north/south/east/west,
@@ -1637,13 +1743,23 @@ class GameView @JvmOverloads constructor(
      * whether this punch breaks it, dents it, or the player walks away
      * -- there is no stall and no invented safe window either way. */
     private fun performPunch(index: Int) {
+        // CAT-PUNCH-TRACE-01: diagnostic-only logging added around the
+        // existing logic below. No call, order, or condition in this
+        // function is changed -- only Log.d/showDiagMessage calls are
+        // inserted between the pre-existing lines.
+        Log.d(CAT_PUNCH_TRACE_TAG, "PERFORM_PUNCH index=$index")
         // AZUSAN-PLAYER-01: cosmetic only -- a brief CAT_PUNCH sprite
         // window alongside the existing SE calls below, which are
         // otherwise unchanged. Fires regardless of destroyed/dented,
         // matching how PUNCH_HIT itself already always plays.
         punchVisual.trigger()
         val instance = qubes[index]
+        val durabilityBefore = instance.qube.durability
+        Log.d(CAT_PUNCH_TRACE_TAG, "DURABILITY_BEFORE=$durabilityBefore")
         val destroyed = instance.qube.punch()
+        val durabilityAfter = instance.qube.durability
+        Log.d(CAT_PUNCH_TRACE_TAG, "DURABILITY_AFTER=$durabilityAfter")
+        Log.d(CAT_PUNCH_TRACE_TAG, "QUBE_DESTROYED=$destroyed")
         if (destroyed) {
             // QUBE-BREAK-VISUAL-01: capture the exact pose (previous/
             // current cell, direction, and the toppling rotation the
@@ -1668,6 +1784,8 @@ class GameView @JvmOverloads constructor(
             )
             qubes.removeAt(index)
             soundEventPlayer.play(SoundEvent.QUBE_BREAK)
+            Log.d(CAT_PUNCH_TRACE_TAG, "SOUND_EVENT=QUBE_BREAK")
+            showDiagMessage("PUNCH QUBE #$index $durabilityBefore→$durabilityAfter DESTROYED")
             // SCORE-SYSTEM-01: scored exactly once, only in this
             // `destroyed` branch (durability just hit 0 above) -- the
             // first punch (the `else` branch below, durability 2->1)
@@ -1687,6 +1805,8 @@ class GameView @JvmOverloads constructor(
             if (qubes.isEmpty()) pendingStageClearAfterBreak = true
         } else {
             soundEventPlayer.play(SoundEvent.PUNCH_HIT)
+            Log.d(CAT_PUNCH_TRACE_TAG, "SOUND_EVENT=PUNCH_HIT")
+            showDiagMessage("PUNCH QUBE #$index $durabilityBefore→$durabilityAfter")
         }
     }
 

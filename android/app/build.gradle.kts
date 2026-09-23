@@ -13,9 +13,11 @@ android {
         targetSdk = 34
         // AZUSAN-SIZE-TEST-01 established bumping these every round purely
         // for on-device identification (they're read by nothing in game
-        // logic). GAMEOVER-FINAL-01 continues that.
-        versionCode = 33
-        versionName = "0.1-GAMEOVER_FINAL_01"
+        // logic). CAT-PUNCH-TRACE-01 continues that -- this build is
+        // diagnostic-instrumentation-only (Logcat tracing + a temporary
+        // on-screen readout for the cat-punch input path), not a logic fix.
+        versionCode = 34
+        versionName = "0.1-CAT_PUNCH_TRACE_01"
     }
 
     // Pinned debug signing key (app/debug.keystore), checked into the repo
