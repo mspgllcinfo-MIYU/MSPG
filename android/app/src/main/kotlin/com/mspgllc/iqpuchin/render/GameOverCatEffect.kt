@@ -37,36 +37,49 @@ import kotlin.random.Random
 class GameOverCatEffect(context: Context) {
 
     companion object {
-        // まり/あんこ/あずさん: quick 3-frame rush (90ms/frame) + a short
-        // impact hold, with a brief silent gap between characters.
-        private const val RUN_FRAME_MS = 90L
-        private const val RUN_MS = RUN_FRAME_MS * 3 // 270ms
-        private const val IMPACT_MS = 150L
+        // EFFECT-01B-SPEED-01: real-device feedback said the whole
+        // sequence read as too fast to actually register each character
+        // -- every base timing constant below was doubled (BB's impact
+        // hold/shatter ~1.8x, within this round's own 1.5-2x allowance),
+        // with every *derived* constant (CHARACTER_MS, the per-character
+        // start times, BB_RUN_MS, SHATTER_START_MS/END_MS,
+        // TOTAL_DURATION_MS) simply recomputed from those via the same
+        // formulas as before -- no structural change, timeline math only.
+        //
+        // まり/あんこ/あずさん: 3-frame rush (now 180ms/frame) + a longer
+        // impact hold, with a brief silent gap between characters (GAP_MS
+        // itself is untouched -- not called out in this round's spec --
+        // so ANKO/AZUSAN's start-time offsets shift automatically only
+        // because CHARACTER_MS grew, preserving the same relative
+        // structure).
+        private const val RUN_FRAME_MS = 180L
+        private const val RUN_MS = RUN_FRAME_MS * 3 // 540ms
+        private const val IMPACT_MS = 300L
         private const val GAP_MS = 80L
-        private const val CHARACTER_MS = RUN_MS + IMPACT_MS // 420ms
+        private const val CHARACTER_MS = RUN_MS + IMPACT_MS // 840ms
 
         private const val MARI_START_MS = 0L
-        private const val ANKO_START_MS = MARI_START_MS + CHARACTER_MS + GAP_MS // 500ms
-        private const val AZUSAN_START_MS = ANKO_START_MS + CHARACTER_MS + GAP_MS // 1000ms
+        private const val ANKO_START_MS = MARI_START_MS + CHARACTER_MS + GAP_MS // 920ms
+        private const val AZUSAN_START_MS = ANKO_START_MS + CHARACTER_MS + GAP_MS // 1840ms
 
-        // The deliberate "did it end?" hush before BB -- longer than the
-        // GAP_MS between the first three characters, per this round's own
-        // explicit emphasis on this specific beat.
-        private const val PRE_BB_PAUSE_MS = 600L
-        private const val BB_START_MS = AZUSAN_START_MS + CHARACTER_MS + PRE_BB_PAUSE_MS // 1670ms
+        // The deliberate "did it end?" hush before BB -- this round's own
+        // explicitly named 1100ms baseline (within its stated 1000-1200ms
+        // range), replacing the previous 600ms.
+        private const val PRE_BB_PAUSE_MS = 1100L
+        private const val BB_START_MS = AZUSAN_START_MS + CHARACTER_MS + PRE_BB_PAUSE_MS // 3780ms
 
-        // BB: 4 distinct heavy stomps, each noticeably slower than the
-        // other three characters' own run-frame pacing (never "fast"),
-        // then a hold on the final-impact pose before the shatter takes
-        // over.
-        private const val BB_STOMP_MS = 260L
-        private const val BB_RUN_MS = BB_STOMP_MS * 4 // 1040ms
-        private const val BB_IMPACT_HOLD_MS = 220L
-        private const val SHATTER_START_MS = BB_START_MS + BB_RUN_MS + BB_IMPACT_HOLD_MS // 2930ms
+        // BB: 4 distinct heavy stomps (now 520ms each -- still a fixed
+        // pose-and-scale step per stomp, never a smooth/fast slide),
+        // then a longer hold on the final-impact pose before the shatter
+        // takes over.
+        private const val BB_STOMP_MS = 520L
+        private const val BB_RUN_MS = BB_STOMP_MS * 4 // 2080ms
+        private const val BB_IMPACT_HOLD_MS = 440L
+        private const val SHATTER_START_MS = BB_START_MS + BB_RUN_MS + BB_IMPACT_HOLD_MS // 6300ms
 
-        private const val SHATTER_BURST_MS = 140L
-        private const val SHATTER_SHARD_MS = 420L
-        const val SHATTER_END_MS = SHATTER_START_MS + SHATTER_SHARD_MS // 3350ms
+        private const val SHATTER_BURST_MS = 280L
+        private const val SHATTER_SHARD_MS = 840L
+        const val SHATTER_END_MS = SHATTER_START_MS + SHATTER_SHARD_MS // 7140ms
 
         /** GameView's own single source of truth for "has the whole
          * sequence finished" -- see [isDone]. */

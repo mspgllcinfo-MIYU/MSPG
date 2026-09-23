@@ -13,9 +13,9 @@ android {
         targetSdk = 34
         // AZUSAN-SIZE-TEST-01 established bumping these every round purely
         // for on-device identification (they're read by nothing in game
-        // logic). EFFECT-01B continues that.
-        versionCode = 22
-        versionName = "0.1-EFFECT_01B"
+        // logic). EFFECT-01B-SPEED-01 continues that.
+        versionCode = 23
+        versionName = "0.1-EFFECT_01B_SPEED_01"
     }
 
     // Pinned debug signing key (app/debug.keystore), checked into the repo
