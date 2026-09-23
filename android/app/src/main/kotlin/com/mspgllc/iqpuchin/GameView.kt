@@ -148,6 +148,32 @@ class GameView @JvmOverloads constructor(
             3 to listOf(1, 3, 5),
             4 to listOf(0, 2, 4, 6)
         )
+
+        /**
+         * STAGE-DESIGN-01B: once every QUBE currently on board has
+         * traveled at least this many cells past the spawn row (z=0), the
+         * frame loop pre-spawns the stage's next wave -- see the frame
+         * loop's own early-spawn check. This is the entire fix for "waves
+         * felt like sudden respawns": the next group now becomes visible
+         * at the board's own back edge *while the current wave is still
+         * in play*, since the whole 12-row board is already always fully
+         * on screen (this camera never scrolls -- confirmed via
+         * IsoProjection/recomputeLayout, both untouched), rather than only
+         * after `qubes` goes empty.
+         *
+         * 4 is deliberately not 0 (would spawn instantly, defeating the
+         * "avoid overlap" point below) and not close to the player's own
+         * z (would barely give any "still coming" runway before the new
+         * wave itself reaches them) -- it guarantees the new wave's z=0
+         * spawn cell can never coincide with an old QUBE still nearby (a
+         * QUBE only clears this threshold once it is already 4 cells past
+         * z=0), while the old wave still has most of its own journey left
+         * to be genuinely "still present," and the new wave still gets a
+         * full traverse of the board's own front half before reaching the
+         * player -- comfortably more than the "2-3 moves of judgment
+         * time" this round's own spec asks for.
+         */
+        const val EARLY_SPAWN_DEPTH_THRESHOLD = 4
     }
 
     /** Pairs a [Qube] with the [QubeMotion] that advances it and the
@@ -327,13 +353,23 @@ class GameView @JvmOverloads constructor(
      * the stage's actual end.
      */
     private fun resolveWaveBoundary() {
-        val waves = currentStageWaves()
-        if (stageWaveIndex < waves.size) {
-            spawnWave(waves[stageWaveIndex])
-            stageWaveIndex++
-        } else {
+        if (!spawnNextWaveIfAny()) {
             stageClear = true
         }
+    }
+
+    /** STAGE-DESIGN-01B: spawns [stageNumber]'s next not-yet-spawned wave,
+     * if any, and advances [stageWaveIndex] -- returns whether it did.
+     * Shared by [resolveWaveBoundary] (the stage's true exhaustion check,
+     * called once `qubes` actually empties) and the frame loop's own
+     * early pre-spawn check below -- both need the same "spawn the next
+     * wave" action, just triggered at different times. */
+    private fun spawnNextWaveIfAny(): Boolean {
+        val waves = currentStageWaves()
+        if (stageWaveIndex >= waves.size) return false
+        spawnWave(waves[stageWaveIndex])
+        stageWaveIndex++
+        return true
     }
 
     /** STAGE-DESIGN-01: (re)starts wave spawning for whatever [stageNumber]
@@ -535,6 +571,19 @@ class GameView @JvmOverloads constructor(
                     // STAGE-DESIGN-01: decides wave-vs-stage-end instead of
                     // always meaning "this was the stage's last QUBE."
                     resolveWaveBoundary()
+                }
+                // STAGE-DESIGN-01B: pre-spawns the stage's next wave once
+                // every QUBE currently on board has cleared
+                // EARLY_SPAWN_DEPTH_THRESHOLD -- see that constant's own
+                // doc for why this is the fix for "waves felt like sudden
+                // respawns." Only ever fires while `qubes` is still
+                // non-empty (the current wave is still genuinely in play);
+                // resolveWaveBoundary's own qubes.isEmpty()-triggered
+                // spawn above remains the safety net for a player who
+                // clears a wave fast enough that it never crosses this
+                // threshold at all.
+                if (qubes.isNotEmpty() && qubes.all { it.qube.coord.z >= EARLY_SPAWN_DEPTH_THRESHOLD }) {
+                    spawnNextWaveIfAny()
                 }
                 wasGameOver = false
                 wasStageClear = false
