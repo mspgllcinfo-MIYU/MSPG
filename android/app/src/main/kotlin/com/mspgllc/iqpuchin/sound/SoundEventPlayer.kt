@@ -98,15 +98,35 @@ class SoundEventPlayer(context: Context) {
         // GAME OVER-side no-ops get a real asset. Explicit hierarchy per
         // this round's own instruction -- GAMEOVER_CAT_STEP <
         // GAMEOVER_CAT_IMPACT < BB_STOMP -- via effective peak (asset
-        // peak * volume): STEP 0.72*0.55=0.396, IMPACT 0.75*0.65=0.488,
-        // STOMP 0.85*0.80=0.68. BB_STOMP is deliberately kept below
-        // QUBE_BREAK's own 0.765 and GLASS_CRACK's own 0.722, leaving
-        // clear headroom under 1.0 for BB_FINAL_IMPACT/GLASS_SHATTER (a
-        // future round) to read as the larger event -- BB_STOMP is not
-        // pushed to be the loudest SE in the game.
+        // peak * volume): STEP 0.72*0.55=0.396, IMPACT 0.75*0.65=0.488.
         const val VOLUME_GAMEOVER_CAT_STEP = 0.55f
         const val VOLUME_GAMEOVER_CAT_IMPACT = 0.65f
-        const val VOLUME_BB_STOMP = 0.80f
+        // GAMEOVER-FINAL-01: nudged 0.80->0.90 (asset itself untouched;
+        // this round's own explicitly required final chain --
+        // GAMEOVER_CAT_STEP < GAMEOVER_CAT_IMPACT < QUBE_LAND <
+        // GLASS_CRACK < BB_STOMP < BB_FINAL_IMPACT < GLASS_SHATTER --
+        // needs BB_STOMP's own effective peak above GLASS_CRACK's 0.748
+        // (0.85*0.88), which the old 0.80 volume (eff. 0.68) fell short
+        // of; 0.90 gives 0.85*0.90=0.765, clearing it with the smallest
+        // possible nudge). BB_STOMP's own 520ms stomp interval and WAV
+        // asset are untouched.
+        const val VOLUME_BB_STOMP = 0.90f
+
+        // GAMEOVER-FINAL-01: BB_FINAL_IMPACT (asset peak 0.88) and
+        // GLASS_SHATTER (asset peak 0.92) complete the required chain
+        // above -- effective peaks 0.88*0.92=0.8096 and 0.92*0.98=0.9016
+        // respectively, each comfortably above the previous link and
+        // both well under 1.0 (no clipping). GLASS_SHATTER is deliberately
+        // not pushed all the way to 1.0 -- its own far wider bandwidth,
+        // denser layering, and much longer 840ms decay (vs GLASS_CRACK's
+        // 400ms) are what make it read as the game's largest destruction
+        // sound, not raw gain alone. GAME_OVER (asset peak 0.55) stays
+        // deliberately quiet and outside this ordered chain -- a short,
+        // restrained low-end closing cue that must never compete with
+        // GLASS_SHATTER's own tail.
+        const val VOLUME_BB_FINAL_IMPACT = 0.92f
+        const val VOLUME_GLASS_SHATTER = 0.98f
+        const val VOLUME_GAME_OVER = 0.60f
     }
 
     private val appContext = context.applicationContext
@@ -163,6 +183,13 @@ class SoundEventPlayer(context: Context) {
     private val gameoverCatImpactId = load(R.raw.gameover_cat_impact)
     private val bbStompId = load(R.raw.bb_stomp)
 
+    // GAMEOVER-FINAL-01: same procedurally-synthesized-only method as
+    // every asset above -- the last 3 of SOUND-01A's originally-nine
+    // GAME OVER-side no-ops get a real asset, completing the funnel.
+    private val bbFinalImpactId = load(R.raw.bb_final_impact)
+    private val glassShatterId = load(R.raw.glass_shatter)
+    private val gameOverId = load(R.raw.game_over)
+
     private fun load(resId: Int): Int {
         val id = soundPool.load(appContext, resId, 1)
         loaded[id] = false
@@ -203,15 +230,14 @@ class SoundEventPlayer(context: Context) {
             SoundEvent.GAMEOVER_CAT_IMPACT -> playSample(gameoverCatImpactId, VOLUME_GAMEOVER_CAT_IMPACT)
             SoundEvent.BB_STOMP -> playSample(bbStompId, VOLUME_BB_STOMP)
 
-            // SOUND-01A: the remaining three GAME OVER-finale events stay
-            // deliberate no-ops for now -- out of scope this round, which
-            // is explicitly "cat entrance through BB's 4 stomps" only. A
-            // future SOUND round fills these in the same way
-            // (synthesize/load + playSample()) without touching any call
-            // site.
-            SoundEvent.BB_FINAL_IMPACT -> {}
-            SoundEvent.GLASS_SHATTER -> {}
-            SoundEvent.GAME_OVER -> {}
+            // GAMEOVER-FINAL-01: BB's final blow, the full-screen glass
+            // shatter, and the closing GAME_OVER cue -- the last three of
+            // SOUND-01A's originally-nine no-op events. The funnel/trigger
+            // plumbing itself (GameView's own catEffectSoundSchedule) is
+            // unchanged, exactly as SOUND-01A's own comment predicted.
+            SoundEvent.BB_FINAL_IMPACT -> playSample(bbFinalImpactId, VOLUME_BB_FINAL_IMPACT)
+            SoundEvent.GLASS_SHATTER -> playSample(glassShatterId, VOLUME_GLASS_SHATTER)
+            SoundEvent.GAME_OVER -> playSample(gameOverId, VOLUME_GAME_OVER)
         }
     }
 

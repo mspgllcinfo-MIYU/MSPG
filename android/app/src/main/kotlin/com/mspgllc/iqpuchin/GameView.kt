@@ -1234,6 +1234,21 @@ class GameView @JvmOverloads constructor(
             }
         }
 
+        // GAMEOVER-FINAL-01: once the whole finishing sequence (through
+        // GLASS_SHATTER) has fully played out, the shattered glass stays
+        // on screen indefinitely -- drawn last, after the GAME OVER dim/
+        // text/prompt block above, so the broken pane sits in front of
+        // "GAME OVER" (the text reads as being seen through the wrecked
+        // screen, not on top of it). `catEffectDone` is the same flag
+        // that already gates the GAME OVER block itself and is only ever
+        // reset to false by restartGame() (RETRY), so this never needs
+        // its own separate reset -- a fresh run always starts with it
+        // false, and it can only become true again via a full replay of
+        // this same GAME OVER sequence.
+        if (catEffectDone) {
+            gameOverCatEffect.drawResidue(canvas, width, height, density)
+        }
+
         // STAGE-CLEAR-01: same overlay shape as GAME OVER above, reusing
         // the same Paints (white/gold/pink) rather than new ones, per
         // this round's own "don't change the look-and-feel" instruction.

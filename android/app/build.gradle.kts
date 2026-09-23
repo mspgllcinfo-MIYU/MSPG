@@ -13,9 +13,9 @@ android {
         targetSdk = 34
         // AZUSAN-SIZE-TEST-01 established bumping these every round purely
         // for on-device identification (they're read by nothing in game
-        // logic). SOUND-QUALITY-05 continues that.
-        versionCode = 32
-        versionName = "0.1-SOUND_QUALITY_05"
+        // logic). GAMEOVER-FINAL-01 continues that.
+        versionCode = 33
+        versionName = "0.1-GAMEOVER_FINAL_01"
     }
 
     // Pinned debug signing key (app/debug.keystore), checked into the repo

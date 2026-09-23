@@ -251,6 +251,27 @@ class GameOverCatEffect(context: Context) {
         }
     }
 
+    // GAMEOVER-FINAL-01: the radiating fracture lines from drawShatter's
+    // own initial burst, precomputed once here (same fixed seed/formula
+    // that function's own per-call `Random(9001)` already used every
+    // frame -- moving it to a class-level val changes nothing about what
+    // drawShatter renders, it just makes the same geometry reusable for
+    // [drawResidue] below) so the post-shatter "cracks stay visible"
+    // state can redraw them frozen at full length without recomputing.
+    private data class BurstLine(val angleDeg: Float, val lengthFrac: Float, val thick: Boolean)
+
+    private val burstLines: List<BurstLine> = run {
+        val rnd = Random(9001)
+        val lineCount = 16
+        (0 until lineCount).map { i ->
+            BurstLine(
+                angleDeg = (360f / lineCount) * i + rnd.nextFloat() * 10f,
+                lengthFrac = 0.35f + rnd.nextFloat() * 0.25f,
+                thick = i % 4 == 0
+            )
+        }
+    }
+
     private val shardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.argb(230, 255, 255, 255)
         style = Paint.Style.FILL
@@ -274,15 +295,12 @@ class GameOverCatEffect(context: Context) {
         // Central impact -> radiating fracture (first SHATTER_BURST_MS).
         val burstT = (localMs.toFloat() / SHATTER_BURST_MS).coerceIn(0f, 1f)
         if (burstT > 0f) {
-            val rnd = Random(9001)
-            val lineCount = 16
-            for (i in 0 until lineCount) {
-                val angle = (360f / lineCount) * i + rnd.nextFloat() * 10f
-                val len = minSide * (0.35f + rnd.nextFloat() * 0.25f) * burstT
-                val rad = Math.toRadians(angle.toDouble())
+            for (line in burstLines) {
+                val len = minSide * line.lengthFrac * burstT
+                val rad = Math.toRadians(line.angleDeg.toDouble())
                 val ex = cx + (cos(rad) * len).toFloat()
                 val ey = cy + (sin(rad) * len).toFloat()
-                burstPaint.strokeWidth = (i % 4 == 0).let { if (it) 3f else 1.6f } * density
+                burstPaint.strokeWidth = (if (line.thick) 3f else 1.6f) * density
                 burstPaint.alpha = (235 * (1f - burstT * 0.3f)).toInt().coerceIn(0, 235)
                 canvas.drawLine(cx, cy, ex, ey, burstPaint)
             }
@@ -333,7 +351,8 @@ class GameOverCatEffect(context: Context) {
 
     /** Draws whatever this timeline says belongs on screen at
      * [elapsedMs] since GameView started the sequence. No-ops once
-     * [isDone]. */
+     * [isDone] -- see [drawResidue] for what GameView draws instead from
+     * that point on. */
     fun draw(canvas: Canvas, width: Int, height: Int, density: Float, elapsedMs: Long) {
         if (elapsedMs < 0L || isDone(elapsedMs)) return
 
@@ -347,6 +366,64 @@ class GameOverCatEffect(context: Context) {
         }
         if (elapsedMs >= BB_START_MS) {
             drawBb(canvas, width, height, elapsedMs - BB_START_MS)
+        }
+    }
+
+    /** GAMEOVER-FINAL-01: the shattered pane's permanent, static
+     * aftermath -- [drawShatter]'s own flying/fading shards are debris
+     * that has flown off screen by [SHATTER_END_MS] (by design, alpha
+     * reaches 0 exactly then), so once [isDone] this is the *only*
+     * broken-glass visual GameView has left to show. It is deliberately
+     * unrelated to [draw]'s own no-op-once-[isDone] contract: GameView
+     * calls this separately, for as long as GAME OVER is showing, so the
+     * full-face crack lines (frozen at the same full length/alpha
+     * [drawShatter]'s own burst settles into after [SHATTER_BURST_MS])
+     * and a handful of small embedded fragments near the impact point
+     * stay on screen indefinitely -- reset only when GameView's own
+     * restartGame() clears the state this class's [draw] itself is keyed
+     * on (`catEffectDone`), never by this class. */
+    fun drawResidue(canvas: Canvas, width: Int, height: Int, density: Float) {
+        val cx = width * 0.5f
+        val cy = height * 0.5f
+        val minSide = min(width, height).toFloat()
+
+        for (line in burstLines) {
+            val len = minSide * line.lengthFrac
+            val rad = Math.toRadians(line.angleDeg.toDouble())
+            val ex = cx + (cos(rad) * len).toFloat()
+            val ey = cy + (sin(rad) * len).toFloat()
+            burstPaint.strokeWidth = (if (line.thick) 3f else 1.6f) * density
+            burstPaint.alpha = 164 // the settled alpha drawShatter's own burst lines reach once burstT=1
+            canvas.drawLine(cx, cy, ex, ey, burstPaint)
+        }
+
+        // A handful of small fragments left stuck near the impact point
+        // -- fixed positions/rotation (never flying, never spinning),
+        // reusing the same shard silhouette [drawShatter] uses for its
+        // own flying debris so the two visually match, but only the
+        // smaller ("not large") shards, kept close to center rather than
+        // at their [Shard.distanceFrac]*[minSide] flown-out distance.
+        for (shard in shards) {
+            if (shard.large) continue
+            val rad = Math.toRadians(shard.angleDeg.toDouble())
+            val travel = shard.distanceFrac * minSide * 0.18f
+            val px = cx + (cos(rad) * travel).toFloat()
+            val py = cy + (sin(rad) * travel).toFloat()
+            val size = shard.sizeFrac * minSide * 0.7f
+            canvas.save()
+            canvas.translate(px, py)
+            canvas.rotate(shard.angleDeg)
+            val path = Path().apply {
+                moveTo(0f, -size)
+                lineTo(size * 0.8f, size * 0.5f)
+                lineTo(-size * 0.6f, size * 0.7f)
+                close()
+            }
+            shardPaint.alpha = 150
+            shardEdgePaint.alpha = 100
+            canvas.drawPath(path, shardPaint)
+            canvas.drawPath(path, shardEdgePaint)
+            canvas.restore()
         }
     }
 }
