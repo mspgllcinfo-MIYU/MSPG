@@ -38,18 +38,21 @@ class SoundEventPlayer(context: Context) {
         // CATPUNCH-FIX-01: real-device feedback was that both QUBE SE
         // still read as too light even after SOUND-03's added bands --
         // bumped further alongside the assets' own strengthened
-        // 150-300Hz/300-600Hz content (see the regenerated WAVs; QUBE_LAND
-        // sits near SoundPool's ceiling since its own peak is already
-        // near-maximal).
+        // 150-300Hz/300-600Hz content (see the regenerated WAVs).
         // SWIPE-TEST-01: "heavier, not yet finished" on real hardware --
         // both WAVs got one more notch on the same two bands via relative
         // mix balance (those layers louder relative to the rest of the
-        // mix, same normalize peak as before), so these volumes are
-        // deliberately left unchanged rather than pushed further, per the
-        // explicit instruction not to raise volume to the point of
-        // clipping or burying other SE.
+        // mix, same normalize peak as before).
         const val VOLUME_QUBE_ROLL_START = 0.78f
-        const val VOLUME_QUBE_LAND = 0.97f
+        // SOUND-QUALITY-02: qube_land.wav's own asset was rewritten (see
+        // that round's notes below and its own commit) to carry a real
+        // 100Hz-3kHz impact transient + 400Hz-1.5kHz material texture
+        // instead of a near-single-band 150-400Hz tone, so it now reads
+        // as heavy through its own spectral content rather than needing
+        // near-maximal gain -- lowered from 0.97 to sit in this round's
+        // explicit AZUSAN_STEP < QUBE_LAND < GLASS_CRACK ordering (with
+        // headroom: asset peak 0.86 * 0.80 = 0.688, well under clipping).
+        const val VOLUME_QUBE_LAND = 0.80f
         const val VOLUME_MARK_SET = 0.6f
         const val VOLUME_CAPTURE_SUCCESS = 0.65f
 
@@ -73,16 +76,23 @@ class SoundEventPlayer(context: Context) {
         const val VOLUME_PUNCH_HIT = 0.8f
         const val VOLUME_QUBE_BREAK = 0.85f
 
-        // SOUND-01B: azusan_step.wav (~120ms, soft low-mid paw-thump +
-        // low-passed noise click, no sharp high transient) plays quietly
-        // -- it fires 3 times per life-loss HIT (see GameView's
-        // lifeLossSoundSchedule), so it must read as a light running
-        // footstep, not compete with the impact SE that follows.
-        // glass_crack.wav (~380ms, high-passed snap + decaying high-
-        // frequency micro-crackle) plays closer to full volume so its
-        // sharp attack reads clearly on a phone speaker.
+        // SOUND-01B: azusan_step.wav plays quietly -- it fires 3 times
+        // per life-loss HIT (see GameView's lifeLossSoundSchedule), so it
+        // must read as a light running footstep, not compete with the
+        // impact SE that follows.
+        // SOUND-QUALITY-02: azusan_step.wav/glass_crack.wav/qube_land.wav
+        // were all rewritten for material realism (see this round's own
+        // commit for the full acoustic design) with an explicit relative
+        // hierarchy -- AZUSAN_STEP < QUBE_LAND < GLASS_CRACK, so the
+        // pane-cracking moment reads as the most important of the three
+        // without simply being the loudest number: glass_crack.wav's own
+        // 2.5-9kHz content already cuts through a phone speaker's weak
+        // low end more than raw gain would, so its volume only needed a
+        // small nudge (0.85->0.88) rather than pushing toward 1.0 (asset
+        // peak 0.82 * 0.88 = 0.722, still comfortable headroom below
+        // clipping).
         const val VOLUME_AZUSAN_STEP = 0.5f
-        const val VOLUME_GLASS_CRACK = 0.85f
+        const val VOLUME_GLASS_CRACK = 0.88f
     }
 
     private val appContext = context.applicationContext
