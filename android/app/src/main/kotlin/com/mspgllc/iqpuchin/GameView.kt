@@ -95,6 +95,59 @@ class GameView @JvmOverloads constructor(
          * same "how far is still a tap" feel already established
          * elsewhere in this app rather than a new invented value. */
         const val RETRY_TAP_SLOP_DP = 24f
+
+        // STAGE-DESIGN-01
+        /**
+         * This release's own current final stage -- deliberately NOT the
+         * game system's hard-coded absolute ceiling (this round's own
+         * explicit instruction): [resolveWaveBoundary]/onTouchEvent/onDraw
+         * all compare `stageNumber` against this one named constant, never
+         * a bare literal `10`, so a future round can extend [STAGE_WAVES]
+         * to Stage 20 and raise this single value -- nothing else about
+         * the NEXT/ALL-CLEAR logic needs to change.
+         */
+        const val CURRENT_RELEASE_FINAL_STAGE = 10
+
+        /**
+         * Per-stage wave layout, index 0 == Stage 1. Each inner list is
+         * one stage's waves in spawn order, one Int per wave = how many
+         * QUBEs that wave spawns (see [WAVE_COLUMNS] for their columns).
+         * A stage's total QUBE count is the sum of its own list.
+         *
+         * Deliberately NOT random and deliberately small per wave (max 4
+         * QUBEs approaching at once, same speed/durability/rolling as
+         * always) -- this round's own "普通に遊んで、何度か慣れればSTAGE
+         * 10までクリアできること" priority over difficulty. Counts/wave
+         * splits follow this round's own per-stage guidance (e.g. Stage 5
+         * "7〜8個程度、2〜3 Wave" -> 3+3+2=8 over 3 waves) without matching
+         * it to the letter -- any reasonable split within the given
+         * ranges satisfies the same design intent.
+         */
+        val STAGE_WAVES: List<List<Int>> = listOf(
+            listOf(3),                 // Stage 1
+            listOf(4),                 // Stage 2
+            listOf(3, 2),               // Stage 3
+            listOf(3, 3),               // Stage 4
+            listOf(3, 3, 2),             // Stage 5
+            listOf(3, 3, 3),             // Stage 6
+            listOf(3, 3, 3, 2),           // Stage 7
+            listOf(4, 3, 3, 3),           // Stage 8
+            listOf(3, 3, 3, 3, 3),         // Stage 9
+            listOf(4, 4, 3, 3, 3)          // Stage 10
+        )
+
+        /** Column (gridX) layout for a wave of a given size -- every QUBE
+         * within one wave gets a distinct column (two QUBEs never start
+         * on the same cell), spread across the board's own
+         * [BoardConfig.GRID_WIDTH] (0..6). Size 3's {1,3,5} is the exact
+         * original Stage 1 layout, kept unchanged so Stage 1 itself is
+         * pixel-for-pixel identical to before this round. */
+        val WAVE_COLUMNS: Map<Int, List<Int>> = mapOf(
+            1 to listOf(3),
+            2 to listOf(2, 4),
+            3 to listOf(1, 3, 5),
+            4 to listOf(0, 2, 4, 6)
+        )
     }
 
     /** Pairs a [Qube] with the [QubeMotion] that advances it and the
@@ -198,12 +251,13 @@ class GameView @JvmOverloads constructor(
     // A successful CAPTURE removes exactly the matching entry from this
     // list (see onActionRequested) -- Qube.kt/QubeMotion.kt themselves
     // are unmodified.
-    // RESTART-SYSTEM-01: `var`, not `val` -- restartGame() reassigns this
-    // to a brand new createInitialQubes() result (the exact same factory
-    // this field's own initial value already uses), so every QUBE after
-    // a restart is a fresh Qube/QubeMotion/QubeSoundTracker with no
-    // leftover reference to anything from the previous run.
-    private var qubes: MutableList<QubeInstance> = createInitialQubes()
+    // RESTART-SYSTEM-01: `var`, not `val` -- restartGame()/advanceToNextStage()
+    // reassign this via [beginStageWaves]/[spawnWave], so every QUBE after
+    // a restart or a new stage's first wave is a fresh Qube/QubeMotion/
+    // QubeSoundTracker with no leftover reference to anything from the
+    // previous run/stage. STAGE-DESIGN-01: starts empty -- the very first
+    // wave is spawned by the init block below, not by this initializer.
+    private var qubes: MutableList<QubeInstance> = mutableListOf()
 
     // QUBE-BREAK-VISUAL-01: completely separate from `qubes` above on
     // purpose -- a QUBE is moved here (see performPunch) at the exact
@@ -218,13 +272,83 @@ class GameView @JvmOverloads constructor(
     // already gone.
     private val brokenQubes: MutableList<BrokenQubeVisual> = mutableListOf()
 
-    private fun createInitialQubes(): MutableList<QubeInstance> {
-        val startXs = listOf(1, 3, 5)
-        return startXs.map { x ->
+    /**
+     * STAGE-DESIGN-01: adds one wave's worth of fresh QUBEs to `qubes` --
+     * same [Qube]/[QubeMotion]/[QubeSoundTracker] construction the old
+     * createInitialQubes() used (default durability, direction SOUTH,
+     * z=0 -- the board's own existing spawn row, completely unchanged;
+     * BoardConfig/BoardLogic/IsoProjection are never touched by this
+     * round), just parameterized by column list instead of a fixed
+     * [1,3,5]. Every QUBE within a wave starts at a distinct column, so
+     * none begin already overlapping another.
+     */
+    private fun spawnWave(count: Int) {
+        val columns = WAVE_COLUMNS[count] ?: (0 until count).map { it % BoardConfig.GRID_WIDTH }
+        for (x in columns) {
             val qube = Qube(startCoord = GridCoord(x, 0), direction = Direction.SOUTH)
             val motion = QubeMotion(qube)
-            QubeInstance(qube, motion, QubeSoundTracker(qube, motion))
-        }.toMutableList()
+            qubes.add(QubeInstance(qube, motion, QubeSoundTracker(qube, motion)))
+        }
+    }
+
+    /** STAGE-DESIGN-01: [stageNumber]'s own wave layout. Stages beyond
+     * [STAGE_WAVES]'s defined range (not currently reachable -- ALL CLEAR
+     * stops progression at [CURRENT_RELEASE_FINAL_STAGE]) fall back to the
+     * last defined stage's layout rather than crashing. */
+    private fun currentStageWaves(): List<Int> =
+        STAGE_WAVES.getOrElse(stageNumber - 1) { STAGE_WAVES.last() }
+
+    /**
+     * STAGE-DESIGN-01: the single place that decides "has this stage's
+     * QUBE supply run out yet." Called whenever `qubes` has just become
+     * empty -- immediately for MARK/ACTIVATE's last QUBE (onActionRequested),
+     * or once brokenQubes has fully drained for CAT_PUNCH's last QUBE (the
+     * frame loop's own pendingStageClearAfterBreak resolution, unchanged
+     * from STAGE-CLEAR-01 otherwise).
+     *
+     * If the current stage still has an unspawned wave, spawns it -- more
+     * QUBEs are "still coming," entirely through spawn timing/count. This
+     * is a deliberate design choice: rather than literally extending the
+     * board's depth past what the camera shows (which this round's own
+     * spec forbids -- no shrinking the board to fit a longer one on
+     * screen, no camera pull-back), waves that haven't spawned yet are
+     * conceptually "still off-screen" purely because they don't exist as
+     * Qube objects yet, not because they sit at an off-screen GridCoord.
+     * BoardConfig.GRID_DEPTH/IsoProjection/BoardRenderer/recomputeLayout
+     * are completely unchanged by this round.
+     *
+     * Once every wave for this stage has spawned and `qubes` is empty,
+     * this is the true "all QUBEs for this stage processed" instant --
+     * STAGE-CLEAR-01's own `stageClear` flag, unchanged in what it does
+     * once true (freezes play, shows the CLEAR overlay). Previously (pre-
+     * STAGE-DESIGN-01) this was set directly wherever `qubes.isEmpty()`
+     * was observed; now both of those call sites go through this function
+     * instead, so a mid-stage wave boundary can no longer be mistaken for
+     * the stage's actual end.
+     */
+    private fun resolveWaveBoundary() {
+        val waves = currentStageWaves()
+        if (stageWaveIndex < waves.size) {
+            spawnWave(waves[stageWaveIndex])
+            stageWaveIndex++
+        } else {
+            stageClear = true
+        }
+    }
+
+    /** STAGE-DESIGN-01: (re)starts wave spawning for whatever [stageNumber]
+     * currently is -- empties `qubes`, resets the wave index, and spawns
+     * wave 0 via [resolveWaveBoundary] (the same function every later
+     * wave boundary during play goes through). Called both by
+     * [resetBoardAndVisuals] (RETRY/NEXT) and once from the init block
+     * below, for Stage 1's own very first spawn -- replacing the old
+     * createInitialQubes() field initializer. */
+    private fun beginStageWaves() {
+        qubes = mutableListOf()
+        stageWaveIndex = 0
+        stageClear = false
+        pendingStageClearAfterBreak = false
+        resolveWaveBoundary()
     }
 
     private var originX = 0f
@@ -260,6 +384,21 @@ class GameView @JvmOverloads constructor(
     // duplicate ~200ms timer. Never set for the MARK/ACTIVATE path, which
     // has no BrokenQubeVisual and transitions immediately.
     private var pendingStageClearAfterBreak = false
+
+    // STAGE-DESIGN-01: how many of currentStageWaves()'s waves have
+    // already been spawned into `qubes` (0 = none yet). Reset to 0 by
+    // [beginStageWaves] at the start of every stage.
+    private var stageWaveIndex = 0
+
+    // STAGE-DESIGN-01: spawns Stage 1's own wave 0 -- replaces the old
+    // `qubes = createInitialQubes()` field initializer. Placed here
+    // (rather than as qubes' own initializer) because it needs
+    // stageNumber/qubes/stageWaveIndex/stageClear/pendingStageClearAfterBreak
+    // already declared, which they all are by this point in the class body.
+    init {
+        beginStageWaves()
+    }
+
     // STEP 7 placeholder-only "HIT" banner -- not part of any real HUD.
     private val hitTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.RED
@@ -393,7 +532,9 @@ class GameView @JvmOverloads constructor(
                 // own doc.
                 if (pendingStageClearAfterBreak && brokenQubes.isEmpty()) {
                     pendingStageClearAfterBreak = false
-                    stageClear = true
+                    // STAGE-DESIGN-01: decides wave-vs-stage-end instead of
+                    // always meaning "this was the stage's last QUBE."
+                    resolveWaveBoundary()
                 }
                 wasGameOver = false
                 wasStageClear = false
@@ -608,12 +749,20 @@ class GameView @JvmOverloads constructor(
         // STAGE-CLEAR-01: same overlay shape as GAME OVER above, reusing
         // the same Paints (white/gold/pink) rather than new ones, per
         // this round's own "don't change the look-and-feel" instruction.
+        // STAGE-DESIGN-01: Stage CURRENT_RELEASE_FINAL_STAGE's own clear
+        // shows "ALL CLEAR" with no TAP TO NEXT line instead -- this
+        // release has nothing to advance to yet (see onTouchEvent).
         if (stageClear) {
             canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), gameOverDimPaint)
-            canvas.drawText("STAGE CLEAR", width / 2f, height / 2f, gameOverTextPaint)
-            canvas.drawText("SCORE ${scoreText()}", width / 2f, height / 2f + 56f * density, gameOverScorePaint)
-            if (stageClearElapsedMs >= RETRY_INPUT_LOCKOUT_MS) {
-                canvas.drawText("TAP TO NEXT", width / 2f, height / 2f + 100f * density, retryPromptPaint)
+            if (stageNumber >= CURRENT_RELEASE_FINAL_STAGE) {
+                canvas.drawText("ALL CLEAR", width / 2f, height / 2f, gameOverTextPaint)
+                canvas.drawText("SCORE ${scoreText()}", width / 2f, height / 2f + 56f * density, gameOverScorePaint)
+            } else {
+                canvas.drawText("STAGE CLEAR", width / 2f, height / 2f, gameOverTextPaint)
+                canvas.drawText("SCORE ${scoreText()}", width / 2f, height / 2f + 56f * density, gameOverScorePaint)
+                if (stageClearElapsedMs >= RETRY_INPUT_LOCKOUT_MS) {
+                    canvas.drawText("TAP TO NEXT", width / 2f, height / 2f + 100f * density, retryPromptPaint)
+                }
             }
         }
     }
@@ -655,7 +804,14 @@ class GameView @JvmOverloads constructor(
                 val dx = event.x - retryDownX
                 val dy = event.y - retryDownY
                 if (hypot(dx, dy) <= retryTapSlopPx) {
-                    if (isGameOver) restartGame() else onTapToNextStage()
+                    // STAGE-DESIGN-01: on the ALL CLEAR screen (stageNumber
+                    // >= CURRENT_RELEASE_FINAL_STAGE) a tap does nothing --
+                    // this release has no Stage 11 to advance to yet.
+                    if (isGameOver) {
+                        restartGame()
+                    } else if (stageNumber < CURRENT_RELEASE_FINAL_STAGE) {
+                        onTapToNextStage()
+                    }
                     invalidate()
                 }
                 true
@@ -684,11 +840,11 @@ class GameView @JvmOverloads constructor(
      * classes -- BoardLogic and GameStateController's own collision-
      * judgement logic are both on this round's fixed-spec list, so
      * neither file is ever touched, only GameView's own reference to
-     * each is replaced. `qubes` is rebuilt via the same
-     * [createInitialQubes] factory the very first launch already uses,
-     * so durability/rotation/movement progress and every QubeSoundTracker
-     * are back to a genuinely fresh state with zero references to any
-     * pre-restart QUBE. MarkController is the one exception to "replace
+     * each is replaced. `qubes` is rebuilt via [beginStageWaves]/
+     * [spawnWave] (STAGE-DESIGN-01), so durability/rotation/movement
+     * progress and every QubeSoundTracker are back to a genuinely fresh
+     * state with zero references to any pre-restart QUBE. MarkController
+     * is the one exception to "replace
      * the whole object" -- it already exposes a safe public [MarkController.clear],
      * so that's used directly instead, per this round's own "use the
      * existing API, don't touch MarkController internals" instruction.
@@ -734,7 +890,7 @@ class GameView @JvmOverloads constructor(
      * Shared by [restartGame] (full reset) and [advanceToNextStage]
      * (score/lives kept) -- everything else a "start playing again" needs
      * reset to fresh-launch state: player position/direction, every QUBE
-     * (a brand new [createInitialQubes] result, so durability/rotation/
+     * (a brand new [beginStageWaves] wave 0, so durability/rotation/
      * movement progress and every QubeSoundTracker are genuinely fresh,
      * same guarantee [restartGame] already relied on), MARK, the break-
      * flash list, every cosmetic timer, and STAGE CLEAR's own tracking
@@ -744,7 +900,10 @@ class GameView @JvmOverloads constructor(
      */
     private fun resetBoardAndVisuals() {
         boardLogic = BoardLogic()
-        qubes = createInitialQubes()
+        // STAGE-DESIGN-01: spawns the (new) stageNumber's own wave 0 and
+        // resets stageClear/pendingStageClearAfterBreak/stageWaveIndex --
+        // replaces the old `qubes = createInitialQubes()` line.
+        beginStageWaves()
         brokenQubes.clear()
         markController.clear()
 
@@ -757,8 +916,6 @@ class GameView @JvmOverloads constructor(
         lastMoveDirection = Direction.SOUTH
         hitVisualElapsedMs = 0L
 
-        stageClear = false
-        pendingStageClearAfterBreak = false
         wasStageClear = false
         stageClearElapsedMs = 0L
     }
@@ -821,9 +978,12 @@ class GameView @JvmOverloads constructor(
                 // reaches this line.
                 awardScore(SCORE_ACTIVATE_CAPTURE, "+$SCORE_ACTIVATE_CAPTURE")
                 // STAGE-CLEAR-01: no BrokenQubeVisual is involved on this
-                // path, so the transition is immediate -- score is already
+                // path, so resolution is immediate -- score is already
                 // awarded above, satisfying "score first, then CLEAR."
-                if (qubes.isEmpty()) stageClear = true
+                // STAGE-DESIGN-01: resolveWaveBoundary() decides whether
+                // this was just a wave boundary (spawns the next wave) or
+                // the stage's actual last QUBE (sets stageClear).
+                if (qubes.isEmpty()) resolveWaveBoundary()
             }
             markController.clear()
         } else {
@@ -907,9 +1067,12 @@ class GameView @JvmOverloads constructor(
             // screen for a single frame.
             awardScore(SCORE_PUNCH_DESTROY, "+$SCORE_PUNCH_DESTROY")
             // STAGE-CLEAR-01: score is already awarded above. Unlike the
-            // ACTIVATE path, this doesn't flip stageClear immediately --
-            // brokenQubes (just added above) must finish its ~200ms flash
-            // first; see pendingStageClearAfterBreak's own doc.
+            // ACTIVATE path, this doesn't resolve immediately -- brokenQubes
+            // (just added above) must finish its ~200ms flash first; see
+            // pendingStageClearAfterBreak's own doc. STAGE-DESIGN-01: the
+            // frame loop's own resolution (once brokenQubes drains) now
+            // calls resolveWaveBoundary() instead of always meaning
+            // "stage over" -- see that function.
             if (qubes.isEmpty()) pendingStageClearAfterBreak = true
         } else {
             soundEventPlayer.play(SoundEvent.PUNCH_HIT)
