@@ -7,7 +7,7 @@
          so the OS-driven splash on newer devices stays black too instead
          of a default white flash before our own background takes over.
          android:icon on <application> already supplies the splash icon
-         on API 31+ automatically -- no separate animated-icon attr
+         on API 31+ automatically; no separate animated-icon attr
          needed. Unknown attrs are silently ignored on older API levels,
          so this single style covers every minSdk..compileSdk device. -->
     <style name="Theme.IqPuchinSplash" parent="@android:style/Theme.Black.NoTitleBar">
