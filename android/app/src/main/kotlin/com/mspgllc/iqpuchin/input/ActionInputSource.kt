@@ -1,7 +1,5 @@
 package com.mspgllc.iqpuchin.input
 
-import android.util.Log
-
 /**
  * STEP 7's single ACTION button, replacing the separate MARK and
  * ACTIVATE buttons. CONTROL-SIMPLE-01: [PawActionButtonView] now reports
@@ -25,13 +23,6 @@ class ActionInputSource(private val actionButton: PawActionButtonView) {
             actionButton.setAwaitingActivate(!isAwaitingMark())
         }
         actionButton.setOnPunchGesture {
-            // CAT-PUNCH-TRACE-01: diagnostic-only log confirming the punch
-            // gesture was actually received from the view layer, before
-            // listener.onPunchGestureRequested() (unchanged below) runs.
-            // Tag literal duplicated from GameView.CAT_PUNCH_TRACE_TAG since
-            // that constant is private to GameView and this is a separate
-            // class/package.
-            Log.d("CAT_PUNCH_TRACE", "PUNCH_INPUT_RECEIVED")
             listener.onPunchGestureRequested()
             actionButton.setAwaitingActivate(!isAwaitingMark())
         }

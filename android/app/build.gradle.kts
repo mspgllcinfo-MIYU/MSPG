@@ -13,11 +13,14 @@ android {
         targetSdk = 34
         // AZUSAN-SIZE-TEST-01 established bumping these every round purely
         // for on-device identification (they're read by nothing in game
-        // logic). CAT-PUNCH-TRACE-01 continues that -- this build is
-        // diagnostic-instrumentation-only (Logcat tracing + a temporary
-        // on-screen readout for the cat-punch input path), not a logic fix.
-        versionCode = 34
-        versionName = "0.1-CAT_PUNCH_TRACE_01"
+        // logic). GAMEOVER-FINAL-02 is CAT-PUNCH-TRACE-01's diagnostic-only
+        // Logcat/on-screen instrumentation removed after real-device
+        // confirmation that the traced cat-punch path (durability 2->1,
+        // 1->0 DESTROYED) is correct -- GameView.kt/ActionInputSource.kt are
+        // restored byte-for-byte from f62a54d (GAMEOVER-FINAL-01), so this
+        // is a clean official build, not a new feature.
+        versionCode = 35
+        versionName = "0.1-GAMEOVER_FINAL_02"
     }
 
     // Pinned debug signing key (app/debug.keystore), checked into the repo
