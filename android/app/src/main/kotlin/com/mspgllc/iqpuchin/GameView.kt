@@ -22,6 +22,7 @@ import com.mspgllc.iqpuchin.input.InputActionListener
 import com.mspgllc.iqpuchin.render.BoardRenderer
 import com.mspgllc.iqpuchin.render.BrokenQubeVisual
 import com.mspgllc.iqpuchin.render.ChuruLifeRenderer
+import com.mspgllc.iqpuchin.render.GlassCrackEffect
 import com.mspgllc.iqpuchin.render.IsoProjection
 import com.mspgllc.iqpuchin.render.PlayerRenderer
 import com.mspgllc.iqpuchin.render.PoiHitReaction
@@ -360,6 +361,21 @@ class GameView @JvmOverloads constructor(
     // gameStateController.life each frame, never written back to it.
     private val churuRenderer = ChuruLifeRenderer()
 
+    // EFFECT-01A: purely cosmetic, same "GameView holds the state, the
+    // renderer class only draws it" split as churuRenderer above --
+    // glassCrackEffect itself is stateless (its per-HIT patterns are
+    // fixed/precomputed), so it's a `val`, never reconstructed. See
+    // beginCrackHit/the frame loop's own crack-advance block/onDraw.
+    private val glassCrackEffect = GlassCrackEffect()
+    // How many HIT-stages (1..3) are fully settled right now -- 0 means
+    // no cracks. Reset only by restartGame() (RETRY/PLAY AGAIN); NEXT's
+    // resetBoardAndVisuals() deliberately never touches this, so cracks
+    // stay matched to whatever life remains across a stage transition.
+    private var crackRevealedUpTo = 0
+    // The HIT-stage (1..3) currently growing in, or 0 if none.
+    private var crackAnimatingHit = 0
+    private var crackAnimElapsedMs = 0L
+
     // SCORE-SYSTEM-01: the entire score system is this one Int plus the
     // two `score +=` call sites in onActionRequested/performPunch below
     // -- per this round's own "avoid over-engineering" instruction, a
@@ -690,7 +706,22 @@ class GameView @JvmOverloads constructor(
             hitReaction.trigger()
             hitVisualElapsedMs = 0L
             soundEventPlayer.play(SoundEvent.POI_HIT)
+            // EFFECT-01A: purely visual -- the HIT-stage number is derived
+            // from life (already decremented by gameStateController above),
+            // never a second source of truth, and never fed back into
+            // life/GAME_OVER/collision in any way.
+            beginCrackHit(GameStateController.STARTING_LIFE - gameStateController.life)
         }
+    }
+
+    /** EFFECT-01A: starts HIT [hitNumber]'s crack pattern growing in.
+     * Keeps every earlier HIT-stage fully settled while this one animates
+     * -- see [GlassCrackEffect]'s own class doc for why callers must. */
+    private fun beginCrackHit(hitNumber: Int) {
+        if (hitNumber < 1 || hitNumber > GlassCrackEffect.MAX_HITS) return
+        crackRevealedUpTo = maxOf(crackRevealedUpTo, hitNumber - 1)
+        crackAnimatingHit = hitNumber
+        crackAnimElapsedMs = 0L
     }
 
     private var lastFrameTimeNanos = 0L
@@ -785,6 +816,24 @@ class GameView @JvmOverloads constructor(
                     stageClearElapsedMs = 0L
                 } else {
                     stageClearElapsedMs += deltaMs
+                }
+            }
+
+            // EFFECT-01A: advances independently of the isGameOver/
+            // stageClear branching above -- HIT3 (life 1->0) sets
+            // GAME_OVER in the very same checkCollision() call that
+            // starts its crack growing in, so this must keep progressing
+            // through the isGameOver branch too, or HIT3's crack would
+            // freeze at 0% the instant GAME_OVER takes over next frame.
+            // Never runs while stageStartActive (nothing can call
+            // beginCrackHit during that freeze), so no extra guard is
+            // needed here.
+            if (crackAnimatingHit > 0) {
+                crackAnimElapsedMs += deltaMs
+                if (crackAnimElapsedMs >= GlassCrackEffect.REVEAL_DURATION_MS) {
+                    crackRevealedUpTo = crackAnimatingHit
+                    crackAnimatingHit = 0
+                    crackAnimElapsedMs = 0L
                 }
             }
 
@@ -958,6 +1007,15 @@ class GameView @JvmOverloads constructor(
         // play (and dimmed-but-visible under the GAME OVER/STAGE CLEAR
         // overlays below, same as churu/SCORE already are).
         canvas.drawText("STAGE $stageNumber", 16f * density, 66f * density, stageTextPaint)
+
+        // EFFECT-01A: drawn after the board/player/HUD but before the
+        // GAME OVER/STAGE CLEAR overlays below, so a HIT3 crack pattern
+        // is still visible underneath (through) GAME OVER's dim fade-in
+        // rather than being hidden by it -- "the glass is still there"
+        // per this round's own spec. Visual-only: no read of this state
+        // by any collision/life/GAME_OVER check anywhere else.
+        val crackAnimProgress = (crackAnimElapsedMs.toFloat() / GlassCrackEffect.REVEAL_DURATION_MS).coerceIn(0f, 1f)
+        glassCrackEffect.draw(canvas, width, height, density, crackRevealedUpTo, crackAnimatingHit, crackAnimProgress)
 
         if (gameStateController.state == GameState.GAME_OVER) {
             // PRESENTATION-01: a calm, monotonic dim fade-in (never a
@@ -1159,6 +1217,15 @@ class GameView @JvmOverloads constructor(
 
         wasGameOver = false
         gameOverElapsedMs = 0L
+
+        // EFFECT-01A: RETRY/PLAY AGAIN both go through restartGame(), so
+        // clearing every crack here (and nowhere in resetBoardAndVisuals,
+        // which advanceToNextStage() also calls) is what makes NEXT
+        // preserve cracks matching remaining life while RETRY/PLAY AGAIN
+        // wipe them, per this round's own spec.
+        crackRevealedUpTo = 0
+        crackAnimatingHit = 0
+        crackAnimElapsedMs = 0L
     }
 
     /**

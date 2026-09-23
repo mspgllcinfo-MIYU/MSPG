@@ -13,13 +13,9 @@ android {
         targetSdk = 34
         // AZUSAN-SIZE-TEST-01 established bumping these every round purely
         // for on-device identification (they're read by nothing in game
-        // logic). PRESENTATION-01 continues that.
-        // ICON-SIZE-01/ICON-FINAL-01: versionCode bumped each icon-sizing
-        // pass so each build is installable over/distinguishable from the
-        // last -- versionName stays "0.1-PRESENTATION_01" (icon sizing is
-        // still part of that round).
-        versionCode = 20
-        versionName = "0.1-PRESENTATION_01"
+        // logic). EFFECT-01A continues that.
+        versionCode = 21
+        versionName = "0.1-EFFECT_01A"
     }
 
     // Pinned debug signing key (app/debug.keystore), checked into the repo
