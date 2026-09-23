@@ -13,9 +13,9 @@ android {
         targetSdk = 34
         // AZUSAN-SIZE-TEST-01 established bumping these every round purely
         // for on-device identification (they're read by nothing in game
-        // logic). STAGE-CLEAR-01 continues that.
-        versionCode = 10
-        versionName = "0.1-STAGE_CLEAR_01"
+        // logic). STAGE-SYSTEM-01 continues that.
+        versionCode = 11
+        versionName = "0.1-STAGE_SYSTEM_01"
     }
 
     // Pinned debug signing key (app/debug.keystore), checked into the repo

@@ -172,6 +172,14 @@ class GameView @JvmOverloads constructor(
     // this field's initial value is what matters.
     private var score: Int = 0
 
+    // STAGE-SYSTEM-01: starts at 1 (fresh launch == Stage 1), bumped only
+    // by advanceToNextStage() -- restartGame() resets it back to 1 (RETRY
+    // always returns to Stage 1, even from Stage 3+, per this round's own
+    // spec). Never read by any game-logic check (QUBE count/speed/
+    // durability are unaffected by it this round), purely HUD + the
+    // NEXT-transition's own increment.
+    private var stageNumber: Int = 1
+
     // SCORE-SYSTEM-01: a brief "+100"/"+50" popup, same TimedCosmeticFlag
     // shape as walkVisual/punchVisual above (no fade, just present-then-
     // gone -- matching this codebase's existing convention for these
@@ -307,6 +315,17 @@ class GameView @JvmOverloads constructor(
         color = Color.rgb(235, 90, 150)
         textSize = 26f * density
         textAlign = Paint.Align.CENTER
+        isFakeBoldText = true
+    }
+    // STAGE-SYSTEM-01: small, white, left-aligned just under churuRenderer's
+    // icons -- mirrors scorePopupPaint sitting just under scoreTextPaint on
+    // the opposite side, so the HUD reads as two small symmetric stacks
+    // (life+stage on the left, score+popup on the right) rather than
+    // crowding either existing corner.
+    private val stageTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = 18f * density
+        textAlign = Paint.Align.LEFT
         isFakeBoldText = true
     }
 
@@ -566,6 +585,10 @@ class GameView @JvmOverloads constructor(
         if (scorePopup.active) {
             canvas.drawText(scorePopupText, width - 16f * density, 80f * density, scorePopupPaint)
         }
+        // STAGE-SYSTEM-01: small, non-intrusive, always visible during
+        // play (and dimmed-but-visible under the GAME OVER/STAGE CLEAR
+        // overlays below, same as churu/SCORE already are).
+        canvas.drawText("STAGE $stageNumber", 16f * density, 66f * density, stageTextPaint)
 
         if (gameStateController.state == GameState.GAME_OVER) {
             canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), gameOverDimPaint)
@@ -642,14 +665,14 @@ class GameView @JvmOverloads constructor(
     }
 
     /**
-     * STAGE-CLEAR-01: Stage 2 doesn't exist yet, so this is intentionally
-     * a no-op -- the tap path exists (per this round's own "build the
-     * entrance, don't build Stage 2" instruction) but changes nothing:
-     * no QUBE count/speed change, no new QUBE generation, no score/life
-     * reset. A future STAGE-2 round wires real behavior in here without
-     * touching onTouchEvent/the frame loop again.
+     * STAGE-SYSTEM-01: now wired to [advanceToNextStage] -- Stage 2+ is
+     * still identical in every difficulty respect to Stage 1 this round
+     * (same 3 QUBEs, same createInitialQubes() layout, same durability/
+     * speed/rolling), per this round's own explicit "no difficulty design
+     * yet" scope.
      */
     private fun onTapToNextStage() {
+        advanceToNextStage()
     }
 
     /**
@@ -671,8 +694,56 @@ class GameView @JvmOverloads constructor(
      * existing API, don't touch MarkController internals" instruction.
      */
     private fun restartGame() {
-        boardLogic = BoardLogic()
+        stageNumber = 1
         gameStateController = GameStateController()
+        score = 0
+        resetBoardAndVisuals()
+
+        wasGameOver = false
+        gameOverElapsedMs = 0L
+    }
+
+    /**
+     * STAGE-SYSTEM-01: NEXT (from STAGE CLEAR) advances stageNumber and
+     * returns the board/player/QUBEs/every visual timer to a fresh
+     * baseline -- but, unlike [restartGame], deliberately never touches
+     * [score] or [gameStateController]. Score is required to carry over
+     * unchanged (this round's own explicit "NEXT never resets SCORE").
+     *
+     * gameStateController is reused, not reconstructed, so its `life`
+     * (lives/churu count) carries over too -- GameStateController exposes
+     * no public setter for life, so preserving it while reconstructing
+     * the instance is impossible, and GameStateController.kt's own logic
+     * is fixed-spec this round. Reusing the same instance is safe despite
+     * not resetting it: `state` is already PLAYING (STAGE CLEAR never
+     * sets GAME_OVER -- see the frame loop's mutual-exclusion note), and
+     * `inContact`/`hitElapsedMs` need no explicit reset because
+     * checkCollision() unconditionally reassigns `inContact = colliding`
+     * every single call -- since the freshly-generated QUBEs and the
+     * freshly-repositioned player never start on the same cell, the very
+     * next checkCollision() call (the next frame) already recomputes
+     * `inContact = false` on its own, regardless of its value going in.
+     * No stale collision state can leak across a NEXT.
+     */
+    private fun advanceToNextStage() {
+        stageNumber++
+        resetBoardAndVisuals()
+    }
+
+    /**
+     * Shared by [restartGame] (full reset) and [advanceToNextStage]
+     * (score/lives kept) -- everything else a "start playing again" needs
+     * reset to fresh-launch state: player position/direction, every QUBE
+     * (a brand new [createInitialQubes] result, so durability/rotation/
+     * movement progress and every QubeSoundTracker are genuinely fresh,
+     * same guarantee [restartGame] already relied on), MARK, the break-
+     * flash list, every cosmetic timer, and STAGE CLEAR's own tracking
+     * fields. boardLogic is reconstructed fresh the same way
+     * [restartGame] already did (see that method's original doc) --
+     * BoardLogic.kt itself is still never touched.
+     */
+    private fun resetBoardAndVisuals() {
+        boardLogic = BoardLogic()
         qubes = createInitialQubes()
         brokenQubes.clear()
         markController.clear()
@@ -685,15 +756,7 @@ class GameView @JvmOverloads constructor(
 
         lastMoveDirection = Direction.SOUTH
         hitVisualElapsedMs = 0L
-        score = 0
 
-        wasGameOver = false
-        gameOverElapsedMs = 0L
-
-        // STAGE-CLEAR-01: not currently reachable from stageClear (TAP TO
-        // NEXT never calls restartGame -- see onTapToNextStage), but
-        // restartGame's own contract is "exactly fresh-launch state," and
-        // a fresh launch has stageClear false -- kept here defensively.
         stageClear = false
         pendingStageClearAfterBreak = false
         wasStageClear = false
