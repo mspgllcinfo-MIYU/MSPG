@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- PRESENTATION-01: plain windowBackground splash (no SplashScreen
-     library, no extra Activity, no custom delay) -- black full-bleed
+     library, no extra Activity, no custom delay); black full-bleed
      with the app artwork centered. Android swaps this for the real
      content the instant MainActivity's first frame draws, so there is
      no code-controlled timing here at all. -->
