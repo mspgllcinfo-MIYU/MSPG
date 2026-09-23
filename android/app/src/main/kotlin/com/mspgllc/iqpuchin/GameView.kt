@@ -1588,9 +1588,19 @@ class GameView @JvmOverloads constructor(
      * already established; unlike the old shared-tap dispatch, this
      * never falls back to placing/judging a MARK -- if nothing is in
      * punch range, this is simply a no-op.
+     *
+     * EFFECT-01C-FIX-01: the `lifeLossAzusanActive` clause EFFECT-01C
+     * added here (alongside onMoveRequested/onActionRequested) froze
+     * CAT_PUNCH for the full 840ms あずさん-punch overlay after every
+     * single life-loss HIT -- combined with QUBEs continuing to approach
+     * at their own pace, this made landing the 2nd punch on a QUBE
+     * unreliable enough to read as "never fires." Removed here only,
+     * restoring this method's pre-EFFECT-01C (commit 01b647d) condition
+     * exactly; onMoveRequested/onActionRequested deliberately keep the
+     * clause, per this round's own explicit scope.
      */
     override fun onPunchGestureRequested() {
-        if (gameStateController.state == GameState.GAME_OVER || stageClear || stageStartActive || lifeLossAzusanActive) return
+        if (gameStateController.state == GameState.GAME_OVER || stageClear || stageStartActive) return
         val punchIndex = qubes.indexOfFirst { isPunchRange(boardLogic.playerPosition, it.qube.coord) }
         if (punchIndex >= 0) {
             performPunch(punchIndex)
