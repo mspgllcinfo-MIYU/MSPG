@@ -22,6 +22,7 @@ import com.mspgllc.iqpuchin.input.InputActionListener
 import com.mspgllc.iqpuchin.render.BoardRenderer
 import com.mspgllc.iqpuchin.render.BrokenQubeVisual
 import com.mspgllc.iqpuchin.render.ChuruLifeRenderer
+import com.mspgllc.iqpuchin.render.GameOverCatEffect
 import com.mspgllc.iqpuchin.render.GlassCrackEffect
 import com.mspgllc.iqpuchin.render.IsoProjection
 import com.mspgllc.iqpuchin.render.PlayerRenderer
@@ -375,6 +376,18 @@ class GameView @JvmOverloads constructor(
     // The HIT-stage (1..3) currently growing in, or 0 if none.
     private var crackAnimatingHit = 0
     private var crackAnimElapsedMs = 0L
+
+    // EFFECT-01B: the GAME OVER finishing sequence (まり/あんこ/あずさん
+    // rush + BB's final glass shatter) -- same "GameView holds the state,
+    // the renderer class only draws it" split as glassCrackEffect above.
+    // Starts only once EFFECT-01A's HIT3 crack has fully settled (see
+    // the frame loop's own trigger check), and only once it's done does
+    // GAME OVER's own text/dim/TAP TO RETRY become visible/tappable --
+    // see catEffectDone's use in both the frame loop and onDraw below.
+    private val gameOverCatEffect = GameOverCatEffect(context)
+    private var catEffectStarted = false
+    private var catEffectElapsedMs = 0L
+    private var catEffectDone = false
 
     // SCORE-SYSTEM-01: the entire score system is this one Int plus the
     // two `score +=` call sites in onActionRequested/performPunch below
@@ -802,10 +815,17 @@ class GameView @JvmOverloads constructor(
                 // instant GAME_OVER is first observed (the `!wasGameOver`
                 // branch below), then counts up every frame after that --
                 // see RETRY_INPUT_LOCKOUT_MS/onTouchEvent.
+                // EFFECT-01B: `gameOverElapsedMs` now only starts
+                // *counting* once catEffectDone -- kept at 0 through the
+                // whole cat-rush/shatter sequence, which naturally keeps
+                // onTouchEvent's own existing `lockoutElapsedMs <
+                // RETRY_INPUT_LOCKOUT_MS` check (0 < 400) rejecting taps
+                // and onDraw's GAME OVER block hidden throughout, with no
+                // changes needed to either of those two mechanisms.
                 if (!wasGameOver) {
                     wasGameOver = true
                     gameOverElapsedMs = 0L
-                } else {
+                } else if (catEffectDone) {
                     gameOverElapsedMs += deltaMs
                 }
             } else {
@@ -834,6 +854,26 @@ class GameView @JvmOverloads constructor(
                     crackRevealedUpTo = crackAnimatingHit
                     crackAnimatingHit = 0
                     crackAnimElapsedMs = 0L
+                }
+            }
+
+            // EFFECT-01B: starts the GAME OVER finishing sequence only
+            // once HIT3's own crack has fully settled (crackAnimatingHit
+            // back to 0 with all 3 stages revealed) -- "3段階目のヒビが
+            // 完成した後に開始" per spec. Advances unconditionally after
+            // that, same reasoning as the crack timer above (GAME_OVER
+            // freezes the normal-update branch, but this sequence must
+            // keep playing through it).
+            if (isGameOver && !catEffectStarted && crackAnimatingHit == 0 &&
+                crackRevealedUpTo >= GlassCrackEffect.MAX_HITS
+            ) {
+                catEffectStarted = true
+                catEffectElapsedMs = 0L
+            }
+            if (catEffectStarted && !catEffectDone) {
+                catEffectElapsedMs += deltaMs
+                if (gameOverCatEffect.isDone(catEffectElapsedMs)) {
+                    catEffectDone = true
                 }
             }
 
@@ -1014,10 +1054,26 @@ class GameView @JvmOverloads constructor(
         // rather than being hidden by it -- "the glass is still there"
         // per this round's own spec. Visual-only: no read of this state
         // by any collision/life/GAME_OVER check anywhere else.
-        val crackAnimProgress = (crackAnimElapsedMs.toFloat() / GlassCrackEffect.REVEAL_DURATION_MS).coerceIn(0f, 1f)
-        glassCrackEffect.draw(canvas, width, height, density, crackRevealedUpTo, crackAnimatingHit, crackAnimProgress)
+        // EFFECT-01B: skipped once the finishing sequence's own glass-
+        // shatter phase has taken over (see isShatterActive) -- the
+        // 3-stage cracks are, at that point, "the glass, now actually
+        // breaking," which gameOverCatEffect.draw() itself renders.
+        val shatterActive = catEffectStarted && gameOverCatEffect.isShatterActive(catEffectElapsedMs)
+        if (!shatterActive) {
+            val crackAnimProgress = (crackAnimElapsedMs.toFloat() / GlassCrackEffect.REVEAL_DURATION_MS).coerceIn(0f, 1f)
+            glassCrackEffect.draw(canvas, width, height, density, crackRevealedUpTo, crackAnimatingHit, crackAnimProgress)
+        }
 
-        if (gameStateController.state == GameState.GAME_OVER) {
+        // EFFECT-01B: まり/あんこ/あずさん rush + BB's approach/final
+        // impact/glass shatter -- drawn above the crack layer (per this
+        // round's own layer order: board -> cracks -> cat characters ->
+        // glass shards -> GAME OVER UI), below the GAME OVER block below
+        // it, which stays hidden until this finishes (see catEffectDone).
+        if (catEffectStarted && !catEffectDone) {
+            gameOverCatEffect.draw(canvas, width, height, density, catEffectElapsedMs)
+        }
+
+        if (gameStateController.state == GameState.GAME_OVER && catEffectDone) {
             // PRESENTATION-01: a calm, monotonic dim fade-in (never a
             // pulse/flash) -- deliberately slower than STAGE CLEAR/ALL
             // CLEAR's snappier text scale-in below, per this round's own
@@ -1226,6 +1282,13 @@ class GameView @JvmOverloads constructor(
         crackRevealedUpTo = 0
         crackAnimatingHit = 0
         crackAnimElapsedMs = 0L
+
+        // EFFECT-01B: same reasoning -- RETRY/PLAY AGAIN fully resets the
+        // finishing sequence too, so the next GAME OVER plays it again
+        // from the start rather than being stuck "done."
+        catEffectStarted = false
+        catEffectElapsedMs = 0L
+        catEffectDone = false
     }
 
     /**
