@@ -109,44 +109,100 @@ class GameView @JvmOverloads constructor(
         const val CURRENT_RELEASE_FINAL_STAGE = 10
 
         /**
-         * Per-stage wave layout, index 0 == Stage 1. Each inner list is
-         * one stage's waves in spawn order, one Int per wave = how many
-         * QUBEs that wave spawns (see [WAVE_COLUMNS] for their columns).
-         * A stage's total QUBE count is the sum of its own list.
-         *
-         * Deliberately NOT random and deliberately small per wave (max 4
-         * QUBEs approaching at once, same speed/durability/rolling as
-         * always) -- this round's own "普通に遊んで、何度か慣れればSTAGE
-         * 10までクリアできること" priority over difficulty. Counts/wave
-         * splits follow this round's own per-stage guidance (e.g. Stage 5
-         * "7〜8個程度、2〜3 Wave" -> 3+3+2=8 over 3 waves) without matching
-         * it to the letter -- any reasonable split within the given
-         * ranges satisfies the same design intent.
+         * STAGE-LAYOUT-01: the board's 7 columns (x=0..6), named left-to-
+         * right exactly as this round's own spec requests. Confirmed from
+         * the actual projection math, not guessed: under FRONT_ALIGNED
+         * (this app's active [RenderMode]), IsoProjection's screenX =
+         * originX + gridX * axisMajorPx (axisMinorPx is 0 in this mode),
+         * so increasing x moves strictly rightward on screen with no
+         * other axis mixed in -- x=0 is the leftmost column, x=6 the
+         * rightmost. C.x=3 lines up with BoardLogic's own default player
+         * spawn column (`GridCoord(BoardConfig.GRID_WIDTH / 2, ...)` =
+         * x=3, since GRID_WIDTH=7), confirming C really is the board's
+         * logical center column, not an assumption.
          */
-        val STAGE_WAVES: List<List<Int>> = listOf(
-            listOf(3),                 // Stage 1
-            listOf(4),                 // Stage 2
-            listOf(3, 2),               // Stage 3
-            listOf(3, 3),               // Stage 4
-            listOf(3, 3, 2),             // Stage 5
-            listOf(3, 3, 3),             // Stage 6
-            listOf(3, 3, 3, 2),           // Stage 7
-            listOf(4, 3, 3, 3),           // Stage 8
-            listOf(3, 3, 3, 3, 3),         // Stage 9
-            listOf(4, 4, 3, 3, 3)          // Stage 10
-        )
+        private enum class Lane(val x: Int) {
+            L3(0), L2(1), L1(2), C(3), R1(4), R2(5), R3(6)
+        }
 
-        /** Column (gridX) layout for a wave of a given size -- every QUBE
-         * within one wave gets a distinct column (two QUBEs never start
-         * on the same cell), spread across the board's own
-         * [BoardConfig.GRID_WIDTH] (0..6). Size 3's {1,3,5} is the exact
-         * original Stage 1 layout, kept unchanged so Stage 1 itself is
-         * pixel-for-pixel identical to before this round. */
-        val WAVE_COLUMNS: Map<Int, List<Int>> = mapOf(
-            1 to listOf(3),
-            2 to listOf(2, 4),
-            3 to listOf(1, 3, 5),
-            4 to listOf(0, 2, 4, 6)
+        /**
+         * Per-stage wave layout, index 0 == Stage 1. Each stage is a list
+         * of waves in spawn order; each wave is the list of [Lane]s its
+         * QUBEs spawn in, so e.g. `listOf(Lane.L1, Lane.C)` reads directly
+         * as "a two-QUBE group in the L1 and C columns" -- per this
+         * round's own "the data should show the layout, not a large if/
+         * when dispatcher" instruction. A stage's total QUBE count is the
+         * sum of its own waves' sizes; every QUBE within one wave uses a
+         * distinct Lane, so none ever start on the same cell (the same
+         * guarantee STAGE-DESIGN-01's old count-based WAVE_COLUMNS gave).
+         *
+         * STAGE-LAYOUT-01 replaces STAGE-DESIGN-01's count-only waves with
+         * this round's own hand-authored per-stage layouts (Stage 1-3:
+         * single QUBEs only; Stage 4 introduces the first 2-wide wave;
+         * Stage 9 introduces the first L3+R3 both-edge wave). Every
+         * stage's own total QUBE count is unchanged from STAGE-DESIGN-01/
+         * 01B/01C -- verified by summing each list below: 3/4/5/6/8/9/11/
+         * 13/15/17.
+         *
+         * Stage 10 is the one exception: it keeps STAGE-DESIGN-01C's
+         * original wave shape rather than this round's own newly-specified
+         * layout. This round's own itemized Stage 10 wave list sums to 18
+         * QUBEs, not the 17 this round's own "don't change any stage's
+         * total QUBE count" rule requires stay unchanged -- see this
+         * round's completion report for the exact discrepancy. Guessing
+         * which single QUBE to drop to reconcile that would be inventing
+         * a design decision neither given nor asked for, so Stage 10's
+         * layout is left exactly as it already shipped and was already
+         * real-device-verified (STAGE-DESIGN-01C, commit d38dc26) instead.
+         */
+        val STAGE_WAVES: List<List<List<Lane>>> = listOf(
+            // Stage 1 -- 3, single QUBEs only
+            listOf(listOf(Lane.L1), listOf(Lane.R1), listOf(Lane.L2)),
+            // Stage 2 -- 4, single QUBEs only, center kept clear
+            listOf(listOf(Lane.R2), listOf(Lane.L2), listOf(Lane.R1), listOf(Lane.L1)),
+            // Stage 3 -- 5, single QUBEs only
+            listOf(listOf(Lane.L1), listOf(Lane.R1), listOf(Lane.L2), listOf(Lane.C), listOf(Lane.R2)),
+            // Stage 4 -- 6, first 2-wide wave (L1+C), right side left wide open
+            listOf(
+                listOf(Lane.L1, Lane.C), listOf(Lane.R2), listOf(Lane.L2),
+                listOf(Lane.R1), listOf(Lane.L1)
+            ),
+            // Stage 5 -- 8, left cluster then right cluster
+            listOf(
+                listOf(Lane.L2, Lane.L1), listOf(Lane.R1), listOf(Lane.R2, Lane.R3),
+                listOf(Lane.L1), listOf(Lane.L2), listOf(Lane.C)
+            ),
+            // Stage 6 -- 9
+            listOf(
+                listOf(Lane.L1, Lane.C), listOf(Lane.L2, Lane.R2), listOf(Lane.C),
+                listOf(Lane.R1, Lane.R2), listOf(Lane.L2), listOf(Lane.R1)
+            ),
+            // Stage 7 -- 11
+            listOf(
+                listOf(Lane.L2, Lane.L1), listOf(Lane.R1), listOf(Lane.L1, Lane.C),
+                listOf(Lane.R2), listOf(Lane.L2, Lane.R2), listOf(Lane.C, Lane.R1), listOf(Lane.L1)
+            ),
+            // Stage 8 -- 13, left -> center -> right -> left sweep
+            listOf(
+                listOf(Lane.L3, Lane.L2), listOf(Lane.L1), listOf(Lane.C, Lane.R1),
+                listOf(Lane.R2), listOf(Lane.R1, Lane.R2), listOf(Lane.L2),
+                listOf(Lane.L1, Lane.C), listOf(Lane.R2), listOf(Lane.C)
+            ),
+            // Stage 9 -- 15, first L3+R3 both-edge wave (center kept clear)
+            listOf(
+                listOf(Lane.L2, Lane.L1), listOf(Lane.C), listOf(Lane.R1, Lane.R2),
+                listOf(Lane.L3, Lane.R3), listOf(Lane.L1, Lane.C), listOf(Lane.L2, Lane.R2),
+                listOf(Lane.C, Lane.R1), listOf(Lane.L1), listOf(Lane.R1)
+            ),
+            // Stage 10 -- 17, kept as STAGE-DESIGN-01C's original shape --
+            // see this constant's own doc for why.
+            listOf(
+                listOf(Lane.L3, Lane.L1, Lane.R1, Lane.R3),
+                listOf(Lane.L3, Lane.L1, Lane.R1, Lane.R3),
+                listOf(Lane.L2, Lane.C, Lane.R2),
+                listOf(Lane.L2, Lane.C, Lane.R2),
+                listOf(Lane.L2, Lane.C, Lane.R2)
+            )
         )
 
         /**
@@ -313,19 +369,20 @@ class GameView @JvmOverloads constructor(
     private val brokenQubes: MutableList<BrokenQubeVisual> = mutableListOf()
 
     /**
-     * STAGE-DESIGN-01: adds one wave's worth of fresh QUBEs to `qubes` --
-     * same [Qube]/[QubeMotion]/[QubeSoundTracker] construction the old
-     * createInitialQubes() used (default durability, direction SOUTH,
-     * z=0 -- the board's own existing spawn row, completely unchanged;
-     * BoardConfig/BoardLogic/IsoProjection are never touched by this
-     * round), just parameterized by column list instead of a fixed
-     * [1,3,5]. Every QUBE within a wave starts at a distinct column, so
-     * none begin already overlapping another.
+     * STAGE-LAYOUT-01: adds one wave's worth of fresh QUBEs to `qubes`,
+     * one per [Lane] in [lanes] -- same [Qube]/[QubeMotion]/
+     * [QubeSoundTracker] construction STAGE-DESIGN-01's version used
+     * (default durability, direction SOUTH, z=0 -- the board's own
+     * existing spawn row, completely unchanged; BoardConfig/BoardLogic/
+     * IsoProjection are never touched by this round), just taking each
+     * QUBE's column directly from [STAGE_WAVES]'s own data instead of a
+     * count-keyed lookup. [STAGE_WAVES] never repeats a Lane within one
+     * wave, so no two QUBEs spawned by the same call ever land on the
+     * same cell.
      */
-    private fun spawnWave(count: Int) {
-        val columns = WAVE_COLUMNS[count] ?: (0 until count).map { it % BoardConfig.GRID_WIDTH }
-        for (x in columns) {
-            val qube = Qube(startCoord = GridCoord(x, 0), direction = Direction.SOUTH)
+    private fun spawnWave(lanes: List<Lane>) {
+        for (lane in lanes) {
+            val qube = Qube(startCoord = GridCoord(lane.x, 0), direction = Direction.SOUTH)
             val motion = QubeMotion(qube)
             qubes.add(QubeInstance(qube, motion, QubeSoundTracker(qube, motion)))
         }
@@ -335,7 +392,7 @@ class GameView @JvmOverloads constructor(
      * [STAGE_WAVES]'s defined range (not currently reachable -- ALL CLEAR
      * stops progression at [CURRENT_RELEASE_FINAL_STAGE]) fall back to the
      * last defined stage's layout rather than crashing. */
-    private fun currentStageWaves(): List<Int> =
+    private fun currentStageWaves(): List<List<Lane>> =
         STAGE_WAVES.getOrElse(stageNumber - 1) { STAGE_WAVES.last() }
 
     /**
