@@ -25,6 +25,7 @@ import com.mspgllc.iqpuchin.render.ChuruLifeRenderer
 import com.mspgllc.iqpuchin.render.GameOverCatEffect
 import com.mspgllc.iqpuchin.render.GlassCrackEffect
 import com.mspgllc.iqpuchin.render.IsoProjection
+import com.mspgllc.iqpuchin.render.LifeLossAzusanEffect
 import com.mspgllc.iqpuchin.render.PlayerRenderer
 import com.mspgllc.iqpuchin.render.PoiHitReaction
 import com.mspgllc.iqpuchin.render.QubeRenderer
@@ -389,6 +390,21 @@ class GameView @JvmOverloads constructor(
     private var catEffectElapsedMs = 0L
     private var catEffectDone = false
 
+    // EFFECT-01C: a short, freeze-the-board あずさん-punch overlay shown
+    // on every life-loss HIT (1..3), replacing the old "the crack just
+    // appears the instant life decrements" behavior -- GlassCrackEffect
+    // itself is completely unmodified; GameView now simply waits until
+    // this effect's own IMPACT_START_MS before calling the same
+    // beginCrackHit it always called. Kept fully separate from
+    // gameOverCatEffect/its state above -- this plays mid-game on HIT1/
+    // HIT2 and (before EFFECT-01B) on HIT3 too, never sharing a timeline
+    // with the GAME OVER finishing sequence.
+    private val lifeLossAzusanEffect = LifeLossAzusanEffect(context)
+    private var lifeLossAzusanActive = false
+    private var lifeLossAzusanElapsedMs = 0L
+    private var lifeLossPendingHitNumber = 0
+    private var lifeLossCrackFired = false
+
     // SCORE-SYSTEM-01: the entire score system is this one Int plus the
     // two `score +=` call sites in onActionRequested/performPunch below
     // -- per this round's own "avoid over-engineering" instruction, a
@@ -719,17 +735,37 @@ class GameView @JvmOverloads constructor(
             hitReaction.trigger()
             hitVisualElapsedMs = 0L
             soundEventPlayer.play(SoundEvent.POI_HIT)
-            // EFFECT-01A: purely visual -- the HIT-stage number is derived
-            // from life (already decremented by gameStateController above),
-            // never a second source of truth, and never fed back into
-            // life/GAME_OVER/collision in any way.
-            beginCrackHit(GameStateController.STARTING_LIFE - gameStateController.life)
+            // EFFECT-01C: the crack no longer appears the instant life
+            // decrements -- it now waits for lifeLossAzusanEffect's own
+            // punch-impact instant (see the frame loop's own
+            // lifeLossAzusanActive branch, which is what actually calls
+            // beginCrackHit). This call only starts that short overlay;
+            // the HIT-stage number is still derived from life (already
+            // decremented by gameStateController above) as the one source
+            // of truth, never fed back into life/GAME_OVER/collision.
+            beginLifeLossAzusan(GameStateController.STARTING_LIFE - gameStateController.life)
         }
+    }
+
+    /** EFFECT-01C: starts the short あずさん-punch overlay for HIT
+     * [hitNumber] -- freezes normal play (see the frame loop's own
+     * lifeLossAzusanActive branch) until it finishes, at which point
+     * [beginCrackHit] will already have fired at the exact punch-impact
+     * instant. */
+    private fun beginLifeLossAzusan(hitNumber: Int) {
+        if (hitNumber < 1 || hitNumber > GlassCrackEffect.MAX_HITS) return
+        lifeLossAzusanActive = true
+        lifeLossAzusanElapsedMs = 0L
+        lifeLossPendingHitNumber = hitNumber
+        lifeLossCrackFired = false
     }
 
     /** EFFECT-01A: starts HIT [hitNumber]'s crack pattern growing in.
      * Keeps every earlier HIT-stage fully settled while this one animates
-     * -- see [GlassCrackEffect]'s own class doc for why callers must. */
+     * -- see [GlassCrackEffect]'s own class doc for why callers must.
+     * EFFECT-01C: now called from the frame loop's own
+     * lifeLossAzusanActive branch at the punch-impact instant, never
+     * directly from [checkCollision] anymore. */
     private fun beginCrackHit(hitNumber: Int) {
         if (hitNumber < 1 || hitNumber > GlassCrackEffect.MAX_HITS) return
         crackRevealedUpTo = maxOf(crackRevealedUpTo, hitNumber - 1)
@@ -766,6 +802,29 @@ class GameView @JvmOverloads constructor(
                 stageStartElapsedMs += deltaMs
                 if (stageStartElapsedMs >= STAGE_START_DISPLAY_MS) {
                     stageStartActive = false
+                }
+            } else if (lifeLossAzusanActive) {
+                // EFFECT-01C: same freeze principle as stageStartActive
+                // above -- QUBE motion/collision/cosmetic timers are all
+                // skipped for the whole あずさん-punch overlay (even for
+                // HIT3, where `isGameOver` is already true this same
+                // frame -- this branch takes priority, so the isGameOver
+                // branch's own wasGameOver/gameOverElapsedMs bookkeeping
+                // simply starts a little later, once this ends, which is
+                // harmless since nothing reads it before catEffectDone
+                // anyway). checkCollision() never runs here, so this can
+                // never re-trigger itself mid-overlay.
+                lifeLossAzusanElapsedMs += deltaMs
+                if (!lifeLossCrackFired && lifeLossAzusanElapsedMs >= LifeLossAzusanEffect.IMPACT_START_MS) {
+                    lifeLossCrackFired = true
+                    // The exact fix this round makes: the crack now
+                    // starts growing in at the same instant the punch
+                    // frame begins showing, not the instant life itself
+                    // decremented.
+                    beginCrackHit(lifeLossPendingHitNumber)
+                }
+                if (lifeLossAzusanElapsedMs >= LifeLossAzusanEffect.TOTAL_DURATION_MS) {
+                    lifeLossAzusanActive = false
                 }
             } else if (!isGameOver && !stageClear) {
                 for (instance in qubes) {
@@ -863,9 +922,14 @@ class GameView @JvmOverloads constructor(
             // 完成した後に開始" per spec. Advances unconditionally after
             // that, same reasoning as the crack timer above (GAME_OVER
             // freezes the normal-update branch, but this sequence must
-            // keep playing through it).
-            if (isGameOver && !catEffectStarted && crackAnimatingHit == 0 &&
-                crackRevealedUpTo >= GlassCrackEffect.MAX_HITS
+            // keep playing through it). EFFECT-01C: also waits for
+            // `!lifeLossAzusanActive` -- HIT3's own あずさん-punch overlay
+            // is what causes the crack to finish settling partway through
+            // its own TOTAL_DURATION_MS, so without this check EFFECT-01B
+            // could start (and begin drawing its own second あずさん run)
+            // before that first overlay has actually finished playing.
+            if (isGameOver && !catEffectStarted && !lifeLossAzusanActive &&
+                crackAnimatingHit == 0 && crackRevealedUpTo >= GlassCrackEffect.MAX_HITS
             ) {
                 catEffectStarted = true
                 catEffectElapsedMs = 0L
@@ -1071,6 +1135,14 @@ class GameView @JvmOverloads constructor(
         // it, which stays hidden until this finishes (see catEffectDone).
         if (catEffectStarted && !catEffectDone) {
             gameOverCatEffect.draw(canvas, width, height, density, catEffectElapsedMs)
+        }
+
+        // EFFECT-01C: the same "cat character" layer position as EFFECT-
+        // 01B's own sequence above -- drawn on top of the crack overlay
+        // so あずさん visibly appears to be the one striking whatever HIT-
+        // stage crack is (about to be) growing in underneath her.
+        if (lifeLossAzusanActive) {
+            lifeLossAzusanEffect.draw(canvas, width, height, lifeLossAzusanElapsedMs, lifeLossPendingHitNumber)
         }
 
         if (gameStateController.state == GameState.GAME_OVER && catEffectDone) {
@@ -1289,6 +1361,15 @@ class GameView @JvmOverloads constructor(
         catEffectStarted = false
         catEffectElapsedMs = 0L
         catEffectDone = false
+
+        // EFFECT-01C: same reasoning -- RETRY/PLAY AGAIN clears any
+        // in-flight あずさん-punch overlay too, so a RETRY that happens to
+        // land mid-overlay never leaves lifeLossAzusanActive stuck true
+        // (which would otherwise permanently freeze the new run).
+        lifeLossAzusanActive = false
+        lifeLossAzusanElapsedMs = 0L
+        lifeLossPendingHitNumber = 0
+        lifeLossCrackFired = false
     }
 
     /**
@@ -1358,7 +1439,7 @@ class GameView @JvmOverloads constructor(
     private fun scoreText(): String = score.toString().padStart(6, '0')
 
     override fun onMoveRequested(direction: Direction) {
-        if (gameStateController.state == GameState.GAME_OVER || stageClear || stageStartActive) return
+        if (gameStateController.state == GameState.GAME_OVER || stageClear || stageStartActive || lifeLossAzusanActive) return
         if (boardLogic.movePlayer(direction)) {
             // AZUSAN-PLAYER-01: cosmetic only -- a brief WALK_<direction>
             // sprite window, purely reflecting a move that already
@@ -1387,7 +1468,7 @@ class GameView @JvmOverloads constructor(
      * looks at punch range at all anymore.
      */
     override fun onActionRequested() {
-        if (gameStateController.state == GameState.GAME_OVER || stageClear || stageStartActive) return
+        if (gameStateController.state == GameState.GAME_OVER || stageClear || stageStartActive || lifeLossAzusanActive) return
         val currentMark = markController.markedCoord
         if (currentMark != null) {
             // Logical grid coordinates are unique per QUBE, so at most
@@ -1436,7 +1517,7 @@ class GameView @JvmOverloads constructor(
      * punch range, this is simply a no-op.
      */
     override fun onPunchGestureRequested() {
-        if (gameStateController.state == GameState.GAME_OVER || stageClear || stageStartActive) return
+        if (gameStateController.state == GameState.GAME_OVER || stageClear || stageStartActive || lifeLossAzusanActive) return
         val punchIndex = qubes.indexOfFirst { isPunchRange(boardLogic.playerPosition, it.qube.coord) }
         if (punchIndex >= 0) {
             performPunch(punchIndex)
