@@ -93,6 +93,20 @@ class SoundEventPlayer(context: Context) {
         // clipping).
         const val VOLUME_AZUSAN_STEP = 0.5f
         const val VOLUME_GLASS_CRACK = 0.88f
+
+        // SOUND-QUALITY-04: the first 3 of SOUND-01A's six remaining
+        // GAME OVER-side no-ops get a real asset. Explicit hierarchy per
+        // this round's own instruction -- GAMEOVER_CAT_STEP <
+        // GAMEOVER_CAT_IMPACT < BB_STOMP -- via effective peak (asset
+        // peak * volume): STEP 0.72*0.55=0.396, IMPACT 0.75*0.65=0.488,
+        // STOMP 0.85*0.80=0.68. BB_STOMP is deliberately kept below
+        // QUBE_BREAK's own 0.765 and GLASS_CRACK's own 0.722, leaving
+        // clear headroom under 1.0 for BB_FINAL_IMPACT/GLASS_SHATTER (a
+        // future round) to read as the larger event -- BB_STOMP is not
+        // pushed to be the loudest SE in the game.
+        const val VOLUME_GAMEOVER_CAT_STEP = 0.55f
+        const val VOLUME_GAMEOVER_CAT_IMPACT = 0.65f
+        const val VOLUME_BB_STOMP = 0.80f
     }
 
     private val appContext = context.applicationContext
@@ -140,6 +154,15 @@ class SoundEventPlayer(context: Context) {
     private val azusanStepId = load(R.raw.azusan_step)
     private val glassCrackId = load(R.raw.glass_crack)
 
+    // SOUND-QUALITY-04: same procedurally-synthesized-only method as
+    // every asset above -- the next 3 of SOUND-01A's six remaining GAME
+    // OVER-side no-ops (GAMEOVER_CAT_STEP/GAMEOVER_CAT_IMPACT/BB_STOMP)
+    // get a real asset. BB_FINAL_IMPACT/GLASS_SHATTER/GAME_OVER remain
+    // deliberate no-ops below, unchanged.
+    private val gameoverCatStepId = load(R.raw.gameover_cat_step)
+    private val gameoverCatImpactId = load(R.raw.gameover_cat_impact)
+    private val bbStompId = load(R.raw.bb_stomp)
+
     private fun load(resId: Int): Int {
         val id = soundPool.load(appContext, resId, 1)
         loaded[id] = false
@@ -170,15 +193,22 @@ class SoundEventPlayer(context: Context) {
             SoundEvent.AZUSAN_STEP -> playSample(azusanStepId, VOLUME_AZUSAN_STEP)
             SoundEvent.GLASS_CRACK -> playSample(glassCrackId, VOLUME_GLASS_CRACK)
 
-            // SOUND-01A: the remaining six GAME OVER-side events stay
+            // SOUND-QUALITY-04: the まり/あんこ/あずさん run-in steps and
+            // impacts, plus BB's 4 stomps, now play real assets -- the
+            // funnel/trigger plumbing itself (GameView's own
+            // catEffectSoundSchedule, and GameOverCatEffect's own visual
+            // timing) is unchanged, exactly as SOUND-01A's own comment
+            // predicted this would work for every one of these events.
+            SoundEvent.GAMEOVER_CAT_STEP -> playSample(gameoverCatStepId, VOLUME_GAMEOVER_CAT_STEP)
+            SoundEvent.GAMEOVER_CAT_IMPACT -> playSample(gameoverCatImpactId, VOLUME_GAMEOVER_CAT_IMPACT)
+            SoundEvent.BB_STOMP -> playSample(bbStompId, VOLUME_BB_STOMP)
+
+            // SOUND-01A: the remaining three GAME OVER-finale events stay
             // deliberate no-ops for now -- out of scope this round, which
-            // is explicitly life-loss-overlay-only (AZUSAN_STEP/
-            // GLASS_CRACK above). A future SOUND round fills these in the
-            // same way (synthesize/load + playSample()) without touching
-            // any call site.
-            SoundEvent.GAMEOVER_CAT_STEP -> {}
-            SoundEvent.GAMEOVER_CAT_IMPACT -> {}
-            SoundEvent.BB_STOMP -> {}
+            // is explicitly "cat entrance through BB's 4 stomps" only. A
+            // future SOUND round fills these in the same way
+            // (synthesize/load + playSample()) without touching any call
+            // site.
             SoundEvent.BB_FINAL_IMPACT -> {}
             SoundEvent.GLASS_SHATTER -> {}
             SoundEvent.GAME_OVER -> {}
