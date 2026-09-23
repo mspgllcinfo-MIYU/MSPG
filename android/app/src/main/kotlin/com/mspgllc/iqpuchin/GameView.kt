@@ -161,19 +161,22 @@ class GameView @JvmOverloads constructor(
          * IsoProjection/recomputeLayout, both untouched), rather than only
          * after `qubes` goes empty.
          *
-         * 4 is deliberately not 0 (would spawn instantly, defeating the
-         * "avoid overlap" point below) and not close to the player's own
-         * z (would barely give any "still coming" runway before the new
-         * wave itself reaches them) -- it guarantees the new wave's z=0
-         * spawn cell can never coincide with an old QUBE still nearby (a
-         * QUBE only clears this threshold once it is already 4 cells past
-         * z=0), while the old wave still has most of its own journey left
-         * to be genuinely "still present," and the new wave still gets a
-         * full traverse of the board's own front half before reaching the
-         * player -- comfortably more than the "2-3 moves of judgment
-         * time" this round's own spec asks for.
+         * The empty gap this leaves between the old wave's front (at
+         * z=[EARLY_SPAWN_DEPTH_THRESHOLD]) and the new wave's spawn row
+         * (z=0) is [EARLY_SPAWN_DEPTH_THRESHOLD]-1 rows (the strictly-
+         * between rows z=1..threshold-1). STAGE-DESIGN-01B originally used
+         * 4 (a 3-row gap) -- real-device testing (STAGE-DESIGN-01C) found
+         * that read as too large a blank stretch, so this is now 3 (a
+         * 2-row gap, this round's own explicit "最大2段まで" ceiling).
+         * Still deliberately not 0/1 (would spawn instantly or almost so,
+         * defeating the whole "avoid overlap" point) -- 3 keeps the new
+         * wave's z=0 spawn cell guaranteed clear of the old wave (which is
+         * always at z>=3 the instant this fires), while the new wave still
+         * gets a full traverse of the board's own front half before
+         * reaching the player -- comfortably more than the "2-3 moves of
+         * judgment time" this round's own spec asks for.
          */
-        const val EARLY_SPAWN_DEPTH_THRESHOLD = 4
+        const val EARLY_SPAWN_DEPTH_THRESHOLD = 3
     }
 
     /** Pairs a [Qube] with the [QubeMotion] that advances it and the

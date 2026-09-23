@@ -50,7 +50,7 @@ jobs:
         run: |
           set -e
           SRC="app/build/outputs/apk/debug/app-debug.apk"
-          DEST="app/build/outputs/apk/debug/IQ_PUCHIN_STAGE_DESIGN_01B.apk"
+          DEST="app/build/outputs/apk/debug/IQ_PUCHIN_STAGE_DESIGN_01C.apk"
           if [ ! -f "$SRC" ]; then
             echo "Expected APK not found at $SRC"
             ls -R app/build/outputs/apk || true
@@ -62,6 +62,6 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: IQ-PUCHIN-STAGE-DESIGN-01B
-          path: android/app/build/outputs/apk/debug/IQ_PUCHIN_STAGE_DESIGN_01B.apk
+          name: IQ-PUCHIN-STAGE-DESIGN-01C
+          path: android/app/build/outputs/apk/debug/IQ_PUCHIN_STAGE_DESIGN_01C.apk
           if-no-files-found: error
