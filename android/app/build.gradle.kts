@@ -13,22 +13,22 @@ android {
         targetSdk = 34
         // AZUSAN-SIZE-TEST-01 established bumping these every round purely
         // for on-device identification (they're read by nothing in game
-        // logic). CAT-PAW-IMAGE-TITLE-01: the left stick's knob and the
-        // right ACTION button now show the two real Azusan-paw photos
-        // provided this round (fur-from-above / pad-forward) instead of
-        // the prior round's Canvas-drawn CatPawShape (deleted, now fully
-        // unused); PLAYER_GLIDE_CELLS_PER_SEC retuned 5.0f->2.5f; and the
-        // app now opens on a real title/START-wait screen (a new
-        // GameView.titleActive freeze, gated first in the frame loop's
-        // own branch chain, ahead of stageStartActive) instead of
-        // launching straight into STAGE 1 -- QUBE/player/LIFE/SCORE are
-        // all frozen until START is tapped, at which point the existing,
-        // unmodified "STAGE 1 / READY" sequence begins exactly as
-        // before. 360-degree input/movement/dead-zone/haptics, cat
-        // punch, MARK/ACTIVATE, QUBE, GAME OVER, camera, and SE are all
-        // untouched.
-        versionCode = 42
-        versionName = "0.1-CAT_PAW_IMAGE_TITLE_01"
+        // logic). CAT-PAW-UI-FIX-02: real-device feedback found the paw
+        // photos (CAT-PAW-IMAGE-TITLE-01) far too small -- the left
+        // knob's own image now fills ~87.5% of its (unchanged) ring's
+        // diameter instead of ~43.5%, and the right button's image scales
+        // with it (still ~7.5% larger than the left, was ~12.5%); no
+        // touch/input geometry changed. Also fixes a real bug: the 3-
+        // stage glass-crack overlay (a GAME-OVER-context cue that
+        // intentionally survives a stage transition) was bleeding through
+        // the STAGE CLEAR screen because its draw call never checked
+        // stageClear -- now gated on !stageClear, with zero effect on
+        // GAME OVER itself (the two states are mutually exclusive by
+        // construction). Title screen/START button, 360-degree input/
+        // movement/dead-zone/haptics, cat punch, MARK/ACTIVATE, QUBE,
+        // GAME OVER's own timing, camera, and SE are all untouched.
+        versionCode = 43
+        versionName = "0.1-CAT_PAW_UI_FIX_02"
     }
 
     // Pinned debug signing key (app/debug.keystore), checked into the repo

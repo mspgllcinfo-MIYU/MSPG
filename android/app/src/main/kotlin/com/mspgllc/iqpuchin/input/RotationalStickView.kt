@@ -72,11 +72,18 @@ class RotationalStickView @JvmOverloads constructor(
         const val RING_DIAMETER_FRACTION_OF_SCREEN_WIDTH = 0.155f
 
         /** The paw image's own drawn diameter, as a fraction of the
-         * ring's diameter above -- 42-45% per this round's spec (this is
-         * the midpoint). [PawActionButtonView] derives its own button
-         * size from this same constant (times 1.1-1.15) so the two
-         * controls' relative sizing stays anchored to one source. */
-        const val PAW_SIZE_FRACTION_OF_RING_DIAMETER = 0.435f
+         * ring's diameter above. CAT-PAW-UI-FIX-02: real-device feedback
+         * found the original 42-45% (CAT-PAW-IMAGE-TITLE-01) far too
+         * small inside the ring -- retuned to 85-90% (this is the
+         * midpoint) so the paw "fills the ring with only a small margin"
+         * per that round's own spec, with the ring itself
+         * ([RING_DIAMETER_FRACTION_OF_SCREEN_WIDTH]) deliberately left
+         * untouched -- only the paw image grows to meet it, not the
+         * other way around. [PawActionButtonView] derives its own button
+         * size from this same constant (times ~1.075, that round's own
+         * 5-10% "larger" ask) so the two controls' relative sizing stays
+         * anchored to one source. */
+        const val PAW_SIZE_FRACTION_OF_RING_DIAMETER = 0.875f
 
         /** Degrees past a 45-degree sector boundary the angle must move
          * before the haptic sector actually changes -- stops a thumb

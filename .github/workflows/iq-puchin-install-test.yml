@@ -50,7 +50,7 @@ jobs:
         run: |
           set -e
           SRC="app/build/outputs/apk/debug/app-debug.apk"
-          DEST="app/build/outputs/apk/debug/IQ_PUCHIN_CAT_PAW_IMAGE_TITLE_01.apk"
+          DEST="app/build/outputs/apk/debug/IQ_PUCHIN_CAT_PAW_UI_FIX_02.apk"
           if [ ! -f "$SRC" ]; then
             echo "Expected APK not found at $SRC"
             ls -R app/build/outputs/apk || true
@@ -62,6 +62,6 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: IQ-PUCHIN-CAT-PAW-IMAGE-TITLE-01
-          path: android/app/build/outputs/apk/debug/IQ_PUCHIN_CAT_PAW_IMAGE_TITLE_01.apk
+          name: IQ-PUCHIN-CAT-PAW-UI-FIX-02
+          path: android/app/build/outputs/apk/debug/IQ_PUCHIN_CAT_PAW_UI_FIX_02.apk
           if-no-files-found: error

@@ -1418,8 +1418,18 @@ class GameView @JvmOverloads constructor(
         // shatter phase has taken over (see isShatterActive) -- the
         // 3-stage cracks are, at that point, "the glass, now actually
         // breaking," which gameOverCatEffect.draw() itself renders.
+        // CAT-PAW-UI-FIX-02: also skipped while stageClear is true -- the
+        // crack is a GAME-OVER-context-only cue (how close the player
+        // came to dying), and crackRevealedUpTo intentionally survives a
+        // stage transition (see restartGame's own comment on why it's
+        // *not* cleared there), so without this it kept bleeding through
+        // the STAGE CLEAR overlay on real hardware. stageClear and
+        // isGameOver are mutually exclusive by construction (stageClear
+        // can only ever become true while qubes is already empty, which
+        // a GAME_OVER-causing collision requires non-empty), so this can
+        // never suppress the crack during an actual GAME OVER.
         val shatterActive = catEffectStarted && gameOverCatEffect.isShatterActive(catEffectElapsedMs)
-        if (!shatterActive) {
+        if (!shatterActive && !stageClear) {
             val crackAnimProgress = (crackAnimElapsedMs.toFloat() / GlassCrackEffect.REVEAL_DURATION_MS).coerceIn(0f, 1f)
             glassCrackEffect.draw(canvas, width, height, density, crackRevealedUpTo, crackAnimatingHit, crackAnimProgress)
         }

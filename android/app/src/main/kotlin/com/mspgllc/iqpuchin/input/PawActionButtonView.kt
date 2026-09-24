@@ -138,15 +138,17 @@ class PawActionButtonView @JvmOverloads constructor(
 
     /** This button's own drawn diameter in px -- anchored to
      * [RotationalStickView]'s own paw-knob size (same screen-width-
-     * relative formula) times 1.125 (the 10-15% "larger" this round's
-     * spec asks for, midpoint), so the two controls' relative sizing
-     * stays correct on any screen without duplicating a separate magic
-     * number here. Independent of this view's own (unchanged) touch
-     * bounds -- see [onDraw]/class doc. */
+     * relative formula, now enlarged per CAT-PAW-UI-FIX-02's own
+     * [RotationalStickView.PAW_SIZE_FRACTION_OF_RING_DIAMETER] retune)
+     * times 1.075 (CAT-PAW-UI-FIX-02's own 5-10% "larger" ask, midpoint
+     * -- was 1.125 under CAT-PAW-IMAGE-TITLE-01's looser 10-15%), so the
+     * two controls' relative sizing stays correct on any screen without
+     * duplicating a separate magic number here. Independent of this
+     * view's own (unchanged) touch bounds -- see [onDraw]/class doc. */
     private val buttonPawSizePx =
         resources.displayMetrics.widthPixels *
             RotationalStickView.RING_DIAMETER_FRACTION_OF_SCREEN_WIDTH *
-            RotationalStickView.PAW_SIZE_FRACTION_OF_RING_DIAMETER * 1.125f
+            RotationalStickView.PAW_SIZE_FRACTION_OF_RING_DIAMETER * 1.075f
 
     /** Soft outer glow, only drawn while awaiting ACTIVATE -- readable
      * at a glance even with a thumb covering the paw itself. Kept from
