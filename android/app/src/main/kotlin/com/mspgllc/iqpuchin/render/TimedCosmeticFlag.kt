@@ -28,4 +28,14 @@ class TimedCosmeticFlag(private val durationMs: Long) {
             elapsedMs = 0L
         }
     }
+
+    /** ROTATIONAL-STICK-STOP-FIX-01: ends the window immediately,
+     * bypassing [durationMs] -- for when an external event (the stick
+     * going idle) needs this cosmetic state cleared right away rather
+     * than waiting for it to expire on its own via [update]. Purely
+     * additive; [trigger]/[update]'s own behavior is unchanged. */
+    fun cancel() {
+        active = false
+        elapsedMs = 0L
+    }
 }

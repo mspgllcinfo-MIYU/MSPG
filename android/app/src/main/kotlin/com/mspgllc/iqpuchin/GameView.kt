@@ -1758,7 +1758,22 @@ class GameView @JvmOverloads constructor(
     }
 
     override fun onStickIdle() {
+        // ROTATIONAL-STICK-STOP-FIX-01: fires on both a real release
+        // (ACTION_UP/ACTION_CANCEL, via RotationalStickView.resetKnob)
+        // and a return to the dead zone (RotationalStickView.updateKnob)
+        // -- both are "STOP" per this round's spec, and both now get the
+        // exact same immediate cleanup: the glide stops advancing
+        // (stickInputActive below), the stored angle is zeroed (it's
+        // otherwise unused while inactive, but this makes "movement
+        // vector is now zero" an explicit fact rather than an implied
+        // one), and the WALK sprite window is force-ended rather than
+        // left to expire on its own over the next up to
+        // WALK_VISUAL_DURATION_MS -- previously the only thing that
+        // stopped it was its own timer, so Azusan could keep visibly
+        // "running in place" for a moment after the stick went idle.
         stickInputActive = false
+        stickAngleRad = 0f
+        walkVisual.cancel()
     }
 
     /**
@@ -1793,13 +1808,20 @@ class GameView @JvmOverloads constructor(
      */
     private fun updatePlayerGlide(deltaMs: Long) {
         if (!stickInputActive) {
-            // Idle: snap the visual position back onto the current
-            // logical cell rather than easing back, so a released stick
-            // never leaves Azusan visibly hovering off-tile -- see this
-            // round's own report for why this simpler behavior was chosen
-            // over an eased return for a first prototype.
-            playerVisualX = boardLogic.playerPosition.x.toFloat()
-            playerVisualZ = boardLogic.playerPosition.z.toFloat()
+            // ROTATIONAL-STICK-STOP-FIX-01: previously this branch force-
+            // resynced playerVisualX/Z to boardLogic.playerPosition on
+            // every idle frame -- but mid-glide, the continuous position
+            // is very often *ahead* of the last committed cell (it only
+            // commits once a boundary is crossed), so the very first
+            // idle frame after a release would snap backward by up to
+            // ~0.5 cells. That snap was the actual "doesn't stop
+            // cleanly" symptom: instead of freezing in place, Azusan
+            // visibly popped/rubber-banded back toward the last commit
+            // the instant the stick was released. Simply not touching
+            // playerVisualX/Z here freezes Azusan exactly where the
+            // glide left off -- boardLogic.playerPosition (the only
+            // thing MARK/ACTIVATE/checkCollision/isPunchRange ever read)
+            // is untouched either way, so this is purely cosmetic.
             return
         }
 

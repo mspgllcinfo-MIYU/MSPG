@@ -13,20 +13,20 @@ android {
         targetSdk = 34
         // AZUSAN-SIZE-TEST-01 established bumping these every round purely
         // for on-device identification (they're read by nothing in game
-        // logic). VIRTUAL-STICK-ROTATIONAL-PROTOTYPE-01 adds a 360-degree
-        // analog stick (RotationalStickView/RotationalMoveListener) as
-        // this build's active input default, purely to evaluate real-
-        // device operation feel: a continuous, render-only player
-        // position (GameView.playerVisualX/Z) glides diagonally on
-        // screen while BoardLogic.movePlayer is still committed one
-        // cardinal step at a time (up to two per frame for a diagonal
-        // crossing), so MARK/ACTIVATE/QUBE collision/cat punch/Stage
-        // logic all keep reading the exact same discrete GridCoord as
-        // before, completely unmodified. Camera (FRONT_ALIGNED only this
-        // round), BoardRenderer, GAME OVER sequence, SE, LIFE,
-        // STAGE_WAVES are all unchanged.
-        versionCode = 39
-        versionName = "0.1-ROTATIONAL_STICK_PROTO_01"
+        // logic). ROTATIONAL-STICK-STOP-FIX-01 fixes the rotational
+        // stick's release behavior: releasing the stick (or letting it
+        // return to its dead zone) used to force-resync the continuous
+        // playerVisualX/Z back onto boardLogic.playerPosition every idle
+        // frame, which visibly snapped Azusan up to ~half a cell
+        // backward at the moment of release (the actual "doesn't stop
+        // cleanly" symptom) and left the WALK sprite animation running
+        // for up to WALK_VISUAL_DURATION_MS afterward. Now the visual
+        // position simply freezes wherever the glide left off and the
+        // WALK window is force-cancelled immediately. The 360-degree
+        // input/movement math itself, its speed, and the stick's own
+        // dead zone/clamp/haptic tuning are all untouched.
+        versionCode = 40
+        versionName = "0.1-ROTATIONAL_STICK_STOP_FIX_01"
     }
 
     // Pinned debug signing key (app/debug.keystore), checked into the repo
