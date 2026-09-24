@@ -1432,6 +1432,15 @@ class GameView @JvmOverloads constructor(
         if (!shatterActive && !stageClear) {
             val crackAnimProgress = (crackAnimElapsedMs.toFloat() / GlassCrackEffect.REVEAL_DURATION_MS).coerceIn(0f, 1f)
             glassCrackEffect.draw(canvas, width, height, density, crackRevealedUpTo, crackAnimatingHit, crackAnimProgress)
+            // GAMEOVER-GLASS-02: mari/anko/azusan/BB's own finishing-sequence
+            // cracks -- a pure function of catEffectElapsedMs, so it needs no
+            // dedicated state here and resets for free whenever that field
+            // does (restartGame()). Same shatterActive/stageClear guard as
+            // the HIT1-3 crack layer above, since GLASS_SHATTER (6300ms)
+            // takes over the glass entirely from that point on.
+            if (catEffectStarted) {
+                glassCrackEffect.drawGameOverStage(canvas, width, height, density, catEffectElapsedMs)
+            }
         }
 
         // EFFECT-01B: まり/あんこ/あずさん rush + BB's approach/final
