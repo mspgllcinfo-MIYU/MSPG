@@ -1203,9 +1203,19 @@ class GameView @JvmOverloads constructor(
         // is active this frame.
         val axisMajor = RenderConfig.BOARD_AXIS_MAJOR_PX * displayScale
         val axisMinor = effectiveAxisMinorPx() * displayScale
-        val projection = IsoProjection(axisMajor, axisMinor, originX, originY)
+        // CAMERA-PROGRESSION-PHASE-1: IsoProjection now takes gridX's and
+        // gridZ's screenX/screenY coefficients independently; this
+        // substitution (axisXx=axisMajor, axisXy=axisMinor, axisZx=
+        // -axisMinor, axisZy=axisMajor) is algebraically identical to the
+        // old (axisMajor, axisMinor) formula for any renderMode -- see
+        // IsoProjection's own class doc. No Stage-dependent table exists
+        // yet; axisMajor/axisMinor themselves are still derived exactly as
+        // before (RenderConfig.BOARD_AXIS_MAJOR_PX / effectiveAxisMinorPx()),
+        // so with FRONT_ALIGNED active this remains Xx=90*displayScale,
+        // Xy=0, Zx=0, Zy=90*displayScale -- byte-identical to today.
+        val projection = IsoProjection(axisMajor, axisMinor, -axisMinor, axisMajor, originX, originY)
         val qubeHeightScale = RenderConfig.QUBE_VISUAL_HEIGHT_SCALE_PX * displayScale
-        val qubeProjection = IsoProjection(axisMajor, axisMinor, originX, originY, qubeHeightScale)
+        val qubeProjection = IsoProjection(axisMajor, axisMinor, -axisMinor, axisMajor, originX, originY, qubeHeightScale)
 
         boardRenderer.draw(
             canvas,

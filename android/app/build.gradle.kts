@@ -13,15 +13,19 @@ android {
         targetSdk = 34
         // AZUSAN-SIZE-TEST-01 established bumping these every round purely
         // for on-device identification (they're read by nothing in game
-        // logic). STAGE-DESIGN-02C adds Stage 11-20 to STAGE_WAVES and
-        // raises CURRENT_RELEASE_FINAL_STAGE 10->20 (design confirmed in
-        // the STAGE-DESIGN-02A/02B design-only rounds) -- Stage 1-10 data
-        // and every protected system (cat punch, GAME OVER sequence, SE,
-        // LIFE, board/camera) are unchanged. Stage 10/20's own dedicated
-        // clear presentations are a later round; this build still shows
-        // plain STAGE CLEAR at Stage 10 and the existing ALL CLEAR at 20.
-        versionCode = 36
-        versionName = "0.1-STAGE_11_20"
+        // logic). CAMERA-PROGRESSION-PHASE-1 generalizes IsoProjection from
+        // (axisMajorPx, axisMinorPx) to independent per-axis (Xx,Xy,Zx,Zy)
+        // coefficients (design confirmed in the CAMERA-PROGRESSION-AUDIT-01/
+        // DESIGN-02/DESIGN-02-FIX/DESIGN-03 design-only rounds), but still
+        // constructs it with exactly the old FRONT_ALIGNED-equivalent
+        // values for every Stage -- verified algebraically identical to the
+        // prior 2-coefficient formula for arbitrary axisMajor/axisMinor, so
+        // on-screen board position/size/lean are byte-for-byte unchanged.
+        // No Stage-dependent projection table exists yet (that is a later
+        // round); cat punch, GAME OVER sequence, SE, LIFE, STAGE_WAVES, and
+        // board/camera logic are all unchanged.
+        versionCode = 37
+        versionName = "0.1-CAMERA_PROJECTION_PHASE1"
     }
 
     // Pinned debug signing key (app/debug.keystore), checked into the repo

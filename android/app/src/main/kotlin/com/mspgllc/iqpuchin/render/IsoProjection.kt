@@ -7,35 +7,40 @@ package com.mspgllc.iqpuchin.render
  * [worldHeight] defaults to 0 (ground level) -- the floor tiles and
  * player marker never pass it; only the QUBE's toppling motion does.
  *
- * gridZ (the board's depth axis, and the direction every NORMAL QUBE
- * travels) is the *dominant* contributor to screen Y, with only a small
- * secondary contribution to screen X; gridX (the board's width axis) is
- * the dominant contributor to screen X, with only a small secondary
- * contribution to screen Y. In other words the two basis vectors are
- * gridX -> (+axisMajorPx, +axisMinorPx) and gridZ -> (-axisMinorPx,
- * +axisMajorPx). This is what makes a QUBE advancing in +gridZ move
- * almost straight down the screen (a vertical corridor) instead of the
- * 45-degree diagonal a classic mirrored 2:1 dimetric projection (both
- * axes weighted equally in both screen dimensions) produces.
+ * CAMERA-PROGRESSION-PHASE-1: gridX and gridZ each now get their own
+ * fully independent (screenX, screenY) coefficient pair --
+ * gridX -> (axisXx, axisXy) and gridZ -> (axisZx, axisZy) -- generalizing
+ * the previous single (axisMajorPx, axisMinorPx) pair (which forced the
+ * two basis vectors to always be perpendicular and equal-length, i.e. a
+ * plain rotation) so a future round can express a true non-square
+ * dimetric lean per Stage without touching this formula again. This
+ * round only ever constructs it with axisXx=axisMajorPx, axisXy=
+ * axisMinorPx, axisZx=-axisMinorPx, axisZy=axisMajorPx (see GameView's
+ * two call sites), which is *exactly* the old formula -- screenX =
+ * gridX*axisMajorPx - gridZ*axisMinorPx, screenY = gridX*axisMinorPx +
+ * gridZ*axisMajorPx -- algebraically substituted in, so every existing
+ * caller's output is unchanged.
  *
- * The small secondary ("minor") contribution on each axis is not
- * optional polish: a QUBE's RIGHT face only varies in gridZ and
+ * The small secondary ("minor"-equivalent) contribution on each axis is
+ * not optional polish: a QUBE's RIGHT face only varies in gridZ and
  * worldHeight, and its FRONT/BACK faces only vary in gridX and
  * worldHeight (see QubeRenderer) -- a face collapses to a zero-width
  * line in screen space unless its two varying axes map to non-parallel
  * screen vectors, so gridZ's screen-X term (and gridX's screen-Y term)
- * must stay non-zero.
+ * must stay non-zero whenever a lean is in effect.
  */
 class IsoProjection(
-    private val axisMajorPx: Float,
-    private val axisMinorPx: Float,
+    private val axisXx: Float,
+    private val axisXy: Float,
+    private val axisZx: Float,
+    private val axisZy: Float,
     private val originX: Float,
     private val originY: Float,
     private val heightScalePx: Float = 0f
 ) {
     fun toScreen(gridX: Float, gridZ: Float, worldHeight: Float = 0f): FloatArray {
-        val screenX = originX + gridX * axisMajorPx - gridZ * axisMinorPx
-        val screenY = originY + gridX * axisMinorPx + gridZ * axisMajorPx - worldHeight * heightScalePx
+        val screenX = originX + gridX * axisXx + gridZ * axisZx
+        val screenY = originY + gridX * axisXy + gridZ * axisZy - worldHeight * heightScalePx
         return floatArrayOf(screenX, screenY)
     }
 }
