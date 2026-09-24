@@ -12,6 +12,7 @@ import com.mspgllc.iqpuchin.R
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlin.random.Random
 
 /**
@@ -105,6 +106,26 @@ class GameOverCatEffect(context: Context) {
         private const val AFTERSHOCK_DIM_MAX_ALPHA = 90
         private const val DUST_GLINT_WINDOW_MS = 220L
         private const val EDGE_FADE_START_MS = 250L
+
+        // GAMEOVER-GLASS-VISUAL-03: real-device feedback on the frozen
+        // GAME OVER screen (only drawShatter/drawResidue/drawAftershock*
+        // are ever visible there -- GlassCrackEffect stops being drawn
+        // once shatterActive, see GameView.onDraw) was that it read as
+        // "white lines + confetti" rather than broken glass. These knobs
+        // retune alpha/spread only -- no geometry class was removed, no
+        // timing constant above was touched.
+        private const val BURST_LINE_ALPHA = 100
+        private const val RESIDUE_BURST_LINE_ALPHA = 78
+        private const val CENTER_FADE_RADIUS_FRAC = 0.10f
+        private const val SHARD_FILL_ALPHA = 85
+        private const val SHARD_EDGE_ALPHA = 130
+        private const val RESIDUE_SHARD_SPREAD = 0.40f
+        private const val RESIDUE_SHARD_FILL_ALPHA = 55
+        private const val RESIDUE_SHARD_EDGE_ALPHA = 75
+        private const val AFTERSHOCK_SHARD_ALPHA = 95
+        private const val AFTERSHOCK_EDGE_FILL_ALPHA = 90
+        private const val AFTERSHOCK_EDGE_EDGE_ALPHA = 60
+        private const val AFTERSHOCK_EDGE_LINE_ALPHA = 70
     }
 
     /** True once GAME OVER's own text/dim/TAP TO RETRY may finally show
@@ -244,13 +265,23 @@ class GameOverCatEffect(context: Context) {
     // -- Glass shatter: a deterministic (fixed-seed) shard burst, purely
     // Canvas-drawn -- no physics engine, per this round's own explicit
     // "doesn't need to be physically simulated" allowance.
+    // GAMEOVER-GLASS-VISUAL-03: sides/jitter/edgeOnly added so a shard
+    // reads as an irregular sliver of glass rather than a uniform, flat
+    // triangle -- sides picks triangle vs. quad, jitter perturbs each of
+    // that shape's own vertices (fixed at generation time, never
+    // per-frame), and edgeOnly (about 30% of shards) skips the fill
+    // entirely and draws only a thin bright edge, like a piece catching
+    // the light edge-on.
     private data class Shard(
         val angleDeg: Float,
         val distanceFrac: Float,
         val sizeFrac: Float,
         val rotationSpeedDeg: Float,
         val delayFrac: Float,
-        val large: Boolean
+        val large: Boolean,
+        val sides: Int,
+        val jitter: List<Float>,
+        val edgeOnly: Boolean
     )
 
     private val shards: List<Shard> = run {
@@ -262,8 +293,31 @@ class GameOverCatEffect(context: Context) {
                 sizeFrac = if (i < 8) 0.05f + rnd.nextFloat() * 0.05f else 0.02f + rnd.nextFloat() * 0.03f,
                 rotationSpeedDeg = (rnd.nextFloat() - 0.5f) * 720f,
                 delayFrac = rnd.nextFloat() * 0.35f,
-                large = i < 8
+                large = i < 8,
+                sides = if (rnd.nextFloat() < 0.5f) 3 else 4,
+                jitter = (0 until 4).map { 0.55f + rnd.nextFloat() * 0.5f },
+                edgeOnly = rnd.nextFloat() < 0.3f
             )
+        }
+    }
+
+    // Builds this shard's own fixed (per-shard, generated-once) silhouette
+    // -- a 3- or 4-point path with each vertex nudged by [Shard.jitter],
+    // so shards don't all read as the same stamped-out triangle.
+    private fun buildShardPath(shard: Shard, size: Float): Path {
+        val j = shard.jitter
+        return Path().apply {
+            if (shard.sides == 3) {
+                moveTo(0f, -size * j[0])
+                lineTo(size * 0.8f * j[1], size * 0.5f * j[1])
+                lineTo(-size * 0.6f * j[2], size * 0.7f * j[2])
+            } else {
+                moveTo(0f, -size * j[0])
+                lineTo(size * 0.7f * j[1], -size * 0.05f * j[1])
+                lineTo(size * 0.5f * j[2], size * 0.75f * j[2])
+                lineTo(-size * 0.65f * j[3], size * 0.35f * j[3])
+            }
+            close()
         }
     }
 
@@ -274,31 +328,62 @@ class GameOverCatEffect(context: Context) {
     // drawShatter renders, it just makes the same geometry reusable for
     // [drawResidue] below) so the post-shatter "cracks stay visible"
     // state can redraw them frozen at full length without recomputing.
-    private data class BurstLine(val angleDeg: Float, val lengthFrac: Float, val thick: Boolean)
+    // GAMEOVER-GLASS-VISUAL-03: replaced with a short, jittered, 2-4
+    // segment jagged path per direction instead of one dead-straight
+    // line -- real cracked glass doesn't radiate in perfect rays. Each
+    // line's own reachScale is randomized well below 1.0 (many stop far
+    // short of the edge) so cracks read as "some short, some longer,
+    // none reaching the frame," per this round's own instruction, and
+    // the base angle spacing keeps extra jitter on top of an odd
+    // (non-power-of-two) line count so it doesn't read as a uniformly
+    // spaced radial pattern either. Coordinates are stored as fractions
+    // of minSide relative to center, exactly like [Shard]'s own
+    // distanceFrac convention, so drawShatter/drawResidue just scale by
+    // minSide at draw time.
+    private data class BurstSegment(val x1: Float, val y1: Float, val x2: Float, val y2: Float)
+    private data class BurstLine(val segments: List<BurstSegment>, val thick: Boolean)
 
     private val burstLines: List<BurstLine> = run {
         val rnd = Random(9001)
-        val lineCount = 16
+        val lineCount = 13
         (0 until lineCount).map { i ->
-            BurstLine(
-                angleDeg = (360f / lineCount) * i + rnd.nextFloat() * 10f,
-                lengthFrac = 0.35f + rnd.nextFloat() * 0.25f,
-                thick = i % 4 == 0
-            )
+            var dir = (360f / lineCount) * i + rnd.nextFloat() * 26f - 13f
+            var x = 0f
+            var y = 0f
+            val reachScale = 0.16f + rnd.nextFloat() * 0.26f
+            val segCount = 2 + rnd.nextInt(3)
+            val segLenBase = reachScale / segCount
+            val segs = mutableListOf<BurstSegment>()
+            repeat(segCount) {
+                dir += rnd.nextFloat() * 30f - 15f
+                val len = segLenBase * (0.7f + rnd.nextFloat() * 0.6f)
+                val rad = Math.toRadians(dir.toDouble())
+                val nx = x + (cos(rad) * len).toFloat()
+                val ny = y + (sin(rad) * len).toFloat()
+                segs.add(BurstSegment(x, y, nx, ny))
+                x = nx
+                y = ny
+            }
+            BurstLine(segs, thick = i % 5 == 0)
         }
     }
 
+    // GAMEOVER-GLASS-VISUAL-03: shifted from near-opaque pure white to a
+    // pale, translucent gray-blue -- every draw site below still sets
+    // .alpha explicitly per call (these base colors' own alpha values are
+    // therefore only a fallback), but the RGB shift alone is what stops
+    // this reading as "white lines/shapes" at any opacity.
     private val shardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(230, 255, 255, 255)
+        color = Color.argb(90, 224, 228, 233)
         style = Paint.Style.FILL
     }
     private val shardEdgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(160, 200, 210, 220)
+        color = Color.argb(130, 236, 240, 244)
         style = Paint.Style.STROKE
-        strokeWidth = 1.5f
+        strokeWidth = 1.0f
     }
     private val burstPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(235, 255, 255, 255)
+        color = Color.argb(100, 220, 224, 229)
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
     }
@@ -308,17 +393,37 @@ class GameOverCatEffect(context: Context) {
         val cy = height * 0.5f
         val minSide = min(width, height).toFloat()
 
-        // Central impact -> radiating fracture (first SHATTER_BURST_MS).
+        // Central impact -> jagged radiating fracture (first
+        // SHATTER_BURST_MS), each line growing outward segment-by-segment
+        // (same reveal math as GlassCrackEffect's own drawSegments) --
+        // GAMEOVER-GLASS-VISUAL-03 also fades alpha toward the exact
+        // center (centerFade) so the crack's own origin point never
+        // competes with GAME OVER's text, which is drawn later/centered.
         val burstT = (localMs.toFloat() / SHATTER_BURST_MS).coerceIn(0f, 1f)
         if (burstT > 0f) {
             for (line in burstLines) {
-                val len = minSide * line.lengthFrac * burstT
-                val rad = Math.toRadians(line.angleDeg.toDouble())
-                val ex = cx + (cos(rad) * len).toFloat()
-                val ey = cy + (sin(rad) * len).toFloat()
-                burstPaint.strokeWidth = (if (line.thick) 3f else 1.6f) * density
-                burstPaint.alpha = (235 * (1f - burstT * 0.3f)).toInt().coerceIn(0, 235)
-                canvas.drawLine(cx, cy, ex, ey, burstPaint)
+                val segCount = line.segments.size
+                val exactRevealed = segCount * burstT
+                val revealed = exactRevealed.toInt().coerceIn(0, segCount)
+                val partial = (exactRevealed - revealed).coerceIn(0f, 1f)
+                burstPaint.strokeWidth = (if (line.thick) 1.8f else 1.0f) * density
+                for ((idx, seg) in line.segments.withIndex()) {
+                    val segProgress = when {
+                        idx < revealed -> 1f
+                        idx == revealed -> partial
+                        else -> continue
+                    }
+                    if (segProgress <= 0f) continue
+                    val x1 = cx + seg.x1 * minSide
+                    val y1 = cy + seg.y1 * minSide
+                    val x2 = cx + (seg.x1 + (seg.x2 - seg.x1) * segProgress) * minSide
+                    val y2 = cy + (seg.y1 + (seg.y2 - seg.y1) * segProgress) * minSide
+                    val mx = (seg.x1 + seg.x2) * 0.5f
+                    val my = (seg.y1 + seg.y2) * 0.5f
+                    val centerFade = (sqrt(mx * mx + my * my) / CENTER_FADE_RADIUS_FRAC).coerceIn(0f, 1f)
+                    burstPaint.alpha = (BURST_LINE_ALPHA * (1f - burstT * 0.25f) * centerFade).toInt().coerceIn(0, BURST_LINE_ALPHA)
+                    canvas.drawLine(x1, y1, x2, y2, burstPaint)
+                }
             }
         }
 
@@ -337,21 +442,18 @@ class GameOverCatEffect(context: Context) {
             val py = cy + (sin(rad) * travel).toFloat() + fallExtra
             val rotation = shard.rotationSpeedDeg * (localMs.coerceAtLeast(0L) / 1000f)
             val size = shard.sizeFrac * minSide * (1f - 0.3f * eased)
-            val alpha = ((1f - eased) * 255f).toInt().coerceIn(0, 255)
-            if (alpha <= 0) continue
+            val fadeOut = 1f - eased
+            if (fadeOut <= 0f) continue
 
             canvas.save()
             canvas.translate(px, py)
             canvas.rotate(rotation)
-            val path = Path().apply {
-                moveTo(0f, -size)
-                lineTo(size * 0.8f, size * 0.5f)
-                lineTo(-size * 0.6f, size * 0.7f)
-                close()
+            val path = buildShardPath(shard, size)
+            if (!shard.edgeOnly) {
+                shardPaint.alpha = (fadeOut * SHARD_FILL_ALPHA).toInt().coerceIn(0, SHARD_FILL_ALPHA)
+                canvas.drawPath(path, shardPaint)
             }
-            shardPaint.alpha = alpha
-            shardEdgePaint.alpha = (alpha * 0.7f).toInt()
-            canvas.drawPath(path, shardPaint)
+            shardEdgePaint.alpha = (fadeOut * SHARD_EDGE_ALPHA).toInt().coerceIn(0, SHARD_EDGE_ALPHA)
             canvas.drawPath(path, shardEdgePaint)
             canvas.restore()
         }
@@ -404,40 +506,44 @@ class GameOverCatEffect(context: Context) {
         val minSide = min(width, height).toFloat()
 
         for (line in burstLines) {
-            val len = minSide * line.lengthFrac
-            val rad = Math.toRadians(line.angleDeg.toDouble())
-            val ex = cx + (cos(rad) * len).toFloat()
-            val ey = cy + (sin(rad) * len).toFloat()
-            burstPaint.strokeWidth = (if (line.thick) 3f else 1.6f) * density
-            burstPaint.alpha = 164 // the settled alpha drawShatter's own burst lines reach once burstT=1
-            canvas.drawLine(cx, cy, ex, ey, burstPaint)
+            burstPaint.strokeWidth = (if (line.thick) 1.8f else 1.0f) * density
+            for (seg in line.segments) {
+                val x1 = cx + seg.x1 * minSide
+                val y1 = cy + seg.y1 * minSide
+                val x2 = cx + seg.x2 * minSide
+                val y2 = cy + seg.y2 * minSide
+                val mx = (seg.x1 + seg.x2) * 0.5f
+                val my = (seg.y1 + seg.y2) * 0.5f
+                val centerFade = (sqrt(mx * mx + my * my) / CENTER_FADE_RADIUS_FRAC).coerceIn(0f, 1f)
+                burstPaint.alpha = (RESIDUE_BURST_LINE_ALPHA * centerFade).toInt().coerceIn(0, RESIDUE_BURST_LINE_ALPHA)
+                canvas.drawLine(x1, y1, x2, y2, burstPaint)
+            }
         }
 
         // A handful of small fragments left stuck near the impact point
         // -- fixed positions/rotation (never flying, never spinning),
         // reusing the same shard silhouette [drawShatter] uses for its
         // own flying debris so the two visually match, but only the
-        // smaller ("not large") shards, kept close to center rather than
-        // at their [Shard.distanceFrac]*[minSide] flown-out distance.
+        // smaller ("not large") shards, spread further out than before
+        // (GAMEOVER-GLASS-VISUAL-03: RESIDUE_SHARD_SPREAD, was a tight
+        // 0.18f cluster right where GAME OVER's own text sits) and at
+        // much lower opacity.
         for (shard in shards) {
             if (shard.large) continue
             val rad = Math.toRadians(shard.angleDeg.toDouble())
-            val travel = shard.distanceFrac * minSide * 0.18f
+            val travel = shard.distanceFrac * minSide * RESIDUE_SHARD_SPREAD
             val px = cx + (cos(rad) * travel).toFloat()
             val py = cy + (sin(rad) * travel).toFloat()
             val size = shard.sizeFrac * minSide * 0.7f
             canvas.save()
             canvas.translate(px, py)
             canvas.rotate(shard.angleDeg)
-            val path = Path().apply {
-                moveTo(0f, -size)
-                lineTo(size * 0.8f, size * 0.5f)
-                lineTo(-size * 0.6f, size * 0.7f)
-                close()
+            val path = buildShardPath(shard, size)
+            if (!shard.edgeOnly) {
+                shardPaint.alpha = RESIDUE_SHARD_FILL_ALPHA
+                canvas.drawPath(path, shardPaint)
             }
-            shardPaint.alpha = 150
-            shardEdgePaint.alpha = 100
-            canvas.drawPath(path, shardPaint)
+            shardEdgePaint.alpha = RESIDUE_SHARD_EDGE_ALPHA
             canvas.drawPath(path, shardEdgePaint)
             canvas.restore()
         }
@@ -529,7 +635,7 @@ class GameOverCatEffect(context: Context) {
                 EdgeFragment(
                     xFrac = (ax + (rnd.nextFloat() - 0.5f) * 0.05f).coerceIn(0f, 1f),
                     yFrac = (ay + (rnd.nextFloat() - 0.5f) * 0.05f).coerceIn(0f, 1f),
-                    sizeFrac = 0.02f + rnd.nextFloat() * 0.03f,
+                    sizeFrac = 0.012f + rnd.nextFloat() * 0.02f,
                     rotationDeg = rnd.nextFloat() * 360f,
                     crackLine = (i + j) % 3 == 0
                 )
@@ -578,7 +684,7 @@ class GameOverCatEffect(context: Context) {
             val py = cy + (sin(rad) * travel).toFloat() + fallExtra
             val rotation = s.rotationSpeedDeg * (localMs - s.delayMs).coerceAtLeast(0L) / 1000f
             val size = s.sizeFrac * minSide * (1f - 0.2f * t)
-            val alpha = ((1f - t) * 235f).toInt().coerceIn(0, 235)
+            val alpha = ((1f - t) * AFTERSHOCK_SHARD_ALPHA).toInt().coerceIn(0, AFTERSHOCK_SHARD_ALPHA)
             if (alpha <= 0) continue
 
             canvas.save()
@@ -641,8 +747,8 @@ class GameOverCatEffect(context: Context) {
             val py = height * f.yFrac
             val size = f.sizeFrac * minSide
             if (f.crackLine) {
-                burstPaint.strokeWidth = 1.4f * density
-                burstPaint.alpha = (140 * alphaT).toInt().coerceIn(0, 140)
+                burstPaint.strokeWidth = 1.1f * density
+                burstPaint.alpha = (AFTERSHOCK_EDGE_LINE_ALPHA * alphaT).toInt().coerceIn(0, AFTERSHOCK_EDGE_LINE_ALPHA)
                 val rad = Math.toRadians(f.rotationDeg.toDouble())
                 val ex = px + (cos(rad) * size * 1.6f).toFloat()
                 val ey = py + (sin(rad) * size * 1.6f).toFloat()
@@ -657,8 +763,8 @@ class GameOverCatEffect(context: Context) {
                     lineTo(-size * 0.6f, size * 0.7f)
                     close()
                 }
-                shardPaint.alpha = (170 * alphaT).toInt().coerceIn(0, 170)
-                shardEdgePaint.alpha = (110 * alphaT).toInt().coerceIn(0, 110)
+                shardPaint.alpha = (AFTERSHOCK_EDGE_FILL_ALPHA * alphaT).toInt().coerceIn(0, AFTERSHOCK_EDGE_FILL_ALPHA)
+                shardEdgePaint.alpha = (AFTERSHOCK_EDGE_EDGE_ALPHA * alphaT).toInt().coerceIn(0, AFTERSHOCK_EDGE_EDGE_ALPHA)
                 canvas.drawPath(path, shardPaint)
                 canvas.drawPath(path, shardEdgePaint)
                 canvas.restore()

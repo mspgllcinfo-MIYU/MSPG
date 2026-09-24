@@ -13,22 +13,26 @@ android {
         targetSdk = 34
         // AZUSAN-SIZE-TEST-01 established bumping these every round purely
         // for on-device identification (they're read by nothing in game
-        // logic). GAMEOVER-AFTERSHOCK-01: the 6300-7140ms window after
-        // GLASS_SHATTER now has an "echo" -- delayed small shards/glass
-        // dust falling in after the big pieces, a modest dark vignette,
-        // and screen-edge glass residue that persists through GAME OVER
-        // -- all new, purely additive methods on GameOverCatEffect
-        // (drawAftershock/drawAftershockResidue), called from 2 new
-        // guarded one-line calls in GameView.onDraw. GameOverCatEffect's
-        // own cat-animation body, all fixed timing constants (mari 540/
-        // anko 1460/azusan 2380/BB stomps 3780-5340/BB_FINAL_IMPACT 5860/
-        // GLASS_SHATTER 6300/GAME OVER 7140), GAMEOVER-GLASS-02's own
-        // GlassCrackEffect additions, PawActionButtonView's "ムニョ" press
-        // animation, RotationalStickView, ActionInputSource, CAT PUNCH,
+        // logic). GAMEOVER-GLASS-VISUAL-03: pure visual-quality retune of
+        // the frozen GAME OVER screen (drawShatter/drawResidue/
+        // drawAftershock*, the only glass visuals ever drawn there) --
+        // straight radiating burstLines replaced with short jagged
+        // multi-segment cracks that don't all reach the edges, shard
+        // triangles gained irregular quad variants + edge-only/low-alpha
+        // rendering, all base colors shifted from near-opaque white to
+        // translucent pale gray, and a center-fade keeps crack alpha low
+        // right where "GAME OVER" is drawn. GameOverCatEffect's own
+        // timing constants (mari 540/anko 1460/azusan 2380/BB stomps
+        // 3780-5340/BB_FINAL_IMPACT 5860/GLASS_SHATTER 6300/GAME OVER
+        // 7140), cat-animation body, and aftershock time-window logic are
+        // all untouched -- geometry/alpha/stroke-width/shape only.
+        // GAMEOVER-GLASS-02's own GlassCrackEffect additions,
+        // PawActionButtonView's "ムニョ" press animation,
+        // RotationalStickView, ActionInputSource, CAT PUNCH,
         // MARK/ACTIVATE, QUBE movement, and the title/START flow are all
         // byte-for-byte untouched from GOLDEN.
-        versionCode = 47
-        versionName = "0.1-GAMEOVER_AFTERSHOCK_01"
+        versionCode = 48
+        versionName = "0.1-GAMEOVER_GLASS_VISUAL_03"
     }
 
     // Pinned debug signing key (app/debug.keystore), checked into the repo
