@@ -13,19 +13,21 @@ android {
         targetSdk = 34
         // AZUSAN-SIZE-TEST-01 established bumping these every round purely
         // for on-device identification (they're read by nothing in game
-        // logic). CAMERA-PROGRESSION-PHASE-1 generalizes IsoProjection from
-        // (axisMajorPx, axisMinorPx) to independent per-axis (Xx,Xy,Zx,Zy)
-        // coefficients (design confirmed in the CAMERA-PROGRESSION-AUDIT-01/
-        // DESIGN-02/DESIGN-02-FIX/DESIGN-03 design-only rounds), but still
-        // constructs it with exactly the old FRONT_ALIGNED-equivalent
-        // values for every Stage -- verified algebraically identical to the
-        // prior 2-coefficient formula for arbitrary axisMajor/axisMinor, so
-        // on-screen board position/size/lean are byte-for-byte unchanged.
-        // No Stage-dependent projection table exists yet (that is a later
-        // round); cat punch, GAME OVER sequence, SE, LIFE, STAGE_WAVES, and
-        // board/camera logic are all unchanged.
-        versionCode = 37
-        versionName = "0.1-CAMERA_PROJECTION_PHASE1"
+        // logic). CAMERA-PROGRESSION-PHASE-2 generalizes
+        // BoardRenderer.boardBounds()/drawTile() to the same 4-coefficient
+        // (Xx,Xy,Zx,Zy) model Phase 1 gave IsoProjection -- boardBounds now
+        // derives its margins by actually projecting the board's own
+        // corners (no assumption that any coefficient's sign is
+        // non-negative), and drawTile builds each tile's 4 corners as
+        // center +/- Xbasis/2 +/- Zbasis/2. Both are verified algebraically
+        // and numerically identical to the prior formulas for every Stage
+        // (still FRONT_ALIGNED-equivalent everywhere), so on-screen board
+        // position/size/tiling are byte-for-byte unchanged. No Stage-
+        // dependent projection table exists yet (a later round); cat
+        // punch, GAME OVER sequence, SE, LIFE, STAGE_WAVES, and board/
+        // camera game logic are all unchanged.
+        versionCode = 38
+        versionName = "0.1-CAMERA_PROJECTION_PHASE2"
     }
 
     // Pinned debug signing key (app/debug.keystore), checked into the repo

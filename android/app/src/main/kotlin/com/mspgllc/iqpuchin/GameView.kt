@@ -1159,7 +1159,21 @@ class GameView @JvmOverloads constructor(
 
     private fun recomputeLayout(w: Int, h: Int) {
         if (w <= 0 || h <= 0) return
-        val bounds = boardRenderer.boardBounds(BoardConfig.GRID_WIDTH, BoardConfig.GRID_DEPTH, effectiveAxisMinorPx())
+        // CAMERA-PROGRESSION-PHASE-2: same algebraic substitution as
+        // Phase 1's IsoProjection call sites (axisXx=major, axisXy=minor,
+        // axisZx=-minor, axisZy=major) -- boardBounds now derives its
+        // margins by actually projecting the board's own corners instead
+        // of a sign-assuming formula, but this substitution keeps it
+        // producing byte-identical bounds to before.
+        val minorPx = effectiveAxisMinorPx()
+        val bounds = boardRenderer.boardBounds(
+            BoardConfig.GRID_WIDTH,
+            BoardConfig.GRID_DEPTH,
+            RenderConfig.BOARD_AXIS_MAJOR_PX,
+            minorPx,
+            -minorPx,
+            RenderConfig.BOARD_AXIS_MAJOR_PX
+        )
 
         val topMargin = h * RenderConfig.TOP_MARGIN_FRACTION
         val bottomMargin = h * RenderConfig.BOTTOM_MARGIN_FRACTION
@@ -1217,6 +1231,10 @@ class GameView @JvmOverloads constructor(
         val qubeHeightScale = RenderConfig.QUBE_VISUAL_HEIGHT_SCALE_PX * displayScale
         val qubeProjection = IsoProjection(axisMajor, axisMinor, -axisMinor, axisMajor, originX, originY, qubeHeightScale)
 
+        // CAMERA-PROGRESSION-PHASE-2: same axisXx/axisXy/axisZx/axisZy
+        // substitution as `projection`/`bounds` above, so the drawn tile
+        // shape (BoardRenderer.drawTile) never drifts out of sync with
+        // where `projection` actually places each tile's center.
         boardRenderer.draw(
             canvas,
             projection,
@@ -1224,7 +1242,10 @@ class GameView @JvmOverloads constructor(
             BoardConfig.GRID_DEPTH,
             markController.markedCoord,
             displayScale,
-            effectiveAxisMinorPx()
+            RenderConfig.BOARD_AXIS_MAJOR_PX,
+            effectiveAxisMinorPx(),
+            -effectiveAxisMinorPx(),
+            RenderConfig.BOARD_AXIS_MAJOR_PX
         )
 
         // Painter's algorithm across QUBEs and the player together:
