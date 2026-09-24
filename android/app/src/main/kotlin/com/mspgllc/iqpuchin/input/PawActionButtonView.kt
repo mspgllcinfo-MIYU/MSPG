@@ -172,7 +172,12 @@ class PawActionButtonView @JvmOverloads constructor(
             canvas.drawCircle(cx, cy, baseRadius * 1.05f, glowRingPaint)
         }
 
-        PawShape.draw(canvas, cx, cy, baseRadius, padGold, padOutline)
+        // CAT-PAW-CONTROL-UI-01: was PawShape (the pad/toe-bean, palm-
+        // side silhouette) -- now the same "paw from above" silhouette
+        // CatPawShape gives RotationalStickView's knob, unifying the
+        // left/right controls as the same character's paw. Same
+        // padGold/padOutline Paints as before, unchanged.
+        CatPawShape.draw(canvas, cx, cy, baseRadius, padGold, padOutline)
 
         if (awaitingActivate) {
             canvas.drawCircle(cx, cy + baseRadius * 0.3f, baseRadius * 0.14f, glowCenterPaint)

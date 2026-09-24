@@ -13,20 +13,17 @@ android {
         targetSdk = 34
         // AZUSAN-SIZE-TEST-01 established bumping these every round purely
         // for on-device identification (they're read by nothing in game
-        // logic). ROTATIONAL-STICK-STOP-FIX-01 fixes the rotational
-        // stick's release behavior: releasing the stick (or letting it
-        // return to its dead zone) used to force-resync the continuous
-        // playerVisualX/Z back onto boardLogic.playerPosition every idle
-        // frame, which visibly snapped Azusan up to ~half a cell
-        // backward at the moment of release (the actual "doesn't stop
-        // cleanly" symptom) and left the WALK sprite animation running
-        // for up to WALK_VISUAL_DURATION_MS afterward. Now the visual
-        // position simply freezes wherever the glide left off and the
-        // WALK window is force-cancelled immediately. The 360-degree
-        // input/movement math itself, its speed, and the stick's own
-        // dead zone/clamp/haptic tuning are all untouched.
-        versionCode = 40
-        versionName = "0.1-ROTATIONAL_STICK_STOP_FIX_01"
+        // logic). CAT-PAW-CONTROL-UI-01 is UI visual only: RotationalStickView's
+        // knob and PawActionButtonView both now draw Azusan's paw as seen
+        // from above (fur, no pad, no claws -- a new CatPawShape helper)
+        // instead of PawShape's existing palm/pad-side silhouette (which
+        // is left untouched and still used, unmodified, by
+        // VirtualStickView's own knob). The stick's outer ring is kept
+        // but made translucent/thinner so the paw knob reads as the
+        // focus. No input/movement/haptic logic, touch-area size, or
+        // game rule changed at all this round.
+        versionCode = 41
+        versionName = "0.1-CAT_PAW_CONTROL_UI_01"
     }
 
     // Pinned debug signing key (app/debug.keystore), checked into the repo

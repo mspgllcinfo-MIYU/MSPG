@@ -70,10 +70,14 @@ class RotationalStickView @JvmOverloads constructor(
         style = Paint.Style.STROKE
         strokeWidth = 10f
     }
+    // CAT-PAW-CONTROL-UI-01: the outer ring is kept (per this round's
+    // own spec -- it still marks the control's operating bounds) but
+    // made visually weaker -- translucent and thinner than before -- so
+    // the paw knob itself is the visual focus rather than this rim.
     private val goldRimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(255, 205, 60)
+        color = Color.argb(130, 255, 205, 60)
         style = Paint.Style.STROKE
-        strokeWidth = 5f
+        strokeWidth = 2.5f
     }
     private val knobRimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.BLACK
@@ -151,8 +155,13 @@ class RotationalStickView @JvmOverloads constructor(
         canvas.drawCircle(knobCx, knobCy, knobRadius, knobFillPaint)
         canvas.drawCircle(knobCx, knobCy, knobRadius, knobRimPaint)
 
+        // CAT-PAW-CONTROL-UI-01: was PawShape (the pad/toe-bean, palm-
+        // side silhouette) -- now Azusan's paw as seen from above (fur,
+        // no pad, no claws). Same fill/outline Paints as before, so the
+        // color language (idle vs. actively-held) is unchanged; only the
+        // silhouette itself is new.
         val pawFill = if (knobActive) pawActiveFillPaint else pawIdleFillPaint
-        PawShape.draw(canvas, knobCx, knobCy, knobRadius * 0.85f, pawFill, pawOutlinePaint)
+        CatPawShape.draw(canvas, knobCx, knobCy, knobRadius * 0.85f, pawFill, pawOutlinePaint)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
