@@ -4,7 +4,7 @@ import android.app.Activity
 import android.graphics.Color
 import android.os.Bundle
 import android.view.Gravity
-import android.widget.Button
+import android.view.MotionEvent
 import android.widget.FrameLayout
 import android.widget.ImageView
 import com.mspgllc.iqpuchin.input.ActionInputSource
@@ -13,6 +13,7 @@ import com.mspgllc.iqpuchin.input.PawActionButtonView
 import com.mspgllc.iqpuchin.input.RotationalStickView
 import com.mspgllc.iqpuchin.input.SwipeInputView
 import com.mspgllc.iqpuchin.input.VirtualStickView
+import kotlin.math.min
 
 /** Sizing for the move-input controls and the single ACTION button, in dp
  * so it reads the same physical size across Galaxy devices at different
@@ -43,12 +44,59 @@ private object UiConfig {
      * whole point is "anywhere on the left side", full height. */
     const val UI_VERTICAL_CENTER_OFFSET_DP = 60
 
-    /** CAT-PAW-IMAGE-TITLE-01: the title screen's START button sits at
-     * bottom-center (Gravity.BOTTOM or CENTER_HORIZONTAL, itself already
-     * screen-size-relative), offset up from the very bottom edge by this
-     * fixed dp margin -- same sizing convention as every other control
-     * in this file. */
-    const val TITLE_START_BUTTON_BOTTOM_MARGIN_DP = 56
+    /**
+     * TITLE-SCREEN-FINAL-01: the final title art (title_qube_zero.png)
+     * has its own "START" button design baked into the image itself --
+     * these four fractions mark that design's own bounding box, measured
+     * directly against the source PNG's pixel coordinates (1672x941):
+     * the button's pill shape spans x=[532,1134] (0.318-0.678 of width)
+     * and y=[775,889] (0.824-0.945 of height), padded outward here
+     * (per this round's own "slightly larger than the drawn button"
+     * instruction) to a comfortable tap target. Fractions of the
+     * *displayed image area* (see isTouchOnTitleStart), not of the
+     * screen -- so this stays correct however the ImageView's own
+     * FIT_CENTER letterboxing lands on a given device's aspect ratio.
+     */
+    const val TITLE_START_LEFT_FRACTION = 0.30f
+    const val TITLE_START_RIGHT_FRACTION = 0.70f
+    const val TITLE_START_TOP_FRACTION = 0.79f
+    const val TITLE_START_BOTTOM_FRACTION = 0.975f
+}
+
+/**
+ * TITLE-SCREEN-FINAL-01: true iff ([touchX], [touchY]), in [view]'s own
+ * local pixel coordinates, lands within the title image's own drawn
+ * START button -- computed from [view]'s *actual displayed* image rect
+ * under FIT_CENTER (which letterboxes around the image rather than
+ * stretching it), not from the view's raw bounds, so this stays
+ * correctly aligned with the art on any screen aspect ratio. Returns
+ * false (never crashes) if the view has no measured size or drawable
+ * yet, or if the touch falls in a letterbox bar outside the image.
+ */
+private fun isTouchOnTitleStart(view: ImageView, touchX: Float, touchY: Float): Boolean {
+    val drawable = view.drawable ?: return false
+    val bitmapWidth = drawable.intrinsicWidth.toFloat()
+    val bitmapHeight = drawable.intrinsicHeight.toFloat()
+    val viewWidth = view.width.toFloat()
+    val viewHeight = view.height.toFloat()
+    if (bitmapWidth <= 0f || bitmapHeight <= 0f || viewWidth <= 0f || viewHeight <= 0f) return false
+
+    val scale = min(viewWidth / bitmapWidth, viewHeight / bitmapHeight)
+    val displayedWidth = bitmapWidth * scale
+    val displayedHeight = bitmapHeight * scale
+    val offsetX = (viewWidth - displayedWidth) / 2f
+    val offsetY = (viewHeight - displayedHeight) / 2f
+
+    if (touchX < offsetX || touchX > offsetX + displayedWidth ||
+        touchY < offsetY || touchY > offsetY + displayedHeight
+    ) {
+        return false
+    }
+
+    val fracX = (touchX - offsetX) / displayedWidth
+    val fracY = (touchY - offsetY) / displayedHeight
+    return fracX in UiConfig.TITLE_START_LEFT_FRACTION..UiConfig.TITLE_START_RIGHT_FRACTION &&
+        fracY in UiConfig.TITLE_START_TOP_FRACTION..UiConfig.TITLE_START_BOTTOM_FRACTION
 }
 
 /** SWIPE-TEST-01: which move-input control is actually wired up.
@@ -186,44 +234,48 @@ class MainActivity : Activity() {
 
         // CAT-PAW-IMAGE-TITLE-01: added last, so it's the topmost view in
         // `root` -- it fully covers and consumes every touch over every
-        // control added above (both titleImage and this container are
-        // isClickable, so a touch that misses the START button is simply
-        // absorbed here rather than falling through to
-        // RotationalStickView/PawActionButtonView/GameView underneath).
-        // GameView's own [GameView.titleActive] (frozen from
-        // construction) is the actual gameplay-side freeze; this overlay
-        // is the second, independent layer that stops a touch on the
-        // empty title image from ever reaching a control underneath.
-        // Removed entirely, once, the instant START is tapped -- never
-        // re-added, so this is strictly a first-launch-only screen (see
-        // GameView.beginPlay's own doc).
+        // control added above, so a touch that misses the title image's
+        // own drawn START button is simply absorbed here rather than
+        // falling through to RotationalStickView/PawActionButtonView/
+        // GameView underneath. GameView's own [GameView.titleActive]
+        // (frozen from construction) is the actual gameplay-side freeze;
+        // this overlay is the second, independent layer that stops a
+        // touch on the title screen from ever reaching a control
+        // underneath. Removed entirely, once, the instant START is
+        // tapped -- never re-added, so this is strictly a first-launch-
+        // only screen (see GameView.beginPlay's own doc).
+        //
+        // TITLE-SCREEN-FINAL-01: the final title art has its own "START"
+        // button fully drawn into the image (see UiConfig's doc on the
+        // measured fraction constants) -- no separate Button widget is
+        // drawn on top of it any more. Instead, titleImage's own
+        // OnTouchListener below hit-tests ACTION_UP against that drawn
+        // button's own position (via isTouchOnTitleStart, which accounts
+        // for FIT_CENTER's letterboxing), so the transparent tap region
+        // draws nothing of its own (no background/text/border/standard
+        // Button chrome) and stays visually aligned with the art on any
+        // screen aspect ratio. It still returns true unconditionally
+        // (matching isClickable's prior touch-absorbing role exactly),
+        // so a miss anywhere else on the title screen is still swallowed
+        // rather than leaking through.
         val titleImage = ImageView(this).apply {
             setImageResource(R.drawable.title_qube_zero)
             scaleType = ImageView.ScaleType.FIT_CENTER
             isClickable = true
         }
-        val startButton = Button(this).apply {
-            text = "START"
-            textSize = 22f
-        }
         val titleOverlay = FrameLayout(this).apply {
             isClickable = true
             setBackgroundColor(Color.BLACK)
             addView(titleImage, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-            addView(
-                startButton,
-                FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.WRAP_CONTENT,
-                    FrameLayout.LayoutParams.WRAP_CONTENT,
-                    Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-                ).apply {
-                    bottomMargin = (UiConfig.TITLE_START_BUTTON_BOTTOM_MARGIN_DP * density).toInt()
-                }
-            )
         }
-        startButton.setOnClickListener {
-            root.removeView(titleOverlay)
-            gameView.beginPlay()
+        titleImage.setOnTouchListener { view, event ->
+            if (event.action == MotionEvent.ACTION_UP &&
+                isTouchOnTitleStart(view as ImageView, event.x, event.y)
+            ) {
+                root.removeView(titleOverlay)
+                gameView.beginPlay()
+            }
+            true
         }
         root.addView(titleOverlay, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
 

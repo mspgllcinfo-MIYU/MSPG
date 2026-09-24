@@ -13,22 +13,22 @@ android {
         targetSdk = 34
         // AZUSAN-SIZE-TEST-01 established bumping these every round purely
         // for on-device identification (they're read by nothing in game
-        // logic). CAT-PAW-UI-FIX-02: real-device feedback found the paw
-        // photos (CAT-PAW-IMAGE-TITLE-01) far too small -- the left
-        // knob's own image now fills ~87.5% of its (unchanged) ring's
-        // diameter instead of ~43.5%, and the right button's image scales
-        // with it (still ~7.5% larger than the left, was ~12.5%); no
-        // touch/input geometry changed. Also fixes a real bug: the 3-
-        // stage glass-crack overlay (a GAME-OVER-context cue that
-        // intentionally survives a stage transition) was bleeding through
-        // the STAGE CLEAR screen because its draw call never checked
-        // stageClear -- now gated on !stageClear, with zero effect on
-        // GAME OVER itself (the two states are mutually exclusive by
-        // construction). Title screen/START button, 360-degree input/
-        // movement/dead-zone/haptics, cat punch, MARK/ACTIVATE, QUBE,
-        // GAME OVER's own timing, camera, and SE are all untouched.
-        versionCode = 43
-        versionName = "0.1-CAT_PAW_UI_FIX_02"
+        // logic). TITLE-SCREEN-FINAL-01: the title screen now shows the
+        // final title art (title_qube_zero.png replaced in place -- QUBE:
+        // ZERO logo, PUSH THINK ESCAPE, the ぷちんっ gag, Azusan, MIYU x AI,
+        // and a fully-designed START button, all baked into the image).
+        // The prior round's separate android.widget.Button is gone --
+        // tapping is now hit-tested (MainActivity.isTouchOnTitleStart)
+        // against that drawn button's own measured position, accounting
+        // for the ImageView's FIT_CENTER letterboxing, so the tap target
+        // stays aligned with the art on any screen ratio; the transparent
+        // region draws nothing of its own. Tapping it still calls the
+        // same, unmodified GameView.beginPlay(). 360-degree input/
+        // movement/dead-zone/haptics, both paw images' sizing, cat punch,
+        // MARK/ACTIVATE, QUBE, STAGE CLEAR, GAME OVER, camera, and SE are
+        // all untouched.
+        versionCode = 44
+        versionName = "0.1-TITLE_SCREEN_FINAL_01"
     }
 
     // Pinned debug signing key (app/debug.keystore), checked into the repo
