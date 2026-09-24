@@ -1,5 +1,8 @@
 package com.mspgllc.iqpuchin.input
 
+import android.animation.Keyframe
+import android.animation.PropertyValuesHolder
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -10,6 +13,8 @@ import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
+import android.view.animation.DecelerateInterpolator
+import android.view.animation.LinearInterpolator
 import com.mspgllc.iqpuchin.R
 import kotlin.math.abs
 
@@ -72,6 +77,38 @@ class PawActionButtonView @JvmOverloads constructor(
          * flick" answer shouldn't depend on which axis it's measured on.
          */
         private const val GESTURE_THRESHOLD_DP = 20f
+
+        // CAT-PAW-FEEL-03: purely visual press-feedback tuning -- none of
+        // these are read by onTouchEvent/classifyGesture, which still
+        // only ever use raw event.x/event.y and the untouched
+        // GESTURE_THRESHOLD_DP above. "ムニョッ -> ミューン -> プルンッ":
+        // a quick squash on ACTION_DOWN, then a 4-keyframe elastic
+        // recovery on release, all applied only inside onDraw's own
+        // canvas transform (see drawScaleX/drawScaleY/drawTranslateYPx) --
+        // never via real View.scaleX/scaleY/translationY properties,
+        // which Android's own touch dispatch would otherwise remap
+        // ACTION_DOWN/ACTION_UP coordinates through.
+        private const val SQUASH_DURATION_MS = 70L
+        private const val SQUASH_SCALE_X = 1.15f
+        private const val SQUASH_SCALE_Y = 0.75f
+        private const val SQUASH_SINK_DP = 5f
+
+        private const val RECOVER_DURATION_MS = 220L
+        // "1 ミューン" -- overshoots past 1.0 the other way from the
+        // squash (wider->taller) before settling.
+        private const val RECOVER_KF1_FRACTION = 0.35f
+        private const val RECOVER_KF1_SCALE_X = 0.94f
+        private const val RECOVER_KF1_SCALE_Y = 1.12f
+        // "2 プルン" -- a second, smaller overshoot back the other way.
+        private const val RECOVER_KF2_FRACTION = 0.60f
+        private const val RECOVER_KF2_SCALE_X = 1.05f
+        private const val RECOVER_KF2_SCALE_Y = 0.97f
+        // "3 小さな揺り戻し" -- a barely-there final wobble.
+        private const val RECOVER_KF3_FRACTION = 0.82f
+        private const val RECOVER_KF3_SCALE_X = 0.98f
+        private const val RECOVER_KF3_SCALE_Y = 1.02f
+        // "4 REST" -- scaleX=scaleY=1, translateY=0 -- the animator's own
+        // final keyframe (fraction 1f) below, not a separate constant.
     }
 
     private val gestureThresholdPx = GESTURE_THRESHOLD_DP * resources.displayMetrics.density
@@ -117,6 +154,106 @@ class PawActionButtonView @JvmOverloads constructor(
      * [classifyGesture]). */
     private var downX = 0f
     private var downY = 0f
+
+    private val density = resources.displayMetrics.density
+
+    // CAT-PAW-FEEL-03: the paw's current drawn squash/stretch/sink,
+    // applied only inside onDraw's own canvas.scale/translate (never a
+    // real View property) -- see the companion constants' own doc for
+    // why. [onDraw] reads these every frame it's invalidated; nothing
+    // else in this class reads them.
+    private var drawScaleX = 1f
+    private var drawScaleY = 1f
+    private var drawTranslateYPx = 0f
+    private var pressAnimator: ValueAnimator? = null
+
+    /** ACTION_DOWN, or a MOVE that re-enters the button's own bounds
+     * while still down -- animates [drawScaleX]/[drawScaleY]/
+     * [drawTranslateYPx] from wherever they currently are to the "ムニョ"
+     * squash target over [SQUASH_DURATION_MS], never touching touch
+     * coordinates/[pressed]/[downX]/[downY] at all. */
+    private fun startSquashAnimation() {
+        pressAnimator?.cancel()
+        val fromScaleX = drawScaleX
+        val fromScaleY = drawScaleY
+        val fromTranslate = drawTranslateYPx
+        val sinkPx = SQUASH_SINK_DP * density
+        val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = SQUASH_DURATION_MS
+            interpolator = DecelerateInterpolator()
+            addUpdateListener { anim ->
+                val t = anim.animatedValue as Float
+                drawScaleX = fromScaleX + (SQUASH_SCALE_X - fromScaleX) * t
+                drawScaleY = fromScaleY + (SQUASH_SCALE_Y - fromScaleY) * t
+                drawTranslateYPx = fromTranslate + (sinkPx - fromTranslate) * t
+                invalidate()
+            }
+        }
+        pressAnimator = animator
+        animator.start()
+    }
+
+    /** ACTION_UP/ACTION_CANCEL, or a MOVE that leaves the button's own
+     * bounds while still down -- plays the four-stage "ミューン -> プルン
+     * -> 小さな揺り戻し -> REST" elastic recovery over
+     * [RECOVER_DURATION_MS], starting from wherever [drawScaleX]/
+     * [drawScaleY]/[drawTranslateYPx] currently are (so a release mid-
+     * squash still recovers smoothly, never popping). Purely visual --
+     * [onTouchEvent] fires [onPunchGesture]/[onTapClick] synchronously,
+     * independent of this animator, so gameplay response is never
+     * delayed by it. */
+    private fun startRecoverAnimation() {
+        pressAnimator?.cancel()
+        val startScaleX = drawScaleX
+        val startScaleY = drawScaleY
+        val startTranslate = drawTranslateYPx
+
+        val scaleXHolder = PropertyValuesHolder.ofKeyframe(
+            "scaleX",
+            Keyframe.ofFloat(0f, startScaleX),
+            Keyframe.ofFloat(RECOVER_KF1_FRACTION, RECOVER_KF1_SCALE_X),
+            Keyframe.ofFloat(RECOVER_KF2_FRACTION, RECOVER_KF2_SCALE_X),
+            Keyframe.ofFloat(RECOVER_KF3_FRACTION, RECOVER_KF3_SCALE_X),
+            Keyframe.ofFloat(1f, 1f)
+        )
+        val scaleYHolder = PropertyValuesHolder.ofKeyframe(
+            "scaleY",
+            Keyframe.ofFloat(0f, startScaleY),
+            Keyframe.ofFloat(RECOVER_KF1_FRACTION, RECOVER_KF1_SCALE_Y),
+            Keyframe.ofFloat(RECOVER_KF2_FRACTION, RECOVER_KF2_SCALE_Y),
+            Keyframe.ofFloat(RECOVER_KF3_FRACTION, RECOVER_KF3_SCALE_Y),
+            Keyframe.ofFloat(1f, 1f)
+        )
+        // translateY has no explicit per-stage numbers in this round's
+        // spec (only "REST: translationY=0") -- eases back across the
+        // same keyframe timeline, with a small upward overshoot around
+        // the "プルン" stage for a touch of bounce, proportional to
+        // whatever sink distance it's actually recovering from (0 if
+        // released without ever squashing).
+        val translateHolder = PropertyValuesHolder.ofKeyframe(
+            "translateY",
+            Keyframe.ofFloat(0f, startTranslate),
+            Keyframe.ofFloat(RECOVER_KF1_FRACTION, startTranslate * 0.3f),
+            Keyframe.ofFloat(RECOVER_KF2_FRACTION, -abs(startTranslate) * 0.12f),
+            Keyframe.ofFloat(RECOVER_KF3_FRACTION, startTranslate * 0.06f),
+            Keyframe.ofFloat(1f, 0f)
+        )
+        val animator = ValueAnimator.ofPropertyValuesHolder(scaleXHolder, scaleYHolder, translateHolder).apply {
+            duration = RECOVER_DURATION_MS
+            // The keyframes above already encode the overshoot/settle
+            // shape; a linear interpolator between them keeps that shape
+            // exact rather than doubling up on easing.
+            interpolator = LinearInterpolator()
+            addUpdateListener { anim ->
+                drawScaleX = anim.getAnimatedValue("scaleX") as Float
+                drawScaleY = anim.getAnimatedValue("scaleY") as Float
+                drawTranslateYPx = anim.getAnimatedValue("translateY") as Float
+                invalidate()
+            }
+        }
+        pressAnimator = animator
+        animator.start()
+    }
 
     init {
         isClickable = true
@@ -176,13 +313,15 @@ class PawActionButtonView @JvmOverloads constructor(
             canvas.drawCircle(cx, cy, buttonPawSizePx * 0.58f, glowRingPaint)
         }
 
-        // "Muniっと押した感覚": the whole paw photo visibly sinks/shrinks
-        // while held -- same pressScale mechanism/value as before
-        // CAT-PAW-IMAGE-TITLE-01, just now applied to the bitmap draw
-        // instead of the old Canvas paw shape.
-        val pressScale = if (pressed) 0.88f else 1f
+        // CAT-PAW-FEEL-03: "ムニョッ -> ミューン -> プルンッ" -- drawScaleX/
+        // drawScaleY/drawTranslateYPx are animated by startSquashAnimation/
+        // startRecoverAnimation (see onTouchEvent), never a flat step
+        // value. translate happens first so the already-squashed paw
+        // shifts down as a whole; scale pivots on the view's own static
+        // center (cx, cy), never the touch point.
         canvas.save()
-        canvas.scale(pressScale, pressScale, cx, cy)
+        canvas.translate(0f, drawTranslateYPx)
+        canvas.scale(drawScaleX, drawScaleY, cx, cy)
 
         val aspect = pawBitmap.width.toFloat() / pawBitmap.height.toFloat()
         val dstW = if (aspect >= 1f) buttonPawSizePx else buttonPawSizePx * aspect
@@ -234,20 +373,31 @@ class PawActionButtonView @JvmOverloads constructor(
                 downX = event.x
                 downY = event.y
                 pressed = true
-                invalidate()
+                startSquashAnimation()
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
+                // CAT-PAW-FEEL-03: still the exact same in/out-of-bounds
+                // check as before, over the same untouched view width/
+                // height -- only what it now triggers (an animation
+                // instead of a flat pressScale flip) changed. Never reads
+                // dx/dy or touches downX/downY/gesture classification.
                 val inside = event.x >= 0 && event.x <= width && event.y >= 0 && event.y <= height
                 if (pressed != inside) {
                     pressed = inside
-                    invalidate()
+                    if (pressed) startSquashAnimation() else startRecoverAnimation()
                 }
                 return true
             }
             MotionEvent.ACTION_UP -> {
                 pressed = false
-                invalidate()
+                startRecoverAnimation()
+                // CAT-PAW-FEEL-03: dx/dy and classifyGesture below are
+                // byte-for-byte the same computation as before this round
+                // -- the recovery animation above only ever writes
+                // drawScaleX/drawScaleY/drawTranslateYPx (onDraw-only
+                // state), so it can never delay or alter this gesture
+                // outcome, which still fires synchronously right here.
                 val dx = event.x - downX
                 val dy = event.y - downY
                 when (classifyGesture(dx, dy)) {
@@ -259,7 +409,7 @@ class PawActionButtonView @JvmOverloads constructor(
             }
             MotionEvent.ACTION_CANCEL -> {
                 pressed = false
-                invalidate()
+                startRecoverAnimation()
                 return true
             }
         }

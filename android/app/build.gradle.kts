@@ -13,22 +13,22 @@ android {
         targetSdk = 34
         // AZUSAN-SIZE-TEST-01 established bumping these every round purely
         // for on-device identification (they're read by nothing in game
-        // logic). TITLE-SCREEN-FINAL-01: the title screen now shows the
-        // final title art (title_qube_zero.png replaced in place -- QUBE:
-        // ZERO logo, PUSH THINK ESCAPE, the ぷちんっ gag, Azusan, MIYU x AI,
-        // and a fully-designed START button, all baked into the image).
-        // The prior round's separate android.widget.Button is gone --
-        // tapping is now hit-tested (MainActivity.isTouchOnTitleStart)
-        // against that drawn button's own measured position, accounting
-        // for the ImageView's FIT_CENTER letterboxing, so the tap target
-        // stays aligned with the art on any screen ratio; the transparent
-        // region draws nothing of its own. Tapping it still calls the
-        // same, unmodified GameView.beginPlay(). 360-degree input/
-        // movement/dead-zone/haptics, both paw images' sizing, cat punch,
-        // MARK/ACTIVATE, QUBE, STAGE CLEAR, GAME OVER, camera, and SE are
-        // all untouched.
-        versionCode = 44
-        versionName = "0.1-TITLE_SCREEN_FINAL_01"
+        // logic). CAT-PAW-FEEL-03: PawActionButtonView's press feedback
+        // is now a multi-stage "ムニョッ -> ミューン -> プルンッ" elastic
+        // squash-and-recover (ValueAnimator-driven scaleX/scaleY/sink,
+        // applied only inside onDraw's own canvas transform -- never a
+        // real View.scaleX/scaleY/translationY, so Android's touch-event
+        // coordinate remapping is never involved) instead of the old flat
+        // 0.88x step. onTouchEvent's own ACTION_DOWN/MOVE/UP/CANCEL
+        // coordinate handling, dx/dy computation, classifyGesture, and
+        // GESTURE_THRESHOLD_DP (still 20dp) are all byte-for-byte
+        // unchanged from GOLDEN -- gesture classification and
+        // onPunchGesture/onTapClick still fire synchronously in
+        // onTouchEvent, never gated by or waiting on the animation.
+        // RotationalStickView, GameView (CAT PUNCH/MARK/ACTIVATE/QUBE
+        // logic), MainActivity, and GAME OVER are all untouched.
+        versionCode = 45
+        versionName = "0.1-CAT_PAW_FEEL_03"
     }
 
     // Pinned debug signing key (app/debug.keystore), checked into the repo
