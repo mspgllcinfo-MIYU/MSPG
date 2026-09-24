@@ -13,17 +13,22 @@ android {
         targetSdk = 34
         // AZUSAN-SIZE-TEST-01 established bumping these every round purely
         // for on-device identification (they're read by nothing in game
-        // logic). CAT-PAW-CONTROL-UI-01 is UI visual only: RotationalStickView's
-        // knob and PawActionButtonView both now draw Azusan's paw as seen
-        // from above (fur, no pad, no claws -- a new CatPawShape helper)
-        // instead of PawShape's existing palm/pad-side silhouette (which
-        // is left untouched and still used, unmodified, by
-        // VirtualStickView's own knob). The stick's outer ring is kept
-        // but made translucent/thinner so the paw knob reads as the
-        // focus. No input/movement/haptic logic, touch-area size, or
-        // game rule changed at all this round.
-        versionCode = 41
-        versionName = "0.1-CAT_PAW_CONTROL_UI_01"
+        // logic). CAT-PAW-IMAGE-TITLE-01: the left stick's knob and the
+        // right ACTION button now show the two real Azusan-paw photos
+        // provided this round (fur-from-above / pad-forward) instead of
+        // the prior round's Canvas-drawn CatPawShape (deleted, now fully
+        // unused); PLAYER_GLIDE_CELLS_PER_SEC retuned 5.0f->2.5f; and the
+        // app now opens on a real title/START-wait screen (a new
+        // GameView.titleActive freeze, gated first in the frame loop's
+        // own branch chain, ahead of stageStartActive) instead of
+        // launching straight into STAGE 1 -- QUBE/player/LIFE/SCORE are
+        // all frozen until START is tapped, at which point the existing,
+        // unmodified "STAGE 1 / READY" sequence begins exactly as
+        // before. 360-degree input/movement/dead-zone/haptics, cat
+        // punch, MARK/ACTIVATE, QUBE, GAME OVER, camera, and SE are all
+        // untouched.
+        versionCode = 42
+        versionName = "0.1-CAT_PAW_IMAGE_TITLE_01"
     }
 
     // Pinned debug signing key (app/debug.keystore), checked into the repo

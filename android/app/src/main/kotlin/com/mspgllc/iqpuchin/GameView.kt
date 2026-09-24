@@ -100,8 +100,14 @@ class GameView @JvmOverloads constructor(
          * keeping the WALK pose continuously shown rather than flickering
          * back to IDLE between steps. Applies only to this prototype's
          * continuous glide -- BoardLogic/Qube speed/every other input
-         * method's own movement timing is completely untouched. */
-        const val PLAYER_GLIDE_CELLS_PER_SEC = 5.0f
+         * method's own movement timing is completely untouched.
+         * CAT-PAW-IMAGE-TITLE-01 retunes this from 5.0f to 2.5f (400ms/
+         * cell instead of 200ms/cell) per real-device feedback that the
+         * glide felt too fast -- deadzone/input-angle/STOP handling/
+         * haptics and QUBE speed are all untouched; only how fast the
+         * continuous visual position advances per held-stick second
+         * changes. */
+        const val PLAYER_GLIDE_CELLS_PER_SEC = 2.5f
 
         /** How long after entering GAME_OVER before [onTouchEvent] will
          * accept a RETRY tap -- see that method and the frame loop's
@@ -803,6 +809,17 @@ class GameView @JvmOverloads constructor(
     private var stageStartActive = false
     private var stageStartElapsedMs = 0L
 
+    // CAT-PAW-IMAGE-TITLE-01: a fourth, GameView-only freeze state --
+    // same "checked first in the frame loop's own branch chain, gates
+    // everything below it" pattern stageStartActive/lifeLossAzusanActive/
+    // isGameOver/stageClear already establish, never merged into
+    // GameState/GameStateController. True only from construction until
+    // [beginPlay] is called (by MainActivity's title-screen START button,
+    // the only caller) -- resetBoardAndVisuals() (RETRY/PLAY AGAIN/NEXT)
+    // never touches it, so the title screen is strictly a first-launch-
+    // only state and can never reappear later in the same run.
+    private var titleActive = true
+
     // STAGE-DESIGN-01: spawns Stage 1's own wave 0 -- replaces the old
     // `qubes = createInitialQubes()` field initializer. Placed here
     // (rather than as qubes' own initializer) because it needs
@@ -982,15 +999,30 @@ class GameView @JvmOverloads constructor(
             // non-empty qubes list) -- the two conditions are mutually
             // exclusive, not prioritized against each other.
             val isGameOver = gameStateController.state == GameState.GAME_OVER
-            // PRESENTATION-01: stageStartActive freezes play before either
-            // of the other two checks even run -- QUBE motion, collision,
-            // and every cosmetic timer below are completely skipped for
-            // STAGE_START_DISPLAY_MS, so the player can never be hit or
-            // lose a QUBE while "STAGE n / READY" is on screen. Nothing
-            // about QUBE speed/Wave timing/EARLY_SPAWN_DEPTH_THRESHOLD
-            // changes -- this only delays when the already-frozen board
-            // starts advancing.
-            if (stageStartActive) {
+            // CAT-PAW-IMAGE-TITLE-01: titleActive freezes everything
+            // before even stageStartActive is checked -- literally
+            // nothing in this whole if/else-if chain runs while it's
+            // true, so QUBE motion/player glide/collision/every cosmetic
+            // timer/GameStateController.update all stay exactly as
+            // beginStageWaves() (called once, from init) left them:
+            // wave 0 already spawned, stageStartActive already true,
+            // stageStartElapsedMs still 0. The instant beginPlay() flips
+            // this false (see that method), the very next frame falls
+            // through to the unmodified stageStartActive branch below,
+            // which starts timing the existing "STAGE 1 / READY"
+            // sequence from zero -- beginStageWaves/stageStartActive
+            // themselves are untouched by this round.
+            if (titleActive) {
+                // Frozen: intentionally empty.
+            } else if (stageStartActive) {
+                // PRESENTATION-01: stageStartActive freezes play before
+                // either of the other two checks even run -- QUBE motion,
+                // collision, and every cosmetic timer below are completely
+                // skipped for STAGE_START_DISPLAY_MS, so the player can
+                // never be hit or lose a QUBE while "STAGE n / READY" is
+                // on screen. Nothing about QUBE speed/Wave timing/
+                // EARLY_SPAWN_DEPTH_THRESHOLD changes -- this only delays
+                // when the already-frozen board starts advancing.
                 stageStartElapsedMs += deltaMs
                 if (stageStartElapsedMs >= STAGE_START_DISPLAY_MS) {
                     stageStartActive = false
@@ -1733,7 +1765,7 @@ class GameView @JvmOverloads constructor(
     private fun scoreText(): String = score.toString().padStart(6, '0')
 
     override fun onMoveRequested(direction: Direction) {
-        if (gameStateController.state == GameState.GAME_OVER || stageClear || stageStartActive || lifeLossAzusanActive) return
+        if (gameStateController.state == GameState.GAME_OVER || stageClear || stageStartActive || lifeLossAzusanActive || titleActive) return
         if (boardLogic.movePlayer(direction)) {
             // AZUSAN-PLAYER-01: cosmetic only -- a brief WALK_<direction>
             // sprite window, purely reflecting a move that already
@@ -1774,6 +1806,19 @@ class GameView @JvmOverloads constructor(
         stickInputActive = false
         stickAngleRad = 0f
         walkVisual.cancel()
+    }
+
+    /**
+     * CAT-PAW-IMAGE-TITLE-01: called exactly once, by MainActivity's
+     * title-screen START button -- the sole place [titleActive] is ever
+     * set false. Not part of [InputActionListener]/[RotationalMoveListener]
+     * (no other caller exists, so a shared interface would be unneeded
+     * indirection); MainActivity holds its own `gameView` reference and
+     * calls this directly, then removes its title overlay in the same
+     * click handler.
+     */
+    fun beginPlay() {
+        titleActive = false
     }
 
     /**
@@ -1916,7 +1961,7 @@ class GameView @JvmOverloads constructor(
      * looks at punch range at all anymore.
      */
     override fun onActionRequested() {
-        if (gameStateController.state == GameState.GAME_OVER || stageClear || stageStartActive || lifeLossAzusanActive) return
+        if (gameStateController.state == GameState.GAME_OVER || stageClear || stageStartActive || lifeLossAzusanActive || titleActive) return
         val currentMark = markController.markedCoord
         if (currentMark != null) {
             // Logical grid coordinates are unique per QUBE, so at most
@@ -1975,7 +2020,7 @@ class GameView @JvmOverloads constructor(
      * clause, per this round's own explicit scope.
      */
     override fun onPunchGestureRequested() {
-        if (gameStateController.state == GameState.GAME_OVER || stageClear || stageStartActive) return
+        if (gameStateController.state == GameState.GAME_OVER || stageClear || stageStartActive || titleActive) return
         val punchIndex = qubes.indexOfFirst { isPunchRange(boardLogic.playerPosition, it.qube.coord) }
         if (punchIndex >= 0) {
             performPunch(punchIndex)

@@ -1,15 +1,17 @@
 package com.mspgllc.iqpuchin.input
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.RadialGradient
-import android.graphics.Shader
+import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
+import com.mspgllc.iqpuchin.R
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.hypot
@@ -29,6 +31,16 @@ import kotlin.math.roundToInt
  * Dead zone: [DEAD_ZONE_FRACTION] of the base radius, per this round's
  * own spec -- inside it, no vector is reported and [listener]'s
  * onStickIdle() fires instead.
+ *
+ * CAT-PAW-IMAGE-TITLE-01: the knob is now the real
+ * `azusan_paw_back` photo (Azusan's paw as seen from above -- fur, no
+ * pad, no claws) instead of a Canvas-drawn silhouette -- drawn upright,
+ * never rotated, only translated. The touch-detection geometry (view
+ * bounds, dead zone, angle math) is completely unchanged from before;
+ * only the drawn ring/knob's own on-screen *size* now comes from
+ * [ringRadiusPx]/[pawSizePx] (screen-width-relative, much smaller and
+ * cuter than the old view-filling dish) -- see those fields' own docs
+ * for exactly what does and doesn't change as a result.
  */
 class RotationalStickView @JvmOverloads constructor(
     context: Context,
@@ -37,14 +49,34 @@ class RotationalStickView @JvmOverloads constructor(
 
     companion object {
         /** Touch distance (fraction of base radius) treated as dead --
-         * no vector is reported, no haptic, no movement below this. */
+         * no vector is reported, no haptic, no movement below this.
+         * Still measured against the view's own (unchanged) touch
+         * bounds -- see [updateKnob] -- never against [ringRadiusPx]. */
         const val DEAD_ZONE_FRACTION = 0.22f
 
-        /** Knob's own max visual travel (fraction of base radius) -- per
-         * this round's own spec, distinct from VirtualStickView's 0.85f.
-         * The raw input angle is unaffected by this clamp; only the
-         * drawn knob position is clamped. */
+        /** Knob's own max *visual* travel (fraction of [ringRadiusPx]).
+         * CAT-PAW-IMAGE-TITLE-01 re-bases this fraction from the old
+         * (large) touch-view radius onto the new (small) visual ring
+         * radius, so the drawn paw now visually maxes out within its own
+         * small ring rather than the old big dish -- this only changes
+         * how far the *drawn* knob travels in pixels; the raw input
+         * angle reported to [listener] is never clamped by this at all,
+         * and neither is the dead zone (still touch-view-based, above),
+         * so 360-degree input/movement/haptics are unaffected. */
         const val MAX_KNOB_FRACTION = 0.72f
+
+        /** The visual stick's own outer diameter, as a fraction of the
+         * device's screen width -- 15-16% per this round's spec (this is
+         * the midpoint). Deliberately independent of the touch view's
+         * own (much larger, unchanged) size -- see class doc. */
+        const val RING_DIAMETER_FRACTION_OF_SCREEN_WIDTH = 0.155f
+
+        /** The paw image's own drawn diameter, as a fraction of the
+         * ring's diameter above -- 42-45% per this round's spec (this is
+         * the midpoint). [PawActionButtonView] derives its own button
+         * size from this same constant (times 1.1-1.15) so the two
+         * controls' relative sizing stays anchored to one source. */
+        const val PAW_SIZE_FRACTION_OF_RING_DIAMETER = 0.435f
 
         /** Degrees past a 45-degree sector boundary the angle must move
          * before the haptic sector actually changes -- stops a thumb
@@ -65,42 +97,40 @@ class RotationalStickView @JvmOverloads constructor(
         this.listener = listener
     }
 
-    private val dishInnerShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(90, 0, 0, 0)
-        style = Paint.Style.STROKE
-        strokeWidth = 10f
-    }
-    // CAT-PAW-CONTROL-UI-01: the outer ring is kept (per this round's
+    /** CAT-PAW-IMAGE-TITLE-01: the provided "fur/knuckle side" paw photo
+     * -- loaded once (never re-decoded per frame), same
+     * `inScaled = false` convention [render.PlayerSpriteSheet] already
+     * established for res/drawable-nodpi art. */
+    private val pawBitmap: Bitmap = BitmapFactory.decodeResource(
+        context.resources, R.drawable.azusan_paw_back, BitmapFactory.Options().apply { inScaled = false }
+    )
+    private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val reusableDst = RectF()
+
+    /** The visual ring's own radius in px -- screen-width-relative (see
+     * [RING_DIAMETER_FRACTION_OF_SCREEN_WIDTH]), computed once since
+     * screen width doesn't change over this view's lifetime. */
+    private val ringRadiusPx =
+        resources.displayMetrics.widthPixels * RING_DIAMETER_FRACTION_OF_SCREEN_WIDTH / 2f
+
+    /** The drawn paw image's own diameter in px -- see
+     * [PAW_SIZE_FRACTION_OF_RING_DIAMETER]. */
+    private val pawSizePx = ringRadiusPx * 2f * PAW_SIZE_FRACTION_OF_RING_DIAMETER
+
+    // CAT-PAW-CONTROL-UI-01: the outer ring is kept (per that round's
     // own spec -- it still marks the control's operating bounds) but
     // made visually weaker -- translucent and thinner than before -- so
     // the paw knob itself is the visual focus rather than this rim.
+    // CAT-PAW-IMAGE-TITLE-01 only changes what radius this is drawn at
+    // (see onDraw/[ringRadiusPx]), not this Paint itself.
     private val goldRimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.argb(130, 255, 205, 60)
-        style = Paint.Style.STROKE
-        strokeWidth = 2.5f
-    }
-    private val knobRimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.BLACK
-        style = Paint.Style.STROKE
-        strokeWidth = 3f
-    }
-    private val pawIdleFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(140, 110, 20)
-        style = Paint.Style.FILL
-    }
-    private val pawActiveFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(255, 214, 51)
-        style = Paint.Style.FILL
-    }
-    private val pawOutlinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(40, 30, 10)
         style = Paint.Style.STROKE
         strokeWidth = 2.5f
     }
 
     private var knobOffsetX = 0f
     private var knobOffsetY = 0f
-    private var knobActive = false
 
     /** Null while centered/in the dead zone; otherwise the currently
      * "committed" 45-degree sector center (0/45/90/.../315), used only
@@ -118,50 +148,26 @@ class RotationalStickView @JvmOverloads constructor(
         super.onDraw(canvas)
         val cx = width / 2f
         val cy = height / 2f
-        val baseRadius = min(width, height) / 2f
-        drawBase(canvas, cx, cy, baseRadius)
-        drawKnob(canvas, cx, cy, baseRadius)
+        // CAT-PAW-IMAGE-TITLE-01: the big Canvas-drawn dark dish is gone
+        // entirely -- only a thin translucent ring (unchanged Paint, new
+        // smaller radius) plus the paw photo itself remain.
+        canvas.drawCircle(cx, cy, ringRadiusPx, goldRimPaint)
+        drawPawKnob(canvas, cx, cy)
     }
 
-    private fun drawBase(canvas: Canvas, cx: Float, cy: Float, r: Float) {
-        val dishPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.FILL
-            shader = RadialGradient(
-                cx, cy, r,
-                intArrayOf(Color.rgb(8, 8, 10), Color.rgb(42, 40, 36)),
-                floatArrayOf(0f, 1f),
-                Shader.TileMode.CLAMP
-            )
-        }
-        canvas.drawCircle(cx, cy, r, dishPaint)
-        canvas.drawCircle(cx, cy, r * 0.9f, dishInnerShadowPaint)
-        canvas.drawCircle(cx, cy, r, goldRimPaint)
-    }
-
-    private fun drawKnob(canvas: Canvas, cx: Float, cy: Float, baseRadius: Float) {
-        val knobRadius = baseRadius * 0.42f
+    /** Draws [pawBitmap] centered on the current knob offset, upright
+     * and never rotated (per this round's own spec) -- sized to
+     * [pawSizePx] while preserving the source photo's own aspect ratio
+     * (it happens to be ~1:1, so this is effectively square) rather than
+     * stretching it. */
+    private fun drawPawKnob(canvas: Canvas, cx: Float, cy: Float) {
         val knobCx = cx + knobOffsetX
         val knobCy = cy + knobOffsetY
-
-        val knobFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.FILL
-            shader = RadialGradient(
-                knobCx - knobRadius * 0.3f, knobCy - knobRadius * 0.3f, knobRadius * 1.4f,
-                intArrayOf(Color.rgb(60, 58, 54), Color.rgb(14, 13, 12)),
-                floatArrayOf(0f, 1f),
-                Shader.TileMode.CLAMP
-            )
-        }
-        canvas.drawCircle(knobCx, knobCy, knobRadius, knobFillPaint)
-        canvas.drawCircle(knobCx, knobCy, knobRadius, knobRimPaint)
-
-        // CAT-PAW-CONTROL-UI-01: was PawShape (the pad/toe-bean, palm-
-        // side silhouette) -- now Azusan's paw as seen from above (fur,
-        // no pad, no claws). Same fill/outline Paints as before, so the
-        // color language (idle vs. actively-held) is unchanged; only the
-        // silhouette itself is new.
-        val pawFill = if (knobActive) pawActiveFillPaint else pawIdleFillPaint
-        CatPawShape.draw(canvas, knobCx, knobCy, knobRadius * 0.85f, pawFill, pawOutlinePaint)
+        val aspect = pawBitmap.width.toFloat() / pawBitmap.height.toFloat()
+        val dstW = if (aspect >= 1f) pawSizePx else pawSizePx * aspect
+        val dstH = if (aspect >= 1f) pawSizePx / aspect else pawSizePx
+        reusableDst.set(knobCx - dstW / 2f, knobCy - dstH / 2f, knobCx + dstW / 2f, knobCy + dstH / 2f)
+        canvas.drawBitmap(pawBitmap, null, reusableDst, bitmapPaint)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -188,8 +194,13 @@ class RotationalStickView @JvmOverloads constructor(
     private fun updateKnob(touchX: Float, touchY: Float) {
         val cx = width / 2f
         val cy = height / 2f
+        // CAT-PAW-IMAGE-TITLE-01: touch geometry (view-size-based) is
+        // completely unchanged -- still the sole basis for the dead
+        // zone. Only maxKnobRadius (the *drawn* knob's own clamp) is
+        // re-based onto the new, smaller visual ring -- see
+        // MAX_KNOB_FRACTION's own doc.
         val baseRadius = min(width, height) / 2f
-        val maxKnobRadius = baseRadius * MAX_KNOB_FRACTION
+        val maxKnobRadius = ringRadiusPx * MAX_KNOB_FRACTION
         val deadzoneRadius = baseRadius * DEAD_ZONE_FRACTION
 
         val dx = touchX - cx
@@ -197,7 +208,6 @@ class RotationalStickView @JvmOverloads constructor(
         val distance = hypot(dx, dy)
 
         if (distance < deadzoneRadius) {
-            knobActive = false
             knobOffsetX = 0f
             knobOffsetY = 0f
             committedSectorDeg = null
@@ -206,7 +216,6 @@ class RotationalStickView @JvmOverloads constructor(
             return
         }
 
-        knobActive = true
         val knobScale = if (distance > maxKnobRadius) maxKnobRadius / distance else 1f
         knobOffsetX = dx * knobScale
         knobOffsetY = dy * knobScale
@@ -266,7 +275,6 @@ class RotationalStickView @JvmOverloads constructor(
     private fun resetKnob() {
         knobOffsetX = 0f
         knobOffsetY = 0f
-        knobActive = false
         committedSectorDeg = null
         listener?.onStickIdle()
         invalidate()

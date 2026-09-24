@@ -1,13 +1,16 @@
 package com.mspgllc.iqpuchin.input
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.Typeface
+import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
+import com.mspgllc.iqpuchin.R
 import kotlin.math.abs
 
 /**
@@ -50,9 +53,6 @@ class PawActionButtonView @JvmOverloads constructor(
 ) : View(context, attrs) {
 
     companion object {
-        /** UI-CONTROL-02: the brand mark stamped on the paw's main pad. */
-        private const val BRAND_TEXT = "MIYU × AI"
-
         /**
          * Minimum travel (dp), on whichever axis is dominant, from
          * ACTION_DOWN before a release counts as a deliberate slide
@@ -123,87 +123,76 @@ class PawActionButtonView @JvmOverloads constructor(
         contentDescription = "ACTION"
     }
 
-    private val padGold = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(255, 205, 60)
-        style = Paint.Style.FILL
-    }
-    private val padOutline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(40, 30, 10)
-        style = Paint.Style.STROKE
-        strokeWidth = 5f
-    }
+    /** CAT-PAW-IMAGE-TITLE-01: the provided "pad/palm side" paw photo --
+     * loaded once, same `inScaled = false` convention as
+     * [RotationalStickView]'s own `azusan_paw_back`/
+     * [render.PlayerSpriteSheet]. Deliberately the *other* of the two
+     * provided paw photos, so this button reads as clearly different
+     * from the left stick's knob at a glance (pad-forward vs.
+     * fur-from-above), per this round's own spec. */
+    private val pawBitmap: Bitmap = BitmapFactory.decodeResource(
+        context.resources, R.drawable.azusan_paw_pad, BitmapFactory.Options().apply { inScaled = false }
+    )
+    private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val reusableDst = RectF()
+
+    /** This button's own drawn diameter in px -- anchored to
+     * [RotationalStickView]'s own paw-knob size (same screen-width-
+     * relative formula) times 1.125 (the 10-15% "larger" this round's
+     * spec asks for, midpoint), so the two controls' relative sizing
+     * stays correct on any screen without duplicating a separate magic
+     * number here. Independent of this view's own (unchanged) touch
+     * bounds -- see [onDraw]/class doc. */
+    private val buttonPawSizePx =
+        resources.displayMetrics.widthPixels *
+            RotationalStickView.RING_DIAMETER_FRACTION_OF_SCREEN_WIDTH *
+            RotationalStickView.PAW_SIZE_FRACTION_OF_RING_DIAMETER * 1.125f
 
     /** Soft outer glow, only drawn while awaiting ACTIVATE -- readable
-     * at a glance even with a thumb covering the paw itself. */
+     * at a glance even with a thumb covering the paw itself. Kept from
+     * before CAT-PAW-IMAGE-TITLE-01 -- this is a functional MARK/
+     * ACTIVATE cue, not the "circular medal/pedestal" look this round
+     * asks to remove (the gold pad shape/outline/brand text below it). */
     private val glowRingPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.argb(110, 255, 235, 150)
         style = Paint.Style.FILL
     }
 
-    /** Bright highlight on the main pad, also ACTIVATE-only -- a second,
+    /** Bright highlight near the paw, also ACTIVATE-only -- a second,
      * more central glow cue in case the outer ring is occluded. */
     private val glowCenterPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.rgb(255, 250, 210)
         style = Paint.Style.FILL
     }
 
-    /** UI-CONTROL-02: "MIYU × AI" stamped on the main pad -- dark so it
-     * reads against the gold pad without competing with it, auto-shrunk
-     * (see [drawBrandText]) so it always fits regardless of the button's
-     * actual on-screen size. */
-    private val brandTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(35, 22, 8)
-        textAlign = Paint.Align.CENTER
-        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-    }
-
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val cx = width / 2f
         val cy = height / 2f
-        val baseRadius = minOf(width, height) / 2f
 
-        // "Muniっと押した感覚": the whole paw visibly sinks/shrinks while held.
+        if (awaitingActivate) {
+            canvas.drawCircle(cx, cy, buttonPawSizePx * 0.58f, glowRingPaint)
+        }
+
+        // "Muniっと押した感覚": the whole paw photo visibly sinks/shrinks
+        // while held -- same pressScale mechanism/value as before
+        // CAT-PAW-IMAGE-TITLE-01, just now applied to the bitmap draw
+        // instead of the old Canvas paw shape.
         val pressScale = if (pressed) 0.88f else 1f
         canvas.save()
         canvas.scale(pressScale, pressScale, cx, cy)
 
-        if (awaitingActivate) {
-            canvas.drawCircle(cx, cy, baseRadius * 1.05f, glowRingPaint)
-        }
-
-        // CAT-PAW-CONTROL-UI-01: was PawShape (the pad/toe-bean, palm-
-        // side silhouette) -- now the same "paw from above" silhouette
-        // CatPawShape gives RotationalStickView's knob, unifying the
-        // left/right controls as the same character's paw. Same
-        // padGold/padOutline Paints as before, unchanged.
-        CatPawShape.draw(canvas, cx, cy, baseRadius, padGold, padOutline)
+        val aspect = pawBitmap.width.toFloat() / pawBitmap.height.toFloat()
+        val dstW = if (aspect >= 1f) buttonPawSizePx else buttonPawSizePx * aspect
+        val dstH = if (aspect >= 1f) buttonPawSizePx / aspect else buttonPawSizePx
+        reusableDst.set(cx - dstW / 2f, cy - dstH / 2f, cx + dstW / 2f, cy + dstH / 2f)
+        canvas.drawBitmap(pawBitmap, null, reusableDst, bitmapPaint)
 
         if (awaitingActivate) {
-            canvas.drawCircle(cx, cy + baseRadius * 0.3f, baseRadius * 0.14f, glowCenterPaint)
+            canvas.drawCircle(cx, cy + dstH * 0.3f, dstH * 0.08f, glowCenterPaint)
         }
-
-        drawBrandText(canvas, cx, cy, baseRadius)
 
         canvas.restore()
-    }
-
-    /** Centers [BRAND_TEXT] on the main pad (see PawShape's own main-pad
-     * geometry), shrinking it as needed to stay within the pad's width --
-     * the toe beans above are left untouched, and the text never grows
-     * the button itself since it's confined to a fraction of baseRadius. */
-    private fun drawBrandText(canvas: Canvas, cx: Float, cy: Float, r: Float) {
-        val textCy = cy + r * 0.35f
-        val maxTextWidth = r * 0.95f
-        var textSize = r * 0.20f
-        brandTextPaint.textSize = textSize
-        while (textSize > r * 0.08f && brandTextPaint.measureText(BRAND_TEXT) > maxTextWidth) {
-            textSize -= 1f
-            brandTextPaint.textSize = textSize
-        }
-        val fm = brandTextPaint.fontMetrics
-        val baselineY = textCy - (fm.ascent + fm.descent) / 2f
-        canvas.drawText(BRAND_TEXT, cx, baselineY, brandTextPaint)
     }
 
     /**

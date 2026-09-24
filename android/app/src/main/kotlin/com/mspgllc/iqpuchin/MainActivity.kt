@@ -4,7 +4,9 @@ import android.app.Activity
 import android.graphics.Color
 import android.os.Bundle
 import android.view.Gravity
+import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.ImageView
 import com.mspgllc.iqpuchin.input.ActionInputSource
 import com.mspgllc.iqpuchin.input.DirectionalPadView
 import com.mspgllc.iqpuchin.input.PawActionButtonView
@@ -40,6 +42,13 @@ private object UiConfig {
      * SWIPE_ZONE_WIDTH_DP intentionally does NOT use this offset -- its
      * whole point is "anywhere on the left side", full height. */
     const val UI_VERTICAL_CENTER_OFFSET_DP = 60
+
+    /** CAT-PAW-IMAGE-TITLE-01: the title screen's START button sits at
+     * bottom-center (Gravity.BOTTOM or CENTER_HORIZONTAL, itself already
+     * screen-size-relative), offset up from the very bottom edge by this
+     * fixed dp margin -- same sizing convention as every other control
+     * in this file. */
+    const val TITLE_START_BUTTON_BOTTOM_MARGIN_DP = 56
 }
 
 /** SWIPE-TEST-01: which move-input control is actually wired up.
@@ -174,6 +183,49 @@ class MainActivity : Activity() {
                 rotationalStick.attach(gameView)
             }
         }
+
+        // CAT-PAW-IMAGE-TITLE-01: added last, so it's the topmost view in
+        // `root` -- it fully covers and consumes every touch over every
+        // control added above (both titleImage and this container are
+        // isClickable, so a touch that misses the START button is simply
+        // absorbed here rather than falling through to
+        // RotationalStickView/PawActionButtonView/GameView underneath).
+        // GameView's own [GameView.titleActive] (frozen from
+        // construction) is the actual gameplay-side freeze; this overlay
+        // is the second, independent layer that stops a touch on the
+        // empty title image from ever reaching a control underneath.
+        // Removed entirely, once, the instant START is tapped -- never
+        // re-added, so this is strictly a first-launch-only screen (see
+        // GameView.beginPlay's own doc).
+        val titleImage = ImageView(this).apply {
+            setImageResource(R.drawable.title_qube_zero)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            isClickable = true
+        }
+        val startButton = Button(this).apply {
+            text = "START"
+            textSize = 22f
+        }
+        val titleOverlay = FrameLayout(this).apply {
+            isClickable = true
+            setBackgroundColor(Color.BLACK)
+            addView(titleImage, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+            addView(
+                startButton,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                ).apply {
+                    bottomMargin = (UiConfig.TITLE_START_BUTTON_BOTTOM_MARGIN_DP * density).toInt()
+                }
+            )
+        }
+        startButton.setOnClickListener {
+            root.removeView(titleOverlay)
+            gameView.beginPlay()
+        }
+        root.addView(titleOverlay, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
 
         setContentView(root)
     }
