@@ -8,6 +8,7 @@ import android.widget.FrameLayout
 import com.mspgllc.iqpuchin.input.ActionInputSource
 import com.mspgllc.iqpuchin.input.DirectionalPadView
 import com.mspgllc.iqpuchin.input.PawActionButtonView
+import com.mspgllc.iqpuchin.input.RotationalStickView
 import com.mspgllc.iqpuchin.input.SwipeInputView
 import com.mspgllc.iqpuchin.input.VirtualStickView
 
@@ -49,14 +50,20 @@ private object UiConfig {
  * feel of a free-anywhere swipe gesture over needing to land a touch on
  * a fixed arm, so CONTROL-SIMPLE-02 moves the default back to [SWIPE]
  * without deleting DPAD's code or this enum entry -- it stays fully
- * selectable for future comparison. Neither GameView nor any game-logic
- * file reads this -- all three controls only ever reach the game
- * through the same InputActionListener.onMoveRequested call. */
-private enum class MoveInputMode { SWIPE, VIRTUAL_STICK, DPAD }
+ * selectable for future comparison. SWIPE/VIRTUAL_STICK/DPAD only ever
+ * reach the game through InputActionListener.onMoveRequested, unchanged
+ * this round. VIRTUAL-STICK-ROTATIONAL-PROTOTYPE-01 adds
+ * [ROTATIONAL_STICK] (a 360-degree analog stick, [RotationalStickView])
+ * as this build's own active default, purely to evaluate real-device
+ * feel -- it reaches the game through the separate RotationalMoveListener
+ * interface instead, so it can be flipped back to [SWIPE] by changing
+ * only the one line below, with zero risk to the other three modes'
+ * code or behavior. */
+private enum class MoveInputMode { SWIPE, VIRTUAL_STICK, DPAD, ROTATIONAL_STICK }
 
 class MainActivity : Activity() {
 
-    private val moveInputMode = MoveInputMode.SWIPE
+    private val moveInputMode = MoveInputMode.ROTATIONAL_STICK
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -146,6 +153,25 @@ class MainActivity : Activity() {
                 )
                 dpad.translationY = uiVerticalOffsetPx
                 dpad.attach(gameView)
+            }
+            MoveInputMode.ROTATIONAL_STICK -> {
+                // VIRTUAL-STICK-ROTATIONAL-PROTOTYPE-01: same left-side
+                // placement/sizing convention as VIRTUAL_STICK/DPAD above.
+                // RotationalStickView reaches the game through the
+                // separate RotationalMoveListener interface (attach()
+                // below), never InputActionListener -- gameView already
+                // implements both.
+                val stickSizePx = (UiConfig.STICK_SIZE_DP * density).toInt()
+                val stickMarginPx = (UiConfig.STICK_MARGIN_DP * density).toInt()
+                val rotationalStick = RotationalStickView(this)
+                root.addView(
+                    rotationalStick,
+                    FrameLayout.LayoutParams(stickSizePx, stickSizePx, Gravity.CENTER_VERTICAL or Gravity.START).apply {
+                        leftMargin = stickMarginPx
+                    }
+                )
+                rotationalStick.translationY = uiVerticalOffsetPx
+                rotationalStick.attach(gameView)
             }
         }
 

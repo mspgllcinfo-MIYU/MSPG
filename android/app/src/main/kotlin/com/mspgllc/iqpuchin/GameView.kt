@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.util.AttributeSet
 import android.view.Choreographer
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import com.mspgllc.iqpuchin.board.BoardConfig
@@ -19,6 +20,7 @@ import com.mspgllc.iqpuchin.board.MarkController
 import com.mspgllc.iqpuchin.board.Qube
 import com.mspgllc.iqpuchin.board.QubeMotion
 import com.mspgllc.iqpuchin.input.InputActionListener
+import com.mspgllc.iqpuchin.input.RotationalMoveListener
 import com.mspgllc.iqpuchin.render.BoardRenderer
 import com.mspgllc.iqpuchin.render.BrokenQubeVisual
 import com.mspgllc.iqpuchin.render.ChuruLifeRenderer
@@ -37,6 +39,7 @@ import com.mspgllc.iqpuchin.sound.SoundEventPlayer
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /**
@@ -62,7 +65,7 @@ private enum class RenderMode { CURRENT_ISOMETRIC, FRONT_ALIGNED }
 class GameView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null
-) : View(context, attrs), InputActionListener {
+) : View(context, attrs), InputActionListener, RotationalMoveListener {
 
     private companion object {
         /** SCORE-SYSTEM-01: MARK/ACTIVATE scores higher than CAT_PUNCH's
@@ -84,6 +87,21 @@ class GameView @JvmOverloads constructor(
         const val WALK_VISUAL_DURATION_MS = 220L
         const val PUNCH_VISUAL_DURATION_MS = 180L
         const val SCORE_POPUP_DURATION_MS = 400L
+
+        // VIRTUAL-STICK-ROTATIONAL-PROTOTYPE-01
+        /** How fast the player's *visual* position (see [playerVisualX]/
+         * [playerVisualZ]) glides across the board while
+         * [RotationalStickView] is held outside its dead zone, in grid
+         * cells per second. Chosen so a full cell (the same distance one
+         * discrete [onMoveRequested] step already covers) takes 200ms --
+         * safely under [WALK_VISUAL_DURATION_MS] (220ms), so consecutive
+         * cell crossings during a held glide always re-trigger
+         * [walkVisual] before its previous window would have expired,
+         * keeping the WALK pose continuously shown rather than flickering
+         * back to IDLE between steps. Applies only to this prototype's
+         * continuous glide -- BoardLogic/Qube speed/every other input
+         * method's own movement timing is completely untouched. */
+        const val PLAYER_GLIDE_CELLS_PER_SEC = 5.0f
 
         /** How long after entering GAME_OVER before [onTouchEvent] will
          * accept a RETRY tap -- see that method and the frame loop's
@@ -469,6 +487,25 @@ class GameView @JvmOverloads constructor(
     // HIT vs RECOVER -- never changes hitReaction's own DURATION_MS or
     // GameStateController's HIT_DURATION_MS.
     private var hitVisualElapsedMs = 0L
+
+    // VIRTUAL-STICK-ROTATIONAL-PROTOTYPE-01: the player's continuous,
+    // render-only position -- deliberately separate from
+    // boardLogic.playerPosition (the single logical GridCoord every game
+    // rule -- MARK/ACTIVATE/CaptureSystem/checkCollision/isPunchRange --
+    // still reads exclusively; BoardLogic.kt itself is untouched). Only
+    // PlayerRenderer's own draw() call reads these two fields. Starts
+    // matching the fresh BoardLogic's own default spawn position, same as
+    // every other per-run player field, and is re-synced in
+    // resetBoardAndVisuals().
+    private var playerVisualX: Float = boardLogic.playerPosition.x.toFloat()
+    private var playerVisualZ: Float = boardLogic.playerPosition.z.toFloat()
+
+    // True only while RotationalStickView is held outside its dead zone;
+    // stickAngleRad is meaningless/unused whenever this is false. Neither
+    // field is read by any existing input path (Swipe/VirtualStick/DPad
+    // still only ever call onMoveRequested directly, unchanged).
+    private var stickInputActive = false
+    private var stickAngleRad = 0f
     // CATPUNCH-01: purely cosmetic, like hitReaction above -- reads
     // gameStateController.life each frame, never written back to it.
     private val churuRenderer = ChuruLifeRenderer()
@@ -992,6 +1029,19 @@ class GameView @JvmOverloads constructor(
                     lifeLossAzusanActive = false
                 }
             } else if (!isGameOver && !stageClear) {
+                // VIRTUAL-STICK-ROTATIONAL-PROTOTYPE-01: advances the
+                // continuous glide (if RotationalStickView is held) and
+                // commits any newly-crossed grid cell(s) via the same
+                // boardLogic.movePlayer/checkCollision path a discrete
+                // onMoveRequested call already uses -- runs first in this
+                // branch so playerPosition is already current for
+                // everything below (QubeSoundTracker, the frame's own
+                // unconditional checkCollision() further down). Frozen
+                // under the exact same stageStartActive/lifeLossAzusanActive/
+                // isGameOver/stageClear conditions as every other normal-
+                // play update here, by construction (this whole branch
+                // only runs when none of those apply).
+                updatePlayerGlide(deltaMs)
                 for (instance in qubes) {
                     instance.motion.update(deltaMs)
                     instance.soundTracker.update(soundEventPlayer, boardLogic.playerPosition)
@@ -1260,13 +1310,19 @@ class GameView @JvmOverloads constructor(
         // large enough that a QUBE in a farther-back row could otherwise
         // incorrectly paint over Azusan, or Azusan could incorrectly
         // paint over a nearer QUBE.
-        val playerZ = boardLogic.playerPosition.z
+        // VIRTUAL-STICK-ROTATIONAL-PROTOTYPE-01: uses the continuous
+        // playerVisualZ (equal to boardLogic.playerPosition.z whenever
+        // the stick is idle -- see updatePlayerGlide) so the depth sort
+        // itself doesn't pop mid-glide; the comparison below already
+        // supports Int-vs-Float via Kotlin's own cross-type compareTo.
+        val playerZ = playerVisualZ
         var playerDrawn = false
         fun drawPlayer() {
             playerRenderer.draw(
                 canvas,
                 projection,
-                boardLogic.playerPosition,
+                playerVisualX,
+                playerVisualZ,
                 displayScale,
                 lastMoveDirection,
                 walkVisual.active,
@@ -1658,6 +1714,15 @@ class GameView @JvmOverloads constructor(
         lastMoveDirection = Direction.SOUTH
         hitVisualElapsedMs = 0L
 
+        // VIRTUAL-STICK-ROTATIONAL-PROTOTYPE-01: re-syncs the continuous
+        // visual position to the freshly-constructed boardLogic's own
+        // start position, and drops any in-progress stick glide -- a
+        // RETRY/NEXT mid-glide never leaves Azusan's on-screen position
+        // stranded at the old board's coordinates.
+        playerVisualX = boardLogic.playerPosition.x.toFloat()
+        playerVisualZ = boardLogic.playerPosition.z.toFloat()
+        stickInputActive = false
+
         wasStageClear = false
         stageClearElapsedMs = 0L
     }
@@ -1677,6 +1742,138 @@ class GameView @JvmOverloads constructor(
             walkVisual.trigger()
             checkCollision()
             invalidate()
+        }
+    }
+
+    // VIRTUAL-STICK-ROTATIONAL-PROTOTYPE-01: RotationalMoveListener --
+    // completely separate from InputActionListener/onMoveRequested above,
+    // which SwipeInputView/VirtualStickView/DirectionalPadView keep using
+    // entirely unchanged. RotationalStickView is the only caller of
+    // either method below; both just update local state read by
+    // [updatePlayerGlide] in the frame loop -- neither ever touches
+    // boardLogic directly.
+    override fun onStickVector(angleRad: Float) {
+        stickInputActive = true
+        stickAngleRad = angleRad
+    }
+
+    override fun onStickIdle() {
+        stickInputActive = false
+    }
+
+    /**
+     * VIRTUAL-STICK-ROTATIONAL-PROTOTYPE-01: advances [playerVisualX]/
+     * [playerVisualZ] continuously toward [stickAngleRad] while
+     * [stickInputActive], and commits a real, discrete
+     * [BoardLogic.movePlayer] step (through [commitGridStep], the exact
+     * same lastMoveDirection/walkVisual/checkCollision sequence
+     * [onMoveRequested] already uses) the instant that continuous glide
+     * crosses into a new cell on either axis -- up to two commits in one
+     * frame for a genuinely diagonal crossing (one EAST/WEST, one NORTH/
+     * SOUTH), never a single combined "diagonal" step, since BoardLogic's
+     * own [Direction] can only ever change one axis at a time and this
+     * round does not touch BoardLogic.kt.
+     *
+     * Screen-vector -> game-vector mapping: this prototype only ever runs
+     * under FRONT_ALIGNED (section 7 of this round's own spec), where
+     * IsoProjection's basis is gridX->(major,0)/gridZ->(0,major) -- an
+     * unrotated identity mapping -- so a stick's raw screen dx/dy already
+     * equals game dx/dz directly, with no basis inversion needed *yet*.
+     * That mapping is deliberately isolated in its own tiny expression
+     * (ux/uz below) rather than assumed inline throughout this function,
+     * specifically so a later round can replace just that one spot with
+     * a proper inverse of whichever IsoProjection basis is active for the
+     * current Stage, without touching the glide/commit logic below it.
+     *
+     * Not called at all outside the frame loop's own `!isGameOver &&
+     * !stageClear` branch, so this can never advance during STAGE START/
+     * GAME OVER/STAGE CLEAR/the life-loss overlay -- exactly matching
+     * [onMoveRequested]'s own guard, enforced by the caller's placement
+     * rather than repeated here.
+     */
+    private fun updatePlayerGlide(deltaMs: Long) {
+        if (!stickInputActive) {
+            // Idle: snap the visual position back onto the current
+            // logical cell rather than easing back, so a released stick
+            // never leaves Azusan visibly hovering off-tile -- see this
+            // round's own report for why this simpler behavior was chosen
+            // over an eased return for a first prototype.
+            playerVisualX = boardLogic.playerPosition.x.toFloat()
+            playerVisualZ = boardLogic.playerPosition.z.toFloat()
+            return
+        }
+
+        // Screen-vector -> game-vector (see doc above) -- identity under
+        // FRONT_ALIGNED. cos/sin of a single angle is already unit
+        // length, so this can never exceed cardinal-move speed on a
+        // diagonal (the explicit "no sqrt(2) speedup" requirement) --
+        // not a separate normalization step, a property of using one
+        // angle instead of separately-thresholded axis pushes.
+        val ux = cos(stickAngleRad)
+        val uz = sin(stickAngleRad)
+        // Capped below 1 full cell: an abnormally large single deltaMs
+        // (e.g. the app resumes from background, the same class of spike
+        // QubeMotion's own while-loop already guards against) must never
+        // let roundedX/roundedZ below jump by more than one cell in a
+        // single frame -- that per-frame rounding comparison can only
+        // ever detect a *single* adjacent-cell change, so an uncapped
+        // multi-cell jump would silently skip a commit (and its
+        // checkCollision) rather than desync playerVisual from
+        // boardLogic.playerPosition. Any distance this caps away simply
+        // glides over the next frame(s) instead.
+        val step = (PLAYER_GLIDE_CELLS_PER_SEC * (deltaMs / 1000f)).coerceAtMost(0.9f)
+
+        val maxX = (BoardConfig.GRID_WIDTH - 1).toFloat()
+        val maxZ = (BoardConfig.GRID_DEPTH - 1).toFloat()
+        val targetVisualX = (playerVisualX + ux * step).coerceIn(0f, maxX)
+        val targetVisualZ = (playerVisualZ + uz * step).coerceIn(0f, maxZ)
+
+        val fromX = boardLogic.playerPosition.x
+        val fromZ = boardLogic.playerPosition.z
+        val roundedX = targetVisualX.roundToInt()
+        val roundedZ = targetVisualZ.roundToInt()
+
+        playerVisualX = targetVisualX
+        playerVisualZ = targetVisualZ
+
+        // Commit X first, then Z -- each call is the exact single-axis
+        // step BoardLogic already supports, so a diagonal glide becomes
+        // two ordinary sequential moves, never one invented diagonal one.
+        // checkCollision() runs inside commitGridStep after *each* commit
+        // (not just once at the end), so a QUBE sitting on the
+        // intermediate cell of a diagonal crossing is never skipped over.
+        if (roundedX != fromX) {
+            commitGridStep(if (roundedX > fromX) Direction.EAST else Direction.WEST)
+        }
+        // A HIT/GAME_OVER from the X step above already froze normal
+        // play (lifeLossAzusanActive/GAME_OVER) -- the frame loop's own
+        // branch guard means this function's own caller won't run again
+        // until that clears, but *this same frame* must still stop here
+        // rather than also committing the Z step into a board that's
+        // already meant to be frozen.
+        if (gameStateController.state == GameState.GAME_OVER || lifeLossAzusanActive) return
+        if (roundedZ != fromZ) {
+            commitGridStep(if (roundedZ > fromZ) Direction.SOUTH else Direction.NORTH)
+        }
+    }
+
+    /** Exactly [onMoveRequested]'s own post-move sequence, factored out so
+     * both it and [updatePlayerGlide] share one place that decides what
+     * "a grid step happened" means -- lastMoveDirection/walkVisual/
+     * checkCollision, nothing more, nothing new. */
+    private fun commitGridStep(direction: Direction) {
+        if (boardLogic.movePlayer(direction)) {
+            lastMoveDirection = direction
+            walkVisual.trigger()
+            checkCollision()
+            if (gameStateController.state != GameState.GAME_OVER && !lifeLossAzusanActive) {
+                // Section 8.C: a slightly more definite tick than the
+                // stick's own sector-change haptic, fired once per real
+                // grid-cell commit -- never for the continuous glide
+                // itself, and never while a HIT/GAME_OVER just froze play
+                // (matching this same guard used above).
+                performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+            }
         }
     }
 

@@ -5,7 +5,6 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
 import com.mspgllc.iqpuchin.board.Direction
-import com.mspgllc.iqpuchin.board.GridCoord
 
 /**
  * AZUSAN-PLAYER-01: draws the PLAYER marker as one of Azusan's eight
@@ -61,10 +60,20 @@ class PlayerRenderer(context: Context) {
      * loop -- avoids unnecessary GC pressure on real hardware. */
     private val reusableDst = RectF()
 
+    /**
+     * VIRTUAL-STICK-ROTATIONAL-PROTOTYPE-01: [gridX]/[gridZ] are now
+     * continuous Float grid coordinates instead of a discrete [GridCoord]
+     * -- the only change this round makes here. Everything below already
+     * worked in Float internally (the old call site was just
+     * `position.x.toFloat()`/`position.z.toFloat()`), so a continuous
+     * position glides smoothly instead of jumping cell-to-cell; nothing
+     * about how a pose is chosen or drawn/sized/anchored changes.
+     */
     fun draw(
         canvas: Canvas,
         projection: IsoProjection,
-        position: GridCoord,
+        gridX: Float,
+        gridZ: Float,
         scale: Float,
         lastMoveDirection: Direction,
         walkVisualActive: Boolean,
@@ -76,7 +85,7 @@ class PlayerRenderer(context: Context) {
             lastMoveDirection, walkVisualActive, punchVisualActive, hitVisualActive, hitVisualElapsedMs
         )
         val pose = spriteSheet[state]
-        val p = projection.toScreen(position.x.toFloat(), position.z.toFloat())
+        val p = projection.toScreen(gridX, gridZ)
         drawPose(canvas, pose, p[0], p[1], scale)
     }
 
