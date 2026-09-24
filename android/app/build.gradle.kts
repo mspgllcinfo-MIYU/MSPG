@@ -13,14 +13,15 @@ android {
         targetSdk = 34
         // AZUSAN-SIZE-TEST-01 established bumping these every round purely
         // for on-device identification (they're read by nothing in game
-        // logic). GAMEOVER-FINAL-02 is CAT-PUNCH-TRACE-01's diagnostic-only
-        // Logcat/on-screen instrumentation removed after real-device
-        // confirmation that the traced cat-punch path (durability 2->1,
-        // 1->0 DESTROYED) is correct -- GameView.kt/ActionInputSource.kt are
-        // restored byte-for-byte from f62a54d (GAMEOVER-FINAL-01), so this
-        // is a clean official build, not a new feature.
-        versionCode = 35
-        versionName = "0.1-GAMEOVER_FINAL_02"
+        // logic). STAGE-DESIGN-02C adds Stage 11-20 to STAGE_WAVES and
+        // raises CURRENT_RELEASE_FINAL_STAGE 10->20 (design confirmed in
+        // the STAGE-DESIGN-02A/02B design-only rounds) -- Stage 1-10 data
+        // and every protected system (cat punch, GAME OVER sequence, SE,
+        // LIFE, board/camera) are unchanged. Stage 10/20's own dedicated
+        // clear presentations are a later round; this build still shows
+        // plain STAGE CLEAR at Stage 10 and the existing ALL CLEAR at 20.
+        versionCode = 36
+        versionName = "0.1-STAGE_11_20"
     }
 
     // Pinned debug signing key (app/debug.keystore), checked into the repo

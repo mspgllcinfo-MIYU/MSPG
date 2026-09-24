@@ -110,8 +110,17 @@ class GameView @JvmOverloads constructor(
          * a bare literal `10`, so a future round can extend [STAGE_WAVES]
          * to Stage 20 and raise this single value -- nothing else about
          * the NEXT/ALL-CLEAR logic needs to change.
+         *
+         * STAGE-DESIGN-02C: exactly that extension. [STAGE_WAVES] now
+         * carries Stage 11-20 (confirmed in the STAGE-DESIGN-02A/02B design
+         * rounds), so this raises to 20 -- the one line this round's own
+         * doc said would be the only thing besides the data itself. Stage
+         * 10's clear still runs through the plain STAGE CLEAR/TAP TO NEXT
+         * branch below (no special milestone screen yet -- that's a later
+         * round), and ALL CLEAR now triggers at Stage 20 instead of 10
+         * with zero change to the branch's own logic.
          */
-        const val CURRENT_RELEASE_FINAL_STAGE = 10
+        const val CURRENT_RELEASE_FINAL_STAGE = 20
 
         /**
          * STAGE-LAYOUT-01: the board's 7 columns (x=0..6), named left-to-
@@ -207,6 +216,107 @@ class GameView @JvmOverloads constructor(
                 listOf(Lane.L2, Lane.C, Lane.R2),
                 listOf(Lane.L2, Lane.C, Lane.R2),
                 listOf(Lane.L2, Lane.C, Lane.R2)
+            ),
+
+            // STAGE-DESIGN-02C: Stage 11-20, confirmed in STAGE-DESIGN-02A/
+            // 02B (design-only rounds) before this round transcribed them
+            // as data. Difficulty here deliberately does not come from
+            // ever-larger QUBE counts alone -- it comes from simultaneous-
+            // QUBE count, lane spread/switching, and wave tempo, combined
+            // using only the existing move/MARK/ACTIVATE/CAPTURE/CAT_PUNCH
+            // rules already proven by Stage 1-10. Every wave here (like
+            // every wave above) is theoretically no-damage-clearable via
+            // correct MARK pre-placement + punch prioritization + stepping
+            // into an empty lane -- a stage's own design doc (02A/02B)
+            // covers the per-stage intent; nothing here changes what a
+            // wave means, only what data existing STAGE_WAVES-consuming
+            // code (spawnWave/currentStageWaves/resolveWaveBoundary, all
+            // unchanged) iterates over.
+
+            // Stage 11 -- 7, full-lane rotation (no lane repeats), reintroduces
+            // single-QUBE waves after Stage 10's dense walls; the adaptation
+            // block's opener.
+            listOf(
+                listOf(Lane.L3), listOf(Lane.R3), listOf(Lane.L1), listOf(Lane.R1),
+                listOf(Lane.C), listOf(Lane.L2), listOf(Lane.R2)
+            ),
+            // Stage 12 -- 12, alternating single/far-pair waves; every 2-QUBE
+            // wave pairs lanes too far apart to stand adjacent to both at once.
+            listOf(
+                listOf(Lane.C), listOf(Lane.L3, Lane.R2), listOf(Lane.R1), listOf(Lane.L2, Lane.R3),
+                listOf(Lane.L1), listOf(Lane.C, Lane.R3), listOf(Lane.R2), listOf(Lane.L3, Lane.C)
+            ),
+            // Stage 13 -- 13, block 1's graduation: reprises Stage 10's 3-wide
+            // center cluster and both-edge concept in fewer, denser waves.
+            listOf(
+                listOf(Lane.L2, Lane.C, Lane.R2), listOf(Lane.L3, Lane.L1, Lane.R1),
+                listOf(Lane.L2, Lane.C, Lane.R2), listOf(Lane.R3, Lane.L3), listOf(Lane.C, Lane.R2)
+            ),
+            // Stage 14 -- 10, twice fires a 6-lane-wide 3-QUBE wave
+            // (L3+C+R3). Confirmed in STAGE-DESIGN-02B as no-damage-
+            // clearable via correct triage (pre-MARK one, punch/step-aside
+            // for the others) -- LIFE loss here is misplay, not the design.
+            listOf(
+                listOf(Lane.L1), listOf(Lane.R2), listOf(Lane.L3, Lane.C, Lane.R3),
+                listOf(Lane.L2), listOf(Lane.R1), listOf(Lane.L3, Lane.C, Lane.R3)
+            ),
+            // Stage 15 -- 9, all single-QUBE, alternating far lanes with
+            // minimal wave-to-wave gap: a pure decision-tempo test, not a
+            // simultaneity test.
+            listOf(
+                listOf(Lane.L3), listOf(Lane.R3), listOf(Lane.L2), listOf(Lane.R2),
+                listOf(Lane.L1), listOf(Lane.R1), listOf(Lane.C), listOf(Lane.L3), listOf(Lane.R3)
+            ),
+            // Stage 16 -- 16, 8 consecutive far-apart 2-QUBE waves: a
+            // stamina test sustaining the "punch one, mark/capture the
+            // other" loop over a long run rather than a single spike.
+            listOf(
+                listOf(Lane.L2, Lane.R2), listOf(Lane.L1, Lane.R1), listOf(Lane.L3, Lane.R3), listOf(Lane.C, Lane.L2),
+                listOf(Lane.R2, Lane.C), listOf(Lane.L1, Lane.R3), listOf(Lane.L3, Lane.R1), listOf(Lane.L2, Lane.R2)
+            ),
+            // Stage 17 -- 13, block 2's graduation: combines Stage 14's
+            // wide 3-QUBE wave, Stage 15's tempo, and Stage 16's far pairs
+            // in one stage.
+            listOf(
+                listOf(Lane.L3, Lane.C, Lane.R3), listOf(Lane.L1), listOf(Lane.R1), listOf(Lane.L2, Lane.R2),
+                listOf(Lane.C), listOf(Lane.L3, Lane.R3), listOf(Lane.L1, Lane.R1), listOf(Lane.C)
+            ),
+            // Stage 18 -- 14, a long sustained left-center-right sweep (the
+            // Stage 8 pattern extended to 10 waves) -- continuous full-width
+            // repositioning rather than a single peak.
+            listOf(
+                listOf(Lane.L3), listOf(Lane.L2, Lane.L1), listOf(Lane.C), listOf(Lane.R1, Lane.R2), listOf(Lane.R3),
+                listOf(Lane.L3, Lane.L2), listOf(Lane.C), listOf(Lane.R2, Lane.R3), listOf(Lane.L1), listOf(Lane.R1)
+            ),
+            // Stage 19 -- 12, large simultaneous groups (the Stage 10 4-wide
+            // wall, then two 3-wide waves) separated by single-QUBE
+            // "breather" waves -- big decisions given room to think, the
+            // opposite of Stage 17's tight tempo.
+            listOf(
+                listOf(Lane.L3, Lane.L1, Lane.R1, Lane.R3), listOf(Lane.C),
+                listOf(Lane.L2, Lane.C, Lane.R2), listOf(Lane.C), listOf(Lane.L3, Lane.C, Lane.R3)
+            ),
+            // Stage 20 -- 21, the finale: five readable phases, each a
+            // callback to one earlier stage's own lesson (11/14/15/16/
+            // 10+19), rather than one undifferentiated pile of QUBEs. This
+            // release's last stage -- see CURRENT_RELEASE_FINAL_STAGE.
+            // (STAGE-DESIGN-02C: the design rounds' own itemized wave list
+            // summed to 21, not the 22 first stated in STAGE-DESIGN-02A's
+            // own tally -- confirmed a miscount, not a missing QUBE, and
+            // fixed here as a spec-label correction, same precedent as
+            // Stage 10's own 17-vs-18 discrepancy above. No QUBE added to
+            // force the wave data to match the old, wrong total.)
+            listOf(
+                // Phase A -- breadth (Stage 11)
+                listOf(Lane.L3), listOf(Lane.R3), listOf(Lane.C),
+                // Phase B -- wide triage (Stage 14)
+                listOf(Lane.L1, Lane.C, Lane.R1),
+                // Phase C -- tempo (Stage 15)
+                listOf(Lane.L2), listOf(Lane.R2), listOf(Lane.L1), listOf(Lane.R1),
+                // Phase D -- far pairs (Stage 16)
+                listOf(Lane.L3, Lane.R3), listOf(Lane.L2, Lane.R2),
+                // Phase E -- final wall (Stage 10 / 19)
+                listOf(Lane.L3, Lane.L1, Lane.R1, Lane.R3), listOf(Lane.L2, Lane.C, Lane.R2)
             )
         )
 
