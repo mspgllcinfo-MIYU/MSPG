@@ -89,6 +89,22 @@ class GameOverCatEffect(context: Context) {
         /** GameView's own single source of truth for "has the whole
          * sequence finished" -- see [isDone]. */
         const val TOTAL_DURATION_MS = SHATTER_END_MS
+
+        // GAMEOVER-AFTERSHOCK-01: the window after GLASS_SHATTER's own
+        // burst/shard debris ([drawShatter]) settles and before GAME
+        // OVER's own dim/text takes over -- exactly SHATTER_SHARD_MS
+        // (840ms) by construction, reused here rather than a second
+        // hardcoded literal so it can never drift from SHATTER_START_MS/
+        // SHATTER_END_MS.
+        const val AFTERSHOCK_MS = SHATTER_END_MS - SHATTER_START_MS
+
+        // Modest and monotonic -- much weaker than GAME OVER's own
+        // GAME_OVER_DIM_MAX_ALPHA (170, in GameView), so the handoff once
+        // catEffectDone reads as a continuation of the same darkening
+        // rather than a hard cut.
+        private const val AFTERSHOCK_DIM_MAX_ALPHA = 90
+        private const val DUST_GLINT_WINDOW_MS = 220L
+        private const val EDGE_FADE_START_MS = 250L
     }
 
     /** True once GAME OVER's own text/dim/TAP TO RETRY may finally show
@@ -424,6 +440,229 @@ class GameOverCatEffect(context: Context) {
             canvas.drawPath(path, shardPaint)
             canvas.drawPath(path, shardEdgePaint)
             canvas.restore()
+        }
+    }
+
+    // -- GAMEOVER-AFTERSHOCK-01: "the destruction still has an echo" --
+    // purely additive to everything above (never reads/writes shards,
+    // burstLines, sequences, or any of the drawSequence/drawBb/
+    // drawShatter/draw/drawResidue methods). Three independent,
+    // fixed-seed geometry sets, each generated once here (same discipline
+    // as [shards]/[burstLines] above) so nothing is regenerated per
+    // frame and RETRY needs no reset of its own -- GameView only ever
+    // calls the draw methods below while catEffectStarted/catEffectDone
+    // say to, and those flags already reset for free on restartGame().
+
+    private data class DelayedShard(
+        val angleDeg: Float,
+        val distanceFrac: Float,
+        val sizeFrac: Float,
+        val rotationSpeedDeg: Float,
+        val delayMs: Long,
+        val fallBoost: Float
+    )
+
+    // Small pieces that finish falling well after the big GLASS_SHATTER
+    // debris -- delayMs spread 100-500ms per spec, size/rotation/fall
+    // speed all varied per-shard so nothing reads as a single uniform
+    // batch.
+    private val aftershockDelayedShards: List<DelayedShard> = run {
+        val rnd = Random(8888)
+        (0 until 12).map {
+            DelayedShard(
+                angleDeg = rnd.nextFloat() * 360f,
+                distanceFrac = 0.10f + rnd.nextFloat() * 0.45f,
+                sizeFrac = 0.015f + rnd.nextFloat() * 0.025f,
+                rotationSpeedDeg = (rnd.nextFloat() - 0.5f) * 900f,
+                delayMs = 100L + (rnd.nextFloat() * 400f).toLong(),
+                fallBoost = 0.7f + rnd.nextFloat() * 0.6f
+            )
+        }
+    }
+
+    private data class DustFleck(
+        val angleDeg: Float,
+        val distanceFrac: Float,
+        val sizeFrac: Float,
+        val delayMs: Long,
+        val driftDeg: Float
+    )
+
+    // Fine glass dust -- each fleck only catches the light for a brief
+    // window (see drawAftershock's glintWindowMs), never a continuous
+    // sparkle, so this never reads as snow/stars/magic.
+    private val aftershockDust: List<DustFleck> = run {
+        val rnd = Random(8500)
+        (0 until 26).map {
+            DustFleck(
+                angleDeg = rnd.nextFloat() * 360f,
+                distanceFrac = 0.08f + rnd.nextFloat() * 0.5f,
+                sizeFrac = 0.004f + rnd.nextFloat() * 0.006f,
+                delayMs = 120L + (rnd.nextFloat() * 550f).toLong(),
+                driftDeg = (rnd.nextFloat() - 0.5f) * 40f
+            )
+        }
+    }
+
+    private data class EdgeFragment(
+        val xFrac: Float,
+        val yFrac: Float,
+        val sizeFrac: Float,
+        val rotationDeg: Float,
+        val crackLine: Boolean
+    )
+
+    // Small leftover glass at the four corners plus the four edge
+    // midpoints -- deliberately kept off the center so GAME OVER's own
+    // text (drawn before drawAftershockResidue, see GameView.onDraw)
+    // always stays readable. A little per-fragment position jitter keeps
+    // this from reading as a perfectly symmetric frame.
+    private val aftershockEdgeFragments: List<EdgeFragment> = run {
+        val rnd = Random(8700)
+        val anchors = listOf(
+            0.03f to 0.05f, 0.97f to 0.05f, 0.03f to 0.95f, 0.97f to 0.95f,
+            0.02f to 0.5f, 0.98f to 0.5f, 0.5f to 0.03f, 0.5f to 0.97f
+        )
+        anchors.flatMapIndexed { i, anchor ->
+            val (ax, ay) = anchor
+            (0 until 2).map { j ->
+                EdgeFragment(
+                    xFrac = (ax + (rnd.nextFloat() - 0.5f) * 0.05f).coerceIn(0f, 1f),
+                    yFrac = (ay + (rnd.nextFloat() - 0.5f) * 0.05f).coerceIn(0f, 1f),
+                    sizeFrac = 0.02f + rnd.nextFloat() * 0.03f,
+                    rotationDeg = rnd.nextFloat() * 360f,
+                    crackLine = (i + j) % 3 == 0
+                )
+            }
+        }
+    }
+
+    private val dustPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val aftershockDimPaint = Paint().apply { color = Color.BLACK }
+
+    /**
+     * GAMEOVER-AFTERSHOCK-01: everything that happens between
+     * GLASS_SHATTER's own burst ([drawShatter], via [draw] above)
+     * settling and GAME OVER's own dim/text taking over -- delayed small
+     * shards and glass dust falling in after the big pieces, a modest
+     * dark vignette creeping in, and the screen-edge residue below
+     * starting to fade into view. A pure function of [elapsedMs], no
+     * caller-held state needed. GameView calls this once, right after its
+     * existing [draw] call, under the same `catEffectStarted &&
+     * !catEffectDone` guard that already gates [draw] -- so it
+     * automatically stops (and RETRY implicitly clears it) the same way
+     * [draw] already does.
+     */
+    fun drawAftershock(canvas: Canvas, width: Int, height: Int, density: Float, elapsedMs: Long) {
+        if (elapsedMs < SHATTER_START_MS) return
+        val localMs = (elapsedMs - SHATTER_START_MS).coerceIn(0L, AFTERSHOCK_MS)
+        val minSide = min(width, height).toFloat()
+        val cx = width * 0.5f
+        val cy = height * 0.5f
+
+        val dimT = localMs.toFloat() / AFTERSHOCK_MS
+        if (dimT > 0f) {
+            aftershockDimPaint.alpha = (AFTERSHOCK_DIM_MAX_ALPHA * dimT).toInt().coerceIn(0, AFTERSHOCK_DIM_MAX_ALPHA)
+            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), aftershockDimPaint)
+        }
+
+        for (s in aftershockDelayedShards) {
+            if (localMs < s.delayMs) continue
+            val window = (AFTERSHOCK_MS - s.delayMs).coerceAtLeast(1L)
+            val t = ((localMs - s.delayMs).toFloat() / window).coerceIn(0f, 1f)
+            val rad = Math.toRadians(s.angleDeg.toDouble())
+            val travel = s.distanceFrac * minSide * t
+            // Quadratic, not linear -- gravity-like acceleration, per spec.
+            val fallExtra = minSide * 0.30f * s.fallBoost * t * t
+            val px = cx + (cos(rad) * travel).toFloat()
+            val py = cy + (sin(rad) * travel).toFloat() + fallExtra
+            val rotation = s.rotationSpeedDeg * (localMs - s.delayMs).coerceAtLeast(0L) / 1000f
+            val size = s.sizeFrac * minSide * (1f - 0.2f * t)
+            val alpha = ((1f - t) * 235f).toInt().coerceIn(0, 235)
+            if (alpha <= 0) continue
+
+            canvas.save()
+            canvas.translate(px, py)
+            canvas.rotate(rotation)
+            val path = Path().apply {
+                moveTo(0f, -size)
+                lineTo(size * 0.75f, size * 0.55f)
+                lineTo(-size * 0.65f, size * 0.6f)
+                close()
+            }
+            shardPaint.alpha = alpha
+            shardEdgePaint.alpha = (alpha * 0.7f).toInt()
+            canvas.drawPath(path, shardPaint)
+            canvas.drawPath(path, shardEdgePaint)
+            canvas.restore()
+        }
+
+        // Each fleck gets one brief up-down alpha pulse starting at its
+        // own delay -- never a looping/continuous glow.
+        for (d in aftershockDust) {
+            if (localMs < d.delayMs) continue
+            val tSinceDelay = localMs - d.delayMs
+            if (tSinceDelay > DUST_GLINT_WINDOW_MS) continue
+            val glintT = tSinceDelay.toFloat() / DUST_GLINT_WINDOW_MS
+            val pulse = sin((glintT * Math.PI).toFloat()).coerceIn(0f, 1f)
+            val baseRad = Math.toRadians(d.angleDeg.toDouble())
+            val driftRad = Math.toRadians((d.angleDeg + d.driftDeg).toDouble())
+            val drift = d.distanceFrac * minSide * 0.12f * glintT
+            val px = cx + (cos(baseRad) * d.distanceFrac * minSide).toFloat() + (cos(driftRad) * drift).toFloat()
+            val py = cy + (sin(baseRad) * d.distanceFrac * minSide).toFloat() + (sin(driftRad) * drift).toFloat() + minSide * 0.05f * glintT
+            val size = d.sizeFrac * minSide
+            dustPaint.color = Color.argb((pulse * 210f).toInt().coerceIn(0, 210), 235, 238, 242)
+            canvas.drawCircle(px, py, size, dustPaint)
+        }
+
+        val edgeT = ((localMs - EDGE_FADE_START_MS).toFloat() / (AFTERSHOCK_MS - EDGE_FADE_START_MS)).coerceIn(0f, 1f)
+        if (edgeT > 0f) {
+            drawEdgeFragments(canvas, width, height, density, edgeT)
+        }
+    }
+
+    /**
+     * GAMEOVER-AFTERSHOCK-01: the screen-edge glass residue's permanent,
+     * fully-settled state -- drawn for as long as GAME OVER is showing
+     * (GameView calls this once, right after its existing [drawResidue]
+     * call, under the same `catEffectDone` guard, so it shares that
+     * method's own reset-on-RETRY lifecycle without needing one of its
+     * own), so a glance at the corners/edges still reads as "this glass
+     * really broke" beneath the GAME OVER text.
+     */
+    fun drawAftershockResidue(canvas: Canvas, width: Int, height: Int, density: Float) {
+        drawEdgeFragments(canvas, width, height, density, 1f)
+    }
+
+    private fun drawEdgeFragments(canvas: Canvas, width: Int, height: Int, density: Float, alphaT: Float) {
+        val minSide = min(width, height).toFloat()
+        for (f in aftershockEdgeFragments) {
+            val px = width * f.xFrac
+            val py = height * f.yFrac
+            val size = f.sizeFrac * minSide
+            if (f.crackLine) {
+                burstPaint.strokeWidth = 1.4f * density
+                burstPaint.alpha = (140 * alphaT).toInt().coerceIn(0, 140)
+                val rad = Math.toRadians(f.rotationDeg.toDouble())
+                val ex = px + (cos(rad) * size * 1.6f).toFloat()
+                val ey = py + (sin(rad) * size * 1.6f).toFloat()
+                canvas.drawLine(px, py, ex, ey, burstPaint)
+            } else {
+                canvas.save()
+                canvas.translate(px, py)
+                canvas.rotate(f.rotationDeg)
+                val path = Path().apply {
+                    moveTo(0f, -size)
+                    lineTo(size * 0.8f, size * 0.5f)
+                    lineTo(-size * 0.6f, size * 0.7f)
+                    close()
+                }
+                shardPaint.alpha = (170 * alphaT).toInt().coerceIn(0, 170)
+                shardEdgePaint.alpha = (110 * alphaT).toInt().coerceIn(0, 110)
+                canvas.drawPath(path, shardPaint)
+                canvas.drawPath(path, shardEdgePaint)
+                canvas.restore()
+            }
         }
     }
 }

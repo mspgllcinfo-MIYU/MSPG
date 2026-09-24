@@ -13,19 +13,22 @@ android {
         targetSdk = 34
         // AZUSAN-SIZE-TEST-01 established bumping these every round purely
         // for on-device identification (they're read by nothing in game
-        // logic). GAMEOVER-GLASS-02: the GAME OVER finishing sequence's
-        // glass now cracks progressively from each cat's own impact point
-        // (mari -> anko -> azusan -> BB's 4 stomps), accumulating toward
-        // the existing 6300ms GLASS_SHATTER -- purely additive to
-        // GlassCrackEffect (a parallel GoStage pattern system alongside
-        // the untouched HIT1-3 one) plus one new guarded draw call in
-        // GameView.onDraw. GameOverCatEffect's own cat-animation body and
-        // fixed timing constants, PawActionButtonView's "ムニョ" press
+        // logic). GAMEOVER-AFTERSHOCK-01: the 6300-7140ms window after
+        // GLASS_SHATTER now has an "echo" -- delayed small shards/glass
+        // dust falling in after the big pieces, a modest dark vignette,
+        // and screen-edge glass residue that persists through GAME OVER
+        // -- all new, purely additive methods on GameOverCatEffect
+        // (drawAftershock/drawAftershockResidue), called from 2 new
+        // guarded one-line calls in GameView.onDraw. GameOverCatEffect's
+        // own cat-animation body, all fixed timing constants (mari 540/
+        // anko 1460/azusan 2380/BB stomps 3780-5340/BB_FINAL_IMPACT 5860/
+        // GLASS_SHATTER 6300/GAME OVER 7140), GAMEOVER-GLASS-02's own
+        // GlassCrackEffect additions, PawActionButtonView's "ムニョ" press
         // animation, RotationalStickView, ActionInputSource, CAT PUNCH,
         // MARK/ACTIVATE, QUBE movement, and the title/START flow are all
         // byte-for-byte untouched from GOLDEN.
-        versionCode = 46
-        versionName = "0.1-GAMEOVER_GLASS_02"
+        versionCode = 47
+        versionName = "0.1-GAMEOVER_AFTERSHOCK_01"
     }
 
     // Pinned debug signing key (app/debug.keystore), checked into the repo

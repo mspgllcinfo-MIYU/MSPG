@@ -1450,6 +1450,13 @@ class GameView @JvmOverloads constructor(
         // it, which stays hidden until this finishes (see catEffectDone).
         if (catEffectStarted && !catEffectDone) {
             gameOverCatEffect.draw(canvas, width, height, density, catEffectElapsedMs)
+            // GAMEOVER-AFTERSHOCK-01: delayed shards/dust/dim/edge-fade-in
+            // that keep the 6300-7140ms window from reading as "everything
+            // vanishes the instant GLASS_SHATTER's own burst finishes" --
+            // a pure function of catEffectElapsedMs like drawGameOverStage
+            // above, sharing this same guard so it needs no state of its
+            // own and resets for free on restartGame().
+            gameOverCatEffect.drawAftershock(canvas, width, height, density, catEffectElapsedMs)
         }
 
         // EFFECT-01C: the same "cat character" layer position as EFFECT-
@@ -1495,6 +1502,13 @@ class GameView @JvmOverloads constructor(
         // this same GAME OVER sequence.
         if (catEffectDone) {
             gameOverCatEffect.drawResidue(canvas, width, height, density)
+            // GAMEOVER-AFTERSHOCK-01: the same screen-edge glass residue
+            // drawAftershock was fading in, now held at its fully-settled
+            // state for as long as GAME OVER is showing -- drawn after
+            // drawResidue, same layering reasoning as that call's own
+            // comment (the broken pane sits in front of "GAME OVER," not
+            // behind it).
+            gameOverCatEffect.drawAftershockResidue(canvas, width, height, density)
         }
 
         // STAGE-CLEAR-01: same overlay shape as GAME OVER above, reusing
