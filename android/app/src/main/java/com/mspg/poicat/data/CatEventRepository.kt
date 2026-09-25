@@ -9,6 +9,7 @@ import kotlinx.coroutines.launch
 
 class CatEventRepository(context: Context) {
     private val dao = AppDatabase.get(context).catEventDao()
+    private val localNotificationDao = AppDatabase.get(context).localNotificationStateDao()
     private val appContext = context.applicationContext
 
     // ルーム共有(4桁PIN)用のfire-and-forgetなFirestoreプッシュだけに使う — ここで何が
@@ -89,9 +90,21 @@ class CatEventRepository(context: Context) {
     private fun normalizeTitleForDuplicateCheck(title: String): String =
         title.trim().replace(Regex("\\s+"), " ")
 
-    /** Full edit of an existing event; resets both reminder flags so a changed time can notify again. */
+    /**
+     * Full edit of an existing event; resets both shared reminder flags so a changed time can
+     * notify again on other devices too (kept for backward compat with the old かっちゃん build —
+     * see [markReminded1Day]/[markReminded1Hour]).
+     *
+     * #POI通知修正: [dateTime]が実際に変わった場合だけ、この端末のlocal_notification_state
+     * (通知済み判定の正本)もクリアし、新しい日時に対して通知判定をやり直す。タイトルだけの
+     * 変更ではクリアしない — 既存の通知済み状態を不必要にリセットしないため。比較は書き込み
+     * 直前に再取得した現在のDB行を基準にする(roomEventId等の再取得と同じ理由 — [event]は
+     * 呼び出し元の古いスナップショットの可能性があるため)。
+     */
     suspend fun edit(event: CatEvent, title: String, dateTime: Long?) {
+        val dateTimeChanged = dao.byId(event.id)?.dateTime != dateTime
         updateAndSync(event.copy(title = title, dateTime = dateTime, reminded1Day = false, reminded1Hour = false))
+        if (dateTimeChanged) localNotificationDao.clear(event.id)
     }
 
     suspend fun delete(event: CatEvent) = deleteAndSync(event)
@@ -186,6 +199,23 @@ class CatEventRepository(context: Context) {
     suspend fun dueFor1HourReminder(windowStart: Long, windowEnd: Long) =
         dao.dueFor1HourReminder(windowStart, windowEnd)
 
+    /** #POI通知修正: この端末自身の通知可否判定に使う、local_notification_state
+     * ベースの候補取得。[com.mspg.poicat.notify.ReminderWorker]が使う。 */
+    suspend fun due1DayLocally(lowerBoundExclusive: Long, upperBoundInclusive: Long) =
+        dao.due1DayLocally(lowerBoundExclusive, upperBoundInclusive)
+
+    suspend fun due1HourLocally(lowerBoundExclusive: Long, upperBoundInclusive: Long) =
+        dao.due1HourLocally(lowerBoundExclusive, upperBoundInclusive)
+
+    /** この端末で1日前/1時間前通知を実際に表示した直後に呼ぶ、端末ローカルのみの記録
+     * (Firestoreへは送らない、パートナー端末の通知可否に一切影響しない)。 */
+    suspend fun markNotified1DayLocally(eventId: Long) = localNotificationDao.markNotified1Day(eventId)
+
+    suspend fun markNotified1HourLocally(eventId: Long) = localNotificationDao.markNotified1Hour(eventId)
+
+    /** 旧かっちゃん版との後方互換性のためだけに維持する、Firestore共有フィールドへの
+     * 書き込み。新版自身の通知可否判定にはもう使わない([due1DayLocally]/
+     * [markNotified1DayLocally]参照)。 */
     suspend fun markReminded1Day(event: CatEvent) {
         updateAndSync(event.copy(reminded1Day = true))
     }

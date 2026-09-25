@@ -18,15 +18,20 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  *    同時表示するための独立フラグ) — see MIGRATION_5_6
  *  - v7: added locationText (#148 Maps-2A、共有された場所を加工せず保持する
  *    基盤フィールド) — see MIGRATION_6_7
+ *  - v8: added local_notification_state table ([LocalNotificationState]、
+ *    「この端末で実際に1日前/1時間前通知を表示したか」を端末ローカルだけで
+ *    管理する新テーブル。既存のcat_eventsテーブルへの列追加は無い) —
+ *    see MIGRATION_7_8
  *
  * Real schedules/memos/tasks now live in this database on-device, so any
  * future version bump must ship its own explicit Migration here (following
  * MIGRATION_1_2's pattern, same as PhotoDatabase.MIGRATION_1_2) instead of
  * falling back to a destructive recreate, which would silently wipe them.
  */
-@Database(entities = [CatEvent::class], version = 7, exportSchema = true)
+@Database(entities = [CatEvent::class, LocalNotificationState::class], version = 8, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun catEventDao(): CatEventDao
+    abstract fun localNotificationStateDao(): LocalNotificationStateDao
 
     companion object {
         // v1 -> v2: added isTask/completed for the Poi tab. Both are NOT NULL
@@ -91,6 +96,28 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // v7 -> v8: 新テーブルlocal_notification_stateを追加するだけ — 既存の
+        // cat_eventsテーブルへのALTER/UPDATEは一切無い。既存のreminded1Day/
+        // reminded1Hour(Firestore共有フィールド)からのバックフィルもしない —
+        // その値は「どちらかの端末が通知した」ことしか意味せず、この端末自身が
+        // 通知した証拠にはならないため、そのままコピーすると相手端末の通知済み
+        // 状態をこの端末へ誤って引き継いでしまう。新テーブルは空のまま追加され、
+        // 以後の通知判定は予定のdateTimeそのものを基準にした時間ウィンドウ
+        // ([com.mspg.poicat.notify.ReminderWorker]参照)で安全に収束する
+        // (範囲外の古い予定は最初から対象外になるため、空テーブルが原因で
+        // 大量通知が起きることはない)。
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS local_notification_state (" +
+                        "catEventId INTEGER NOT NULL PRIMARY KEY, " +
+                        "notified1Day INTEGER NOT NULL DEFAULT 0, " +
+                        "notified1Hour INTEGER NOT NULL DEFAULT 0, " +
+                        "FOREIGN KEY(catEventId) REFERENCES cat_events(id) ON DELETE CASCADE)",
+                )
+            }
+        }
+
         @Volatile
         private var instance: AppDatabase? = null
 
@@ -101,7 +128,10 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "poicat.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                    .addMigrations(
+                        MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
+                        MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
+                    )
                     .build().also { instance = it }
             }
     }

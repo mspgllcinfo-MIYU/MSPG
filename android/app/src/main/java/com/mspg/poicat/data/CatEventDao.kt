@@ -122,7 +122,10 @@ interface CatEventDao {
     @Query("SELECT * FROM cat_events WHERE title LIKE '%' || :keyword || '%'")
     suspend fun allMatching(keyword: String): List<CatEvent>
 
-    /** Dated, unfired schedule events whose reminder window has arrived — used by the periodic worker. */
+    /** Dated, unfired schedule events whose reminder window has arrived — used by the periodic worker.
+     * Kept for backward-compat reference only; [com.mspg.poicat.notify.ReminderWorker] no longer uses
+     * this (it reads local_notification_state instead — see [due1DayLocally]) since reminded1Day is a
+     * Firestore-shared field and doesn't reflect what THIS device has shown. */
     @Query(
         "SELECT * FROM cat_events WHERE isTask = 0 AND dateTime IS NOT NULL AND reminded1Day = 0 " +
             "AND dateTime BETWEEN :windowStart AND :windowEnd",
@@ -134,4 +137,32 @@ interface CatEventDao {
             "AND dateTime BETWEEN :windowStart AND :windowEnd",
     )
     suspend fun dueFor1HourReminder(windowStart: Long, windowEnd: Long): List<CatEvent>
+
+    /**
+     * 1日前通知の候補: [local_notification_state]をLEFT JOINし、この端末で
+     * まだ通知していない(行が無い、またはnotified1Day=0)予定だけを対象にする —
+     * reminded1Day(Firestore共有フィールド)は一切参照しない。[lowerBoundExclusive]
+     * より後、[upperBoundInclusive]以下のdateTimeを持つ予定が対象
+     * (呼び出し元[com.mspg.poicat.notify.ReminderWorker]が「予定まで2時間より長く
+     * 24時間以内」を渡す)。
+     */
+    @Query(
+        "SELECT cat_events.* FROM cat_events " +
+            "LEFT JOIN local_notification_state ON cat_events.id = local_notification_state.catEventId " +
+            "WHERE cat_events.isTask = 0 AND cat_events.dateTime IS NOT NULL " +
+            "AND (local_notification_state.notified1Day IS NULL OR local_notification_state.notified1Day = 0) " +
+            "AND cat_events.dateTime > :lowerBoundExclusive AND cat_events.dateTime <= :upperBoundInclusive",
+    )
+    suspend fun due1DayLocally(lowerBoundExclusive: Long, upperBoundInclusive: Long): List<CatEvent>
+
+    /** [due1DayLocally]と対称。notified1Hourで判定し、呼び出し元は「予定まで2時間以内、
+     * または予定を過ぎて3時間以内」を渡す。 */
+    @Query(
+        "SELECT cat_events.* FROM cat_events " +
+            "LEFT JOIN local_notification_state ON cat_events.id = local_notification_state.catEventId " +
+            "WHERE cat_events.isTask = 0 AND cat_events.dateTime IS NOT NULL " +
+            "AND (local_notification_state.notified1Hour IS NULL OR local_notification_state.notified1Hour = 0) " +
+            "AND cat_events.dateTime > :lowerBoundExclusive AND cat_events.dateTime <= :upperBoundInclusive",
+    )
+    suspend fun due1HourLocally(lowerBoundExclusive: Long, upperBoundInclusive: Long): List<CatEvent>
 }

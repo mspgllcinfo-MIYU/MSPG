@@ -115,6 +115,7 @@ object RoomEventSync {
         if (listenerRegistration != null) return
         val roomId = RoomStore(context).roomId ?: return
         val dao = AppDatabase.get(context).catEventDao()
+        val localNotificationDao = AppDatabase.get(context).localNotificationStateDao()
         listenerRegistration = eventsRef(roomId).addSnapshotListener { snapshot, error ->
             if (error != null || snapshot == null) return@addSnapshotListener
             // このスナップショットが「この端末自身がまだFirestoreへ書き込み中/サーバー
@@ -149,10 +150,11 @@ object RoomEventSync {
                                 // 次のpushでFirestoreへ反映される）。
                                 return@runCatching
                             }
+                            val newDateTime = (data["dateTime"] as? Number)?.toLong()
                             val merged = CatEvent(
                                 id = local?.id ?: 0,
                                 title = data["title"] as? String ?: "",
-                                dateTime = (data["dateTime"] as? Number)?.toLong(),
+                                dateTime = newDateTime,
                                 createdAt = (data["createdAt"] as? Number)?.toLong() ?: System.currentTimeMillis(),
                                 reminded1Day = data["reminded1Day"] as? Boolean ?: false,
                                 reminded1Hour = data["reminded1Hour"] as? Boolean ?: false,
@@ -173,7 +175,21 @@ object RoomEventSync {
                                 // その場合はnull(「場所なし」)として扱う。
                                 locationText = data["locationText"] as? String,
                             )
-                            if (local == null) dao.insert(merged) else dao.update(merged)
+                            if (local == null) {
+                                dao.insert(merged)
+                            } else {
+                                // #POI通知修正: 受信した内容で日時が実際に変わっていた場合
+                                // だけ、この端末のlocal_notification_state(通知済み判定の
+                                // 正本、Firestoreには一切同期しない)をクリアし、新しい日時
+                                // に対して通知判定をやり直す。reminded1Day/reminded1Hourは
+                                // 上のmergedで(旧版互換のため)そのまま反映するだけで、
+                                // local_notification_stateへは絶対に書き込まない — 相手端末
+                                // が既に通知済みという情報を、この端末の通知抑制に使わない
+                                // ため。タイトル等、日時以外だけの変更ではクリアしない。
+                                val dateTimeChanged = local.dateTime != newDateTime
+                                dao.update(merged)
+                                if (dateTimeChanged) localNotificationDao.clear(merged.id)
+                            }
                         }
                     }
                 }
