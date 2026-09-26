@@ -26,6 +26,15 @@ jobs:
           java-version: "17"
 
       - uses: android-actions/setup-android@v3
+        with:
+          # android-actions/setup-android@v3のpackages入力のデフォルト値は
+          # "tools platform-tools" — このうち廃止済みの"tools"(旧SDK Tools、
+          # android/monitor等)はGoogleのSDKリポジトリから既に削除されており、
+          # sdkmanagerが"Failed to find package 'tools'"で失敗し、Gradleが
+          # 走る前にCIが落ちる原因になっていた。./gradlew assembleDebugは
+          # "tools"を一切使わない(compileSdk/build-toolsはAndroid Gradle
+          # Pluginが別途管理する)ため、ここではplatform-toolsのみを明示指定する。
+          packages: platform-tools
 
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
