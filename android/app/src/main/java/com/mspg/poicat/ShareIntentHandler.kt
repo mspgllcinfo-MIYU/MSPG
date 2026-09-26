@@ -11,6 +11,7 @@ import com.mspg.poicat.data.Photo
 import com.mspg.poicat.data.PhotoRepository
 import com.mspg.poicat.drive.FileDriveSync
 import com.mspg.poicat.maps.SharedLocationDetector
+import com.mspg.poicat.ocr.OcrIntake
 import com.mspg.poicat.room.RoomStore
 
 /**
@@ -72,6 +73,27 @@ object ShareIntentHandler {
         // の会話履歴とは別扱いにする。
         if (sharedText != null && SharedLocationDetector.looksLikeLocationShare(sharedText)) {
             PendingSharedLocation.pending = sharedText
+            return
+        }
+
+        // #POI画像OCR: キャプション無しの画像単体共有(航空券/予約票のスクリーンショット
+        // 等)は、従来の「そのままアルバムへ確定保存するだけ」ではなく、OCRで内容を
+        // 読み取り確認画面へ回す新フローに変更する。キャプション付きの画像共有(猫写真に
+        // コメントを付けて送る等、既存の黒猫AIチャット機能)はここでは一切変更せず、
+        // この下の既存ブロックがそのまま処理する — mimeTypeとキャプション有無だけで
+        // 自然に分岐でき、上のMaps分岐とも競合しない。確認前はPhoto DBへの行を一切
+        // 作らない(PendingOcrImageが保持する一時コピーのみ)— ユーザーがキャンセルした
+        // 場合、POIの正式データには何も残らない。
+        val bareImageUri: Uri? = if (mimeType?.startsWith("image/") == true && sharedText.isNullOrBlank()) {
+            IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+        } else {
+            null
+        }
+        if (bareImageUri != null) {
+            runCatching {
+                val tempFile = PhotoRepository(context).copyUriToTempFile(bareImageUri)
+                PendingOcrImage.pending = OcrIntake.analyze(context, tempFile)
+            }
             return
         }
 

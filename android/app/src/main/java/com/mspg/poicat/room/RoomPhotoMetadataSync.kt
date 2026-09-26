@@ -3,6 +3,7 @@ package com.mspg.poicat.room
 import android.content.Context
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.SetOptions
 import com.mspg.poicat.data.PhotoDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -39,15 +40,26 @@ object RoomPhotoMetadataSync {
         db().collection("rooms").document(roomId).collection("photoMetadata")
 
     /** ローカル編集をFirestoreへ反映する。ローカルDBへの反映は呼び出し元
-     * ([com.mspg.poicat.data.PhotoRepository.updateDetails])が必ず先に完了済みで、
-     * これは後追いのfire-and-forget処理 — 失敗してもローカルの編集結果には
-     * 一切影響しない。 */
+     * ([com.mspg.poicat.data.PhotoRepository.updateDetails]/[com.mspg.poicat.data.PhotoRepository.markDriveSynced])
+     * が必ず先に完了済みで、これは後追いのfire-and-forget処理 — 失敗してもローカルの
+     * 編集結果には一切影響しない。
+     *
+     * #POI画像OCR: [ocrText]は旧かっちゃん版がまだ知らないフィールド。彼が
+     * caption等を編集してpushした際、彼の書くdataマップにはocrTextのキー自体が
+     * 無い — [SetOptions.merge]を使うことで、そのdataマップに載っていない
+     * フィールド(ocrTextに限らず将来同様に追加される未知のフィールドも含む)は
+     * Firestore側の既存の値をそのまま残す(完全上書きしない)。以前は[SetOptions]無しの
+     * 完全上書きだったため、旧版がocrText付きドキュメントを編集すると、その
+     * ocrTextがFirestore上から消えてしまう恐れがあった([RoomEventSync.pushUpsert]の
+     * toMapが同じ理由で既にmergeを使っているのと同じ対策)。
+     */
     suspend fun pushMetadata(
         context: Context,
         driveFileId: String,
         caption: String?,
         albumName: String?,
         linkedDate: Long?,
+        ocrText: String?,
         updatedAt: Long,
     ) {
         runCatching {
@@ -56,9 +68,10 @@ object RoomPhotoMetadataSync {
                 "caption" to caption,
                 "albumName" to albumName,
                 "linkedDate" to linkedDate,
+                "ocrText" to ocrText,
                 "updatedAt" to updatedAt,
             )
-            metadataRef(roomId).document(driveFileId).set(data).await()
+            metadataRef(roomId).document(driveFileId).set(data, SetOptions.merge()).await()
         }
     }
 
@@ -80,9 +93,15 @@ object RoomPhotoMetadataSync {
     }
 
     /** パートナー端末発の編集を、こちらのローカル行(driveFileIdで特定できれば)へ反映する。
-     * [PhotoDao.updateMetadata]でこの3項目とmetadataUpdatedAtだけをピンポイント
+     * [PhotoDao.updateMetadata]でこの4項目とmetadataUpdatedAtだけをピンポイント
      * UPDATEし、driveFileId等の他フィールドは一切書き換えない
-     * ([com.mspg.poicat.data.PhotoRepository.softDelete]と同じ設計判断)。 */
+     * ([com.mspg.poicat.data.PhotoRepository.softDelete]と同じ設計判断)。
+     *
+     * #POI画像OCR: [ocrText]は旧かっちゃん版が書いたドキュメントにはキー自体が無い
+     * (彼のバージョンはこの機能を知らない)。その場合は[photo.ocrText]（今この端末が
+     * 既に持っている値）をそのまま維持する — dataに無いからといってnullへ書き換える
+     * と、みゆたん端末が読み取ったOCR原文を、かっちゃん端末の(ocrTextと無関係な)
+     * caption編集だけで消してしまうことになるため。 */
     private suspend fun applyMetadataLocally(context: Context, driveFileId: String, data: Map<String, Any?>) {
         val photoDao = PhotoDatabase.get(context).photoDao()
         val photo = photoDao.byDriveFileId(driveFileId) ?: return
@@ -92,6 +111,7 @@ object RoomPhotoMetadataSync {
         val caption = data["caption"] as? String
         val albumName = data["albumName"] as? String
         val linkedDate = (data["linkedDate"] as? Number)?.toLong()
-        photoDao.updateMetadata(photo.id, caption, albumName, linkedDate, remoteUpdatedAt)
+        val ocrText = if (data.containsKey("ocrText")) data["ocrText"] as? String else photo.ocrText
+        photoDao.updateMetadata(photo.id, caption, albumName, linkedDate, ocrText, remoteUpdatedAt)
     }
 }

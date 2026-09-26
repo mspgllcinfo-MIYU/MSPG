@@ -1,6 +1,7 @@
 package com.mspg.poicat
 
 import android.Manifest
+import android.app.Activity
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -48,6 +49,7 @@ import androidx.core.content.ContextCompat
 import com.mspg.poicat.brain.CatBrain
 import com.mspg.poicat.data.CatEventRepository
 import com.mspg.poicat.data.PhotoRepository
+import com.mspg.poicat.drive.PhotoDriveSync
 import com.mspg.poicat.maps.LocationDisplayName
 import com.mspg.poicat.maps.MapsLauncher
 import com.mspg.poicat.maps.SharedLocationDetector
@@ -216,6 +218,43 @@ fun AppRoot() {
                 onDismiss = { PendingSharedLocation.pending = null },
             )
         }
+    }
+
+    // #POI画像OCR: ShareIntentHandlerが画像から読み取った内容(PendingOcrImage、
+    // PendingSharedLocationと同じ一度きりのstateパターン)をここで観測し、確認
+    // ダイアログを表示する。共有を受信しOCR/解析を行っただけではPhoto/CatEventを
+    // 一切作らない — キャンセル時は一時コピー(pendingOcr.tempFile)を削除するだけで
+    // POIの正式データには何も残らず、OKした場合だけ、既存のCatEventRepository/
+    // PhotoRepository/PhotoMemoLinkを使って確定保存する(保存順序: 画像確定保存 →
+    // CatEvent登録 → 必要ならalsoShowAsTask → 画像とCatEventの紐付け)。いずれの
+    // 経路でも最後にpendingを必ずnullへ戻す(同じ共有を再度処理しないため)。
+    val pendingOcr = PendingOcrImage.pending
+    if (pendingOcr != null) {
+        OcrConfirmDialog(
+            result = pendingOcr,
+            onCancel = {
+                pendingOcr.tempFile.delete()
+                PendingOcrImage.pending = null
+            },
+            onConfirm = { title, dateTime, locationText, alsoShowAsTask ->
+                scope.launch {
+                    val photoRepository = PhotoRepository(context)
+                    val eventRepository = CatEventRepository(context)
+                    val photo = photoRepository.registerCapturedFile(
+                        pendingOcr.tempFile,
+                        caption = null,
+                        albumName = null,
+                        ocrText = pendingOcr.ocrText.ifBlank { null },
+                    )
+                    PhotoDriveSync.syncNewPhoto(context as Activity, photoRepository, photo)
+                    val saved = eventRepository.remember(title, dateTime)
+                    if (locationText != null) eventRepository.setLocation(saved, locationText)
+                    if (alsoShowAsTask) eventRepository.setAlsoShowAsTask(saved, true)
+                    photoRepository.linkToMemo(photo, saved.id)
+                }
+                PendingOcrImage.pending = null
+            },
+        )
     }
 
     Column(modifier = Modifier.fillMaxSize()) {

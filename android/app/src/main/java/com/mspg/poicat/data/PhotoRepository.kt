@@ -65,10 +65,27 @@ class PhotoRepository(private val context: Context) {
      * re-importing the same shared-Drive photo on every catalog refresh. */
     suspend fun byDriveFileId(driveFileId: String) = dao.byDriveFileId(driveFileId)
 
-    /** Saves a [Photo] row for a file the camera already wrote (see [newCameraCaptureFile]). */
-    suspend fun registerCapturedFile(file: File, caption: String?, albumName: String?): Photo = withContext(Dispatchers.IO) {
-        val photo = Photo(filePath = file.absolutePath, caption = caption, albumName = albumName)
-        photo.copy(id = dao.insert(photo))
+    /** Saves a [Photo] row for a file the camera already wrote (see [newCameraCaptureFile]).
+     * [ocrText]は#POI画像OCR用の追加パラメータ(デフォルトnull) — 既存呼び出し元
+     * (カメラ撮影)は変更不要。 */
+    suspend fun registerCapturedFile(file: File, caption: String?, albumName: String?, ocrText: String? = null): Photo =
+        withContext(Dispatchers.IO) {
+            val photo = Photo(filePath = file.absolutePath, caption = caption, albumName = albumName, ocrText = ocrText)
+            photo.copy(id = dao.insert(photo))
+        }
+
+    /**
+     * #POI画像OCR: 確認画面でユーザーがOKする前の、OCR処理用の一時コピー。
+     * [importFromUri]と違い、Photo DBへの行作成は一切行わない — キャンセルされた
+     * 場合は呼び出し元がこのFileをdelete()するだけで、POIの正式データには何も
+     * 残らない。OK後は同じFileをそのまま[registerCapturedFile]へ渡して確定保存する
+     * (二重コピーしない)。
+     */
+    suspend fun copyUriToTempFile(uri: Uri): File = withContext(Dispatchers.IO) {
+        val destFile = newPhotoFile()
+        val input = context.contentResolver.openInputStream(uri) ?: throw IOException("could not open shared image")
+        input.use { stream -> destFile.outputStream().use { out -> stream.copyTo(out) } }
+        destFile
     }
 
     suspend fun all() = dao.all()
@@ -89,8 +106,8 @@ class PhotoRepository(private val context: Context) {
     /**
      * キャプション/アルバム名/カレンダー日付の編集。[photo]はUI側の古いスナップショットの
      * 可能性がある([softDelete]と同じ理由)ため、[PhotoDao.updateMetadata]でこの3項目と
-     * metadataUpdatedAtだけをピンポイントUPDATEし、driveFileId等の他フィールドは
-     * 一切書き換えない。
+     * (変更しないocrText)・metadataUpdatedAtだけをピンポイントUPDATEし、driveFileId等の
+     * 他フィールドは一切書き換えない。
      *
      * 更新後にDBから読み直した最新の行にdriveFileId(=夫婦間で共有中)があれば、この編集
      * 内容を[RoomPhotoMetadataSync]経由でパートナー端末にも伝える(fire-and-forget、
@@ -99,11 +116,18 @@ class PhotoRepository(private val context: Context) {
      */
     suspend fun updateDetails(photo: Photo, caption: String?, albumName: String?, linkedDate: Long?) {
         val now = System.currentTimeMillis()
-        dao.updateMetadata(photo.id, caption, albumName, linkedDate, now)
+        // #POI画像OCR: ocrTextはこの関数の編集対象ではない(専用の編集UIが無い)ため、
+        // [photo]が既に持つ現在値をそのまま維持する — [updateMetadata]がピンポイント
+        // UPDATEでも他の値を巻き戻さないよう、明示的に渡す必要がある。ocrTextは作成後
+        // 変更されない値なので、UI側スナップショットの[photo]から読んでも(roomEventId等
+        // と違い)古さの問題は生じない。
+        dao.updateMetadata(photo.id, caption, albumName, linkedDate, photo.ocrText, now)
         val current = dao.byIds(listOf(photo.id)).firstOrNull()
         current?.driveFileId?.let { driveFileId ->
             syncScope.launch {
-                RoomPhotoMetadataSync.pushMetadata(context.applicationContext, driveFileId, caption, albumName, linkedDate, now)
+                RoomPhotoMetadataSync.pushMetadata(
+                    context.applicationContext, driveFileId, caption, albumName, linkedDate, photo.ocrText, now,
+                )
             }
         }
     }
@@ -120,6 +144,33 @@ class PhotoRepository(private val context: Context) {
     suspend fun markDriveSynced(photoId: Long, driveFileId: String) = withContext(Dispatchers.IO) {
         val photo = dao.byIds(listOf(photoId)).firstOrNull() ?: return@withContext
         dao.update(photo.copy(driveSyncStatus = Photo.DRIVE_SYNC_SYNCED, driveFileId = driveFileId))
+        // #POI画像OCR: ocrTextには[updateDetails]のような編集UIが無いため、
+        // Driveアップロード未完了(driveFileId無し)の間はpushMetadataの送信先
+        // ドキュメントIDが決まらず、一度も同期されないまま終わってしまう。
+        // アップロードが完了してdriveFileIdが確定したこのタイミングが、既存の
+        // caption/albumName/linkedDateと合わせてocrTextを送る唯一の機会になる
+        // (以後ocrTextが変わることは無いため、これで十分)。
+        //
+        // #POI画像OCR修正: 新規作成直後のphoto.metadataUpdatedAtはまだ既定値の0の
+        // ままのため、これをそのままFirestoreのupdatedAtとして送ると、パートナー
+        // 端末側の(こちらも初期値0の)ローカル行との比較が
+        // 「remoteUpdatedAt(0) <= localUpdatedAt(0)」でtrueになり、既存のLWW判定
+        // ([RoomPhotoMetadataSync.applyMetadataLocally])に「古い/同じ」と弾かれて
+        // 一切反映されない不具合があった。[updateDetails]と同じく新しい
+        // System.currentTimeMillis()を発行し、ローカルのmetadataUpdatedAtも同じ値へ
+        // 先に更新してから送ることで、「Firestoreは新timestamp、ローカルは0のまま」
+        // という不整合を作らない。既存のPhoto一括更新・バックフィルは行わない —
+        // このOCR写真1行だけの、通常のupdateDetailsと同じ形のピンポイントUPDATE。
+        if (photo.ocrText != null) {
+            val now = System.currentTimeMillis()
+            dao.updateMetadata(photo.id, photo.caption, photo.albumName, photo.linkedDate, photo.ocrText, now)
+            syncScope.launch {
+                RoomPhotoMetadataSync.pushMetadata(
+                    context.applicationContext, driveFileId, photo.caption, photo.albumName,
+                    photo.linkedDate, photo.ocrText, now,
+                )
+            }
+        }
     }
 
     /** Photos linked to a memo (any cat_events row), newest-added first — for the memo screen's photo strip. */

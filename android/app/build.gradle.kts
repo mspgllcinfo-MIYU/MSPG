@@ -113,5 +113,16 @@ dependencies {
     implementation("com.google.android.gms:play-services-auth:21.2.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
 
+    // #POI画像OCR: 端末内OCR(Google ML Kit Text Recognition)。画像バイトは端末外へ
+    // 一切送信しない、無料・無制限(APIコール無し)の文字認識。text-recognitionは
+    // ラテン文字用の同梱モデル、text-recognition-japaneseは日本語用の別artifactで、
+    // 初回利用時にPlay Services経由でモデルを取得する(APKには同梱されないため
+    // APKサイズへの影響は小さい)。どちらも通常のJavaライブラリで、firebase-bom等の
+    // ような新しいKotlinコンパイラでコンパイルされたメタデータは持たないため、
+    // 過去にこのプロジェクトで起きたFirebase BOMのKotlinメタデータ非互換問題とは
+    // 無関係。
+    implementation("com.google.mlkit:text-recognition:16.0.1")
+    implementation("com.google.mlkit:text-recognition-japanese:16.0.1")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

@@ -13,7 +13,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * means adding or changing the photo schema can never require a migration
  * of — or risk any damage to — the data already stored in `cat_events`.
  */
-@Database(entities = [Photo::class, PhotoMemoLink::class], version = 6, exportSchema = true)
+@Database(entities = [Photo::class, PhotoMemoLink::class], version = 7, exportSchema = true)
 abstract class PhotoDatabase : RoomDatabase() {
     abstract fun photoDao(): PhotoDao
     abstract fun photoMemoLinkDao(): PhotoMemoLinkDao
@@ -88,6 +88,17 @@ abstract class PhotoDatabase : RoomDatabase() {
             }
         }
 
+        // v6 -> v7: added Photo.ocrText(#POI画像OCR、端末内OCRで読み取った原文の照合用
+        // 保持)。metadataUpdatedAt列(MIGRATION_5_6)と同じ形の、1つのadditive ADD COLUMN
+        // のみ。NOT NULL制約もDEFAULTも無いnullable TEXTのため、既存の全ての写真は
+        // ocrText=NULL(「OCR未実施」という実在の状態)のまま残り、既存行への
+        // UPDATE・バックフィルは一切行わない。
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE photos ADD COLUMN ocrText TEXT")
+            }
+        }
+
         fun get(context: Context): PhotoDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -96,10 +107,13 @@ abstract class PhotoDatabase : RoomDatabase() {
                     "poicat_photos.db",
                 )
                     // v2->v3が正式なmigrationで埋まったため、v1〜v4のどのバージョンから
-                    // 開始してもv5まで非破壊で到達できる — fallbackToDestructiveMigration()
+                    // 開始してもv7まで非破壊で到達できる — fallbackToDestructiveMigration()
                     // は完全に不要になったため外した(既存のPhoto/PhotoMemoLinkデータを
                     // 初期化するリスクを持つ設定を残さない)。
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                    .addMigrations(
+                        MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
+                        MIGRATION_5_6, MIGRATION_6_7,
+                    )
                     .build().also { instance = it }
             }
     }

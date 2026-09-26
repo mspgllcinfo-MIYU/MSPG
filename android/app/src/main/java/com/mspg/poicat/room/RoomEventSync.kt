@@ -8,6 +8,7 @@ import com.google.firebase.firestore.SetOptions
 import com.mspg.poicat.data.AppDatabase
 import com.mspg.poicat.data.CatEvent
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -59,6 +60,76 @@ object RoomEventSync {
      */
     private val applyMutex = Mutex()
 
+    /**
+     * #POI同期race修正: 同一ローカル行(CatEvent.id)に対して短時間に複数の[pushUpsert]が
+     * 呼ばれる場合(例: CatBrain.rememberScheduleWithWorkJudgmentが
+     * repository.remember()の直後にrepository.setAlsoShowAsTaskを呼ぶ経路など、
+     * BBの通常利用で毎回発生する)、各呼び出しが「roomEventIdがまだnullの古い
+     * スナップショット」だけを見て、互いの完了を待たずにそれぞれ新しいUUIDを
+     * 発行してしまい、Firestore上に同じ論理イベントに対する複数のdocumentが
+     * 作られてしまう実機不具合が確認された(先に完了した方のdocumentは
+     * どのローカル行からも参照されない孤児となり、次回アプリ再起動時の
+     * listener初回スナップショットでローカルの重複行として現れる)。
+     *
+     * [withEventLock]で同一event.idの[pushUpsert]/[pushDelete]全体(最新DB状態の確認→
+     * UUID発行判断→Firestore書き込み→[onRoomEventIdAssigned]完了)を直列化し、後から
+     * 実行される呼び出しが必ず先行する呼び出しの結果(ローカルDBへ書き込まれた
+     * roomEventId)を見てからUUID発行の有無を判断できるようにする。既存の[applyMutex]
+     * (Firestore受信/pull側)とは別の排他区間 — pull処理まで不要にブロックしない。
+     *
+     * 単一のグローバルMutex 1個で全event.idのpushを直列化する初期実装は採用しない —
+     * オフライン時、予定Aの`.await()`がサーバー確認まで(オンライン復帰まで)完了しない
+     * Firestoreの仕様上、無関係な予定B/C/Dのpushまで長時間ブロックしてしまうため。
+     * [PushLock.refCount]で「今、このevent.idのロックを使いたいコルーチンが何人いるか」
+     * を数え、0になった時点で[pushLocks]からエントリを取り除くことで、CatEvent数に
+     * 応じてMapが無限に増え続けることも避けている。
+     *
+     * [pushLocks]の読み書きは必ず[ConcurrentHashMap.compute]経由で行う — 同一キーに対する
+     * compute呼び出し全体はConcurrentHashMapがアトミックに保証するため、「参照数0で
+     * エントリを消す」処理と「参照数を増やして既存ロックを再利用する」処理が別の
+     * コルーチンで同時に走っても、消したはずのロックがまだ待機中のコルーチンから
+     * 見えている、または消えた直後に同じevent.id用の別のロックが新たに作られて
+     * 待機側と食い違う、といった競合状態は起きない(あるコルーチンの参照が有効な間、
+     * そのcomputeが完了するまで他のcomputeは同じキーに対してブロックされるため)。
+     */
+    private class PushLock {
+        val mutex = Mutex()
+        var refCount = 0
+    }
+
+    private val pushLocks = ConcurrentHashMap<Long, PushLock>()
+
+    private fun acquireEventLock(eventId: Long): PushLock {
+        lateinit var acquired: PushLock
+        pushLocks.compute(eventId) { _, existing ->
+            val lock = existing ?: PushLock()
+            lock.refCount++
+            acquired = lock
+            lock
+        }
+        return acquired
+    }
+
+    private fun releaseEventLock(eventId: Long) {
+        pushLocks.compute(eventId) { _, existing ->
+            val lock = existing ?: return@compute null
+            lock.refCount--
+            if (lock.refCount <= 0) null else lock
+        }
+    }
+
+    /** 同一[eventId]についての[block]呼び出しだけを直列化する(別eventIdなら並行実行可能)。
+     * 例外・キャンセル時も[releaseEventLock]が必ず呼ばれるため、ロック管理状態が
+     * 壊れることはない。 */
+    private suspend inline fun <T> withEventLock(eventId: Long, block: () -> T): T {
+        val lock = acquireEventLock(eventId)
+        try {
+            return lock.mutex.withLock { block() }
+        } finally {
+            releaseEventLock(eventId)
+        }
+    }
+
     private fun db() = FirebaseFirestore.getInstance()
     private fun eventsRef(roomId: String) = db().collection("rooms").document(roomId).collection("events")
 
@@ -78,11 +149,17 @@ object RoomEventSync {
     )
 
     /**
-     * ローカルで新規追加/更新された1件をFirestoreへ反映する。[event]がまだ
-     * roomEventIdを持たない（初回プッシュ）場合は新規にUUIDを割り当て、書き込みが
-     * 成功した後にだけ[onRoomEventIdAssigned]で呼び出し元へ知らせる（＝ローカルの
-     * 行へ保存するのは呼び出し元＝CatEventRepositoryの責務。書き込み失敗時は
-     * roomEventIdを持たないままなので、次のpush機会に再度新規プッシュとして扱われる）。
+     * ローカルで新規追加/更新された1件をFirestoreへ反映する。[withEventLock]で同一
+     * event.idについて直列化されているため、UUID発行判断の直前に必ずローカルDBの
+     * 最新状態(直前の[pushUpsert]呼び出しが書き込んだ可能性のあるroomEventIdを含む)を
+     * 再確認できる — 呼び出し元が渡した[event]のroomEventIdがnullでも、DB側に既に
+     * (先行する呼び出しによって)roomEventIdが記録されていればそれをそのまま再利用し、
+     * 新規UUIDは発行しない。DBにも無い場合だけ、新規にUUIDを割り当てる。書き込みが
+     * 成功し、かつ今回新たにUUIDを発行した場合にだけ[onRoomEventIdAssigned]で呼び出し元
+     * へ知らせる（＝ローカルの行へ保存するのは呼び出し元＝CatEventRepositoryの責務。
+     * 書き込み失敗時はroomEventIdを持たないままなので、次のpush機会に再度新規プッシュ
+     * として扱われる）。別のevent.idへの[pushUpsert]/[pushDelete]はこの呼び出しを
+     * 待たずに並行して進む。
      *
      * [SetOptions.merge]を使い、[toMap]に載っていないフィールドはFirestore側の
      * 既存の値をそのまま残す（＝完全上書きしない）。これにより、将来この端末より
@@ -91,19 +168,42 @@ object RoomEventSync {
      * 送る各フィールド自体は常にこのイベントの最新値で上書きされる点は従来と変わらない。
      */
     suspend fun pushUpsert(context: Context, event: CatEvent, onRoomEventIdAssigned: suspend (String) -> Unit) {
-        runCatching {
-            val roomId = RoomStore(context).roomId ?: return
-            val roomEventId = event.roomEventId ?: UUID.randomUUID().toString()
-            eventsRef(roomId).document(roomEventId).set(toMap(event), SetOptions.merge()).await()
-            if (event.roomEventId == null) onRoomEventIdAssigned(roomEventId)
+        withEventLock(event.id) {
+            runCatching {
+                val roomId = RoomStore(context).roomId ?: return
+                val dao = AppDatabase.get(context).catEventDao()
+                val existingRoomEventId = dao.byId(event.id)?.roomEventId ?: event.roomEventId
+                val roomEventId = existingRoomEventId ?: UUID.randomUUID().toString()
+                eventsRef(roomId).document(roomEventId).set(toMap(event), SetOptions.merge()).await()
+                if (existingRoomEventId == null) onRoomEventIdAssigned(roomEventId)
+            }
         }
     }
 
+    /**
+     * #POI同期race修正: [pushUpsert]と同じ[withEventLock](event.id)で直列化する —
+     * 同一event.idに対する編集push(pushUpsert)と削除push(pushDelete)が別々の
+     * タイミングでFirestoreへ書き込み/削除を送ると、削除が先に完了した直後に、既に
+     * 直前から進行中だった編集pushの書き込みが後から到着して削除済みdocumentを
+     * 復活させてしまう、という順序の競合を防ぐ。既存の削除仕様(論理削除ではなく
+     * Firestore document自体をdeleteする方式)自体は変更していない。
+     *
+     * 注意(既知の制限、今回のスコープ外): ここで直列化できるのは「roomEventIdが
+     * 既に確定している既存イベント」への編集/削除の競合のみ。新規作成の初回push
+     * (roomEventIdがまだnull)が完了するより前に、その同じローカル行が削除された
+     * 場合、削除時点のローカル行は既に無くなっているため[pushDelete]は
+     * `event.roomEventId ?: return`で何もできず、初回pushが後から発行した
+     * roomEventIdをFirestore上から消す手段が無い(既存の、この修正以前からある
+     * ギャップ)。これを解消するには[CatEventRepository]側の削除経路自体の見直しが
+     * 必要で、今回の`RoomEventSync.kt`単体の修正範囲を超えるため対応していない。
+     */
     suspend fun pushDelete(context: Context, event: CatEvent) {
-        runCatching {
-            val roomId = RoomStore(context).roomId ?: return
-            val roomEventId = event.roomEventId ?: return
-            eventsRef(roomId).document(roomEventId).delete().await()
+        withEventLock(event.id) {
+            runCatching {
+                val roomId = RoomStore(context).roomId ?: return
+                val roomEventId = event.roomEventId ?: return
+                eventsRef(roomId).document(roomEventId).delete().await()
+            }
         }
     }
 
@@ -118,19 +218,25 @@ object RoomEventSync {
         val localNotificationDao = AppDatabase.get(context).localNotificationStateDao()
         listenerRegistration = eventsRef(roomId).addSnapshotListener { snapshot, error ->
             if (error != null || snapshot == null) return@addSnapshotListener
-            // このスナップショットが「この端末自身がまだFirestoreへ書き込み中/サーバー
-            // 未確認の、自分自身の変更」を反映しただけのローカルエコーである場合は
-            // 無視する。理由: pushUpsertの書き込みが完了する前にこのローカルエコーが
-            // 先に届くと、その時点ではまだmarkRoomEventIdによるroomEventIdの記録が
-            // 終わっておらず、dao.byRoomEventIdが該当ローカル行を見つけられないため
-            // 「新規」として別行をinsertしてしまい、同じ内容が2行登録される(実機で
-            // 確認された二重登録の直接原因)。hasPendingWrites()==trueは「まだサーバー
-            // 未確認の、この端末自身の変更」だけを意味するため、他端末からの変更を
-            // 取りこぼすことはない — サーバー確認後(hasPendingWrites==false)に改めて
-            // 届いた時点では、markRoomEventIdは既に完了しているはずなので、正しく
-            // 「既存行の更新」として扱われる。
-            if (snapshot.metadata.hasPendingWrites()) return@addSnapshotListener
             for (change in snapshot.documentChanges) {
+                // #POI同期修正②: このdocument自身が「まだFirestoreへ書き込み中/サーバー
+                // 未確認の、自分自身の変更」を反映しただけのローカルエコーである場合は
+                // 無視する。理由: pushUpsertの書き込みが完了する前にこのローカルエコーが
+                // 先に届くと、その時点ではまだmarkRoomEventIdによるroomEventIdの記録が
+                // 終わっておらず、dao.byRoomEventIdが該当ローカル行を見つけられないため
+                // 「新規」として別行をinsertしてしまい、同じ内容が2行登録される(実機で
+                // 確認された二重登録の直接原因)。change.document.metadata.hasPendingWrites()
+                // はdocumentごとに個別の値(Firestore SDK自体がdocument単位で保持している)
+                // であり、以前使っていたsnapshot.metadata.hasPendingWrites()(スナップ
+                // ショット全体で1つの値 — 含まれるいずれかのdocumentがpendingなら全体が
+                // trueになる)より粒度が細かい。これにより、この端末の別の予定がpending中
+                // でも、同じスナップショットに乗ってきた相手端末発の変更(pendingではない)
+                // まで一緒に捨ててしまうことがなくなる。hasPendingWrites()==trueは「まだ
+                // サーバー未確認の、この端末自身の変更」だけを意味するため、他端末からの
+                // 変更を取りこぼすことはない — サーバー確認後(hasPendingWrites==false)に
+                // 改めて届いた時点では、markRoomEventIdは既に完了しているはずなので、
+                // 正しく「既存行の更新」として扱われる。
+                if (change.document.metadata.hasPendingWrites()) continue
                 val roomEventId = change.document.id
                 scope.launch {
                     // #143: このDocumentChangeの反映が完了するまで、他のDocumentChangeの

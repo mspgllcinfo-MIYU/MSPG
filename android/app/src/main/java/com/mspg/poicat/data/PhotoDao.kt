@@ -24,15 +24,25 @@ interface PhotoDao {
     @Query("UPDATE photos SET deletedAt = :deletedAt WHERE id = :photoId")
     suspend fun markDeleted(photoId: Long, deletedAt: Long)
 
-    /** キャプション/アルバム名/カレンダー日付編集専用 — idを条件にこの3つと
+    /** キャプション/アルバム名/カレンダー日付/OCR原文編集専用 — idを条件にこの4つと
      * metadataUpdatedAtだけをUPDATEする、ピンポイントな書き込み。[markDeleted]と同じ
      * 理由で、UI側の古いPhotoスナップショット全体を書き戻すことはしない — driveFileId・
-     * driveSyncStatus・deletedAt等の他フィールドを一切巻き戻さない。 */
+     * driveSyncStatus・deletedAt等の他フィールドを一切巻き戻さない。#POI画像OCR:
+     * [ocrText]はキャプション等と違って編集UIが無いため、呼び出し元は常に「現在の値を
+     * そのまま渡す(変更しない)」か「パートナー端末から受信した値を渡す」のいずれかで、
+     * この関数自体がocrTextを新たに書き換える判断はしない。 */
     @Query(
         "UPDATE photos SET caption = :caption, albumName = :albumName, linkedDate = :linkedDate, " +
-            "metadataUpdatedAt = :metadataUpdatedAt WHERE id = :photoId",
+            "ocrText = :ocrText, metadataUpdatedAt = :metadataUpdatedAt WHERE id = :photoId",
     )
-    suspend fun updateMetadata(photoId: Long, caption: String?, albumName: String?, linkedDate: Long?, metadataUpdatedAt: Long)
+    suspend fun updateMetadata(
+        photoId: Long,
+        caption: String?,
+        albumName: String?,
+        linkedDate: Long?,
+        ocrText: String?,
+        metadataUpdatedAt: Long,
+    )
 
     /** All photos, newest-added first. 論理削除済み(deletedAt != null)の行は除外する —
      * 「×」削除はこのdeletedAtを立てるだけの論理削除なので、一覧系クエリは全て

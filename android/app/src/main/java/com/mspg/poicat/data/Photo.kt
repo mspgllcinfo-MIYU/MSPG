@@ -47,6 +47,12 @@ data class Photo(
      * ために使う。既存行はmigrationで0になる — 0はどんな実際の編集時刻よりも必ず
      * 古い扱いになるだけで、実害はない。 */
     val metadataUpdatedAt: Long = 0,
+    /** #POI画像OCR: この写真から端末内OCRで読み取った生テキスト(照合用の原文)。
+     * captionのような編集UIは無く、作成時に一度だけ設定され、以後変更されない
+     * (ユーザーが手動修正するのはCatEvent側のタイトル/日時/場所であり、この原文
+     * 自体は書き換えない)。既存(この列追加前)の写真は全てnullのまま残る — 未読取
+     * の実在の状態であり、後から自動でOCRし直すことはしない。 */
+    val ocrText: String? = null,
 ) {
     companion object {
         const val DRIVE_SYNC_PENDING = "PENDING"
