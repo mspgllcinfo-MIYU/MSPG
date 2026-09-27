@@ -11,7 +11,6 @@ import com.mspg.poicat.data.Photo
 import com.mspg.poicat.data.PhotoRepository
 import com.mspg.poicat.drive.FileDriveSync
 import com.mspg.poicat.maps.SharedLocationDetector
-import com.mspg.poicat.ocr.OcrIntake
 import com.mspg.poicat.room.RoomStore
 
 /**
@@ -76,63 +75,36 @@ object ShareIntentHandler {
             return
         }
 
-        // #POI画像OCR: キャプション無しの画像単体共有(航空券/予約票のスクリーンショット
-        // 等)は、従来の「そのままアルバムへ確定保存するだけ」ではなく、OCRで内容を
-        // 読み取り確認画面へ回す新フローに変更する。キャプション付きの画像共有(猫写真に
-        // コメントを付けて送る等、既存の黒猫AIチャット機能)はここでは一切変更せず、
-        // この下の既存ブロックがそのまま処理する — mimeTypeとキャプション有無だけで
-        // 自然に分岐でき、上のMaps分岐とも競合しない。確認前はPhoto DBへの行を一切
-        // 作らない(PendingOcrImageが保持する一時コピーのみ)— ユーザーがキャンセルした
-        // 場合、POIの正式データには何も残らない。
-        val bareImageUri: Uri? = if (mimeType?.startsWith("image/") == true && sharedText.isNullOrBlank()) {
-            IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
-        } else {
-            null
-        }
-        if (bareImageUri != null) {
-            runCatching {
-                val tempFile = PhotoRepository(context).copyUriToTempFile(bareImageUri)
-                PendingOcrImage.pending = OcrIntake.analyze(context, tempFile)
+        // #POI画像共有3択: image/*の共有は、EXTRA_TEXTの有無に一切関係なく、まず
+        // 「予定を読み取る/アルバムに保存/猫AIに送る」をユーザーに選んでもらう
+        // (PendingImageShareChoice、AppRootが表示する確認ダイアログ)。以前は
+        // 「キャプション無しならOCR、キャプション有りなら猫AIチャット」という
+        // EXTRA_TEXTの有無だけでの自動判定だったが、共有元アプリがユーザーの意図と
+        // 無関係にEXTRA_TEXTへ文字列を自動付与するケースがあり、OCRルートに入れない
+        // 実機不具合が確認されたため廃止した。ここではPhoto DBへの行を一切作らない
+        // (一時コピーのみ) — 共有元Uriの読み取り権限がユーザーの選択待ちの間に
+        // 失効しても影響しないよう、選択肢を出す前に安全な一時ファイルへコピーして
+        // おく。ユーザーがキャンセルした場合、POIの正式データには何も残らない。
+        if (mimeType?.startsWith("image/") == true) {
+            val imageUri = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+            if (imageUri != null) {
+                runCatching {
+                    val tempFile = PhotoRepository(context).copyUriToTempFile(imageUri)
+                    PendingImageShareChoice.pending = PendingImageShareChoice.Data(tempFile, sharedText)
+                }
             }
             return
         }
 
-        val sharedUri: Uri? = if (mimeType?.startsWith("image/") == true) {
-            IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
-        } else {
-            null
-        }
-        if (sharedText.isNullOrBlank() && sharedUri == null) return
-
+        // ここに到達するのはテキストのみの共有(画像も、Mapsの場所らしいURLも無い場合)。
+        // 従来通り黒猫AIチャットへそのまま渡す — この経路は画像共有3択の対象外で、
+        // 挙動を変更していない。
+        if (sharedText.isNullOrBlank()) return
         runCatching {
-            val photoRepository = PhotoRepository(context)
-            // #144: AiChatScreen.ktと同じく、この端末の現在の利用者
-            // (RoomStore.displayName)を都度読めるラムダとしてCatBrainへ渡す。
             val roomStore = RoomStore(context)
-            val catBrain = CatBrain(CatEventRepository(context), photoRepository) { roomStore.displayName }
-
-            // 2. Import the photo (if any) and record the user message — same
-            // shape as AiChatScreen.send(): text may be blank, photoIds may be empty.
-            val photo: Photo? = sharedUri?.let { photoRepository.importFromUri(it, caption = null, albumName = null) }
-            ChatRepository.addMessage(
-                ChatMessage("user", sharedText.orEmpty(), System.currentTimeMillis(), photo?.let { listOf(it.id) } ?: emptyList()),
-            )
-
-            if (photo != null && sharedText.isNullOrBlank()) {
-                // 3. A bare photo share, no caption: already saved to the album,
-                // same as AiChatScreen's Phase B bare-photo send — nothing for
-                // CatBrain to sort.
-                return@runCatching
-            }
-
-            // 3. Same branching as send(): photo+caption vs. text-only.
-            val reply = if (photo != null) {
-                catBrain.respondToPhoto(sharedText.orEmpty(), photo)
-            } else {
-                catBrain.respond(sharedText!!)
-            }
-
-            // 4. Record the cat's reply.
+            val catBrain = CatBrain(CatEventRepository(context), PhotoRepository(context)) { roomStore.displayName }
+            ChatRepository.addMessage(ChatMessage("user", sharedText, System.currentTimeMillis()))
+            val reply = catBrain.respond(sharedText)
             ChatRepository.addMessage(
                 ChatMessage("assistant", reply.text, System.currentTimeMillis(), reply.photoIds),
             )
@@ -141,9 +113,39 @@ object ShareIntentHandler {
                 ChatMessage("assistant", "うまく受け取れなかったにゃ", System.currentTimeMillis()),
             )
         }
+        PendingNavigation.requestedTab = AppTab.AI
+    }
 
-        // 5. Only now signal AppRoot to open 猫AI — after the message(s) it's
-        // about to display already exist in ChatRepository.
+    /**
+     * #POI画像共有3択「猫AIに送る」の実行部分。既存の黒猫AI画像共有ルート
+     * (catBrain.respondToPhoto→ChatRepository→PendingNavigation)と同じ処理を
+     * そのまま使う。[photo]は呼び出し元([AppRoot]の確認ダイアログのコールバック)が
+     * 既に確定保存済みのPhotoで、ここでは新たにPhoto行を作らない(二重import
+     * しない)。[caption]が空ならCatBrainを呼ばず写真だけ記録する(#144フェーズB
+     * の「キャプション無し画像送信」と同じ挙動)。
+     */
+    suspend fun sendPhotoToChat(context: Activity, photo: Photo, caption: String) {
+        val trimmed = caption.trim()
+        ChatRepository.addMessage(
+            ChatMessage("user", trimmed, System.currentTimeMillis(), listOf(photo.id)),
+        )
+        if (trimmed.isBlank()) {
+            PendingNavigation.requestedTab = AppTab.AI
+            return
+        }
+        runCatching {
+            val photoRepository = PhotoRepository(context)
+            val roomStore = RoomStore(context)
+            val catBrain = CatBrain(CatEventRepository(context), photoRepository) { roomStore.displayName }
+            val reply = catBrain.respondToPhoto(trimmed, photo)
+            ChatRepository.addMessage(
+                ChatMessage("assistant", reply.text, System.currentTimeMillis(), reply.photoIds),
+            )
+        }.onFailure {
+            ChatRepository.addMessage(
+                ChatMessage("assistant", "うまく受け取れなかったにゃ", System.currentTimeMillis()),
+            )
+        }
         PendingNavigation.requestedTab = AppTab.AI
     }
 }

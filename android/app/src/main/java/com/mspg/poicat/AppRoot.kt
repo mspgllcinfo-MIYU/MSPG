@@ -53,6 +53,7 @@ import com.mspg.poicat.drive.PhotoDriveSync
 import com.mspg.poicat.maps.LocationDisplayName
 import com.mspg.poicat.maps.MapsLauncher
 import com.mspg.poicat.maps.SharedLocationDetector
+import com.mspg.poicat.ocr.OcrIntake
 import com.mspg.poicat.room.RoomStore
 import java.time.LocalDate
 import java.time.YearMonth
@@ -220,14 +221,67 @@ fun AppRoot() {
         }
     }
 
-    // #POI画像OCR: ShareIntentHandlerが画像から読み取った内容(PendingOcrImage、
-    // PendingSharedLocationと同じ一度きりのstateパターン)をここで観測し、確認
-    // ダイアログを表示する。共有を受信しOCR/解析を行っただけではPhoto/CatEventを
-    // 一切作らない — キャンセル時は一時コピー(pendingOcr.tempFile)を削除するだけで
-    // POIの正式データには何も残らず、OKした場合だけ、既存のCatEventRepository/
-    // PhotoRepository/PhotoMemoLinkを使って確定保存する(保存順序: 画像確定保存 →
-    // CatEvent登録 → 必要ならalsoShowAsTask → 画像とCatEventの紐付け)。いずれの
-    // 経路でも最後にpendingを必ずnullへ戻す(同じ共有を再度処理しないため)。
+    // #POI画像共有3択: ShareIntentHandlerが検出した「image/*の共有」
+    // (PendingImageShareChoice、他のPendingXxxと同じ一度きりのstateパターン)を
+    // ここで観測し、3択ダイアログを表示する。この時点ではPhoto/CatEvent/
+    // チャット履歴を一切作らない。4つのコールバックのうち呼ばれるのは常に1つだけ
+    // (各コールバックの先頭で即座にpendingをnullへ戻すため、二重タップ等で同じ
+    // 共有が2経路走ることはない)。キャンセル時は一時コピー(tempFile)を削除する
+    // だけでPOIの正式データには何も残らない。EXTRA_TEXT(sharedText)は「猫AIに
+    // 送る」を選んだ場合だけキャプションとして使う。
+    val pendingImageChoice = PendingImageShareChoice.pending
+    if (pendingImageChoice != null) {
+        ImageShareChoiceDialog(
+            onReadSchedule = {
+                val data = pendingImageChoice
+                PendingImageShareChoice.pending = null
+                // ①予定を読み取る: 既存のOcrIntake/PendingOcrImage/OcrConfirmDialogへ
+                // そのまま引き渡す(OCR本体は無変更) — ユーザーがこれを選んだ場合に
+                // だけOCR/Gemini解析を実行する(選ぶ前に先走って解析しない)。
+                scope.launch {
+                    PendingOcrImage.pending = OcrIntake.analyze(context, data.tempFile)
+                }
+            },
+            onSaveToAlbum = {
+                val data = pendingImageChoice
+                PendingImageShareChoice.pending = null
+                // ②アルバムに保存: 既存のPhotoRepository/PhotoDriveSyncをそのまま
+                // 使う(AlbumScreenの「撮影」経路と同じ組み合わせ)。OCR・CatEvent・
+                // 猫AIチャットのいずれにも一切触れない。
+                scope.launch {
+                    val photoRepository = PhotoRepository(context)
+                    val photo = photoRepository.registerCapturedFile(data.tempFile, caption = null, albumName = null)
+                    PhotoDriveSync.syncNewPhoto(context as Activity, photoRepository, photo)
+                }
+            },
+            onSendToChat = {
+                val data = pendingImageChoice
+                PendingImageShareChoice.pending = null
+                // ③猫AIに送る: 既存の黒猫AI画像共有ルート(ShareIntentHandler.
+                // sendPhotoToChat、旧実装のcatBrain.respondToPhoto経路と同じ)を
+                // そのまま使う。EXTRA_TEXTがあればキャプションとして使い、無ければ
+                // 空文字列(キャプション無し画像送信と同じ扱い)。OCR登録は行わない。
+                scope.launch {
+                    val photoRepository = PhotoRepository(context)
+                    val photo = photoRepository.registerCapturedFile(data.tempFile, caption = null, albumName = null)
+                    ShareIntentHandler.sendPhotoToChat(context as Activity, photo, data.sharedText.orEmpty())
+                }
+            },
+            onCancel = {
+                pendingImageChoice.tempFile.delete()
+                PendingImageShareChoice.pending = null
+            },
+        )
+    }
+
+    // #POI画像OCR: 上の3択で「予定を読み取る」が選ばれた場合に、ShareIntentHandlerの
+    // 代わりにここでOcrIntake.analyzeを実行した結果(PendingOcrImage、
+    // PendingSharedLocationと同じ一度きりのstateパターン)を観測し、確認ダイアログを
+    // 表示する。解析を行っただけではPhoto/CatEventを一切作らない — キャンセル時は
+    // 一時コピー(pendingOcr.tempFile)を削除するだけでPOIの正式データには何も残らず、
+    // OKした場合だけ、既存のCatEventRepository/PhotoRepository/PhotoMemoLinkを使って
+    // 確定保存する(保存順序: 画像確定保存 → CatEvent登録 → 必要ならalsoShowAsTask →
+    // 画像とCatEventの紐付け)。いずれの経路でも最後にpendingを必ずnullへ戻す。
     val pendingOcr = PendingOcrImage.pending
     if (pendingOcr != null) {
         OcrConfirmDialog(
