@@ -935,6 +935,25 @@ class CatBrain(
     }
 
     /**
+     * #POI 実機不具合修正: [bareFollowupDateRange]の結果に加え、この一致が担当者
+     * 文脈を引き継ぐべきか([inheritsPerson])を表す。「今日」「明日」「明後日」は
+     * 「今この瞬間からの絶対的な1日」を指す独立した表現であり、「かっちゃんの予定は？」
+     * →「今日は？」のように直前に別の話題(他者名指定)があった直後でも、単独の
+     * 「今日は？」は「(その話題の続きではなく)今日全体はどうか」という新規の
+     * 単発質問として読まれるのが自然 — このためinheritsPerson=falseとし、
+     * 呼び出し元は担当者文脈をnull(指定なし)へ戻す。一方「金曜は？」（曜日名）・
+     * 「来週は？」（週/月相対語）・「翌日は？」（直前の日付そのものに依存する語）は、
+     * 元々の会話の続き(例:「来週のかっちゃんの予定は？」→「金曜は？」)として使われる
+     * ことが前提の表現のため、inheritsPerson=trueのまま既存の担当者文脈を維持する
+     * (Phase1で明示的に要求された継続質問の仕様はそのまま壊さない)。
+     */
+    private data class BareDateFollowup(val range: DateTimeParser.DateRangeMatch, val inheritsPerson: Boolean)
+
+    // 「今日」「明日」「明後日」は絶対的な1日を指す独立した表現なので、担当者文脈を
+    // 引き継がない(BareDateFollowup.inheritsPerson=false)。
+    private val absoluteBareDayWords = setOf("今日", "明日", "明後日")
+
+    /**
      * #POI マリたん性能アップ Phase 1: 「じゃあ金曜は？」「来週は？」「翌日は？」の
      * ように、発話全体が(任意の「じゃあ/じゃ」＋)日付表現＋素朴な疑問表現だけで
      * 構成されている場合にだけ範囲を返す。「翌日」は今日から見た明日ではなく、
@@ -946,7 +965,7 @@ class CatBrain(
         text: String,
         now: LocalDateTime,
         previousStart: LocalDate?,
-    ): DateTimeParser.DateRangeMatch? {
+    ): BareDateFollowup? {
         val stripped = stripBareFollowupTrailer(text)
         val core = stripped.removePrefix("じゃあ").removePrefix("じゃ").trim()
         if (core.isBlank()) return null
@@ -954,11 +973,12 @@ class CatBrain(
         if (core == "翌日") {
             val base = previousStart ?: return null
             val d = base.plusDays(1)
-            return DateTimeParser.DateRangeMatch(d, d, DateTimeParser.formatWhen(d, now.toLocalDate()), "")
+            val range = DateTimeParser.DateRangeMatch(d, d, DateTimeParser.formatWhen(d, now.toLocalDate()), "")
+            return BareDateFollowup(range, inheritsPerson = true)
         }
         val match = DateTimeParser.extractDateRange(core, now) ?: return null
         if (match.remainingText.isNotBlank()) return null
-        return match
+        return BareDateFollowup(match, inheritsPerson = core !in absoluteBareDayWords)
     }
 
     /**
@@ -1425,8 +1445,15 @@ class CatBrain(
                     return CatReply(text) to updated
                 }
             }
-            bareFollowupDateRange(trimmed, now, context.dateRange?.first)?.let { range ->
-                val updated = context.copy(dateRange = range.start to range.end, dateLabel = range.label)
+            bareFollowupDateRange(trimmed, now, context.dateRange?.first)?.let { (range, inheritsPerson) ->
+                // #POI 実機不具合修正: 「今日」「明日」「明後日」の単独継続質問は
+                // 担当者文脈を引き継がず、指定なし(POI全体)へ戻す。曜日名/週相対語/
+                // 「翌日」はinheritsPerson=trueのまま既存の担当者文脈を維持する。
+                val updated = if (inheritsPerson) {
+                    context.copy(dateRange = range.start to range.end, dateLabel = range.label)
+                } else {
+                    context.copy(dateRange = range.start to range.end, dateLabel = range.label, person = null, personIsSelf = false)
+                }
                 val text = when (updated.topic) {
                     ConversationTopic.SCHEDULE -> answerScheduleForContext(updated, now)
                     ConversationTopic.TASK -> answerTaskForContext(updated, now)
