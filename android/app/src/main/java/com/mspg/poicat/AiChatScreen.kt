@@ -61,6 +61,7 @@ import androidx.core.content.ContextCompat
 import com.mspg.poicat.brain.CatBrain
 import com.mspg.poicat.brain.ConversationContext
 import com.mspg.poicat.brain.MapCommandMode
+import com.mspg.poicat.brain.SimpleAppTarget
 import com.mspg.poicat.brain.toEpochMilli
 import com.mspg.poicat.data.CatEventRepository
 import com.mspg.poicat.data.Photo
@@ -626,6 +627,25 @@ private fun MariTanRow(catBrain: CatBrain) {
                                     MapsLauncher.openSearch(context.applicationContext, mapCommand.destination)
                             }
                             val reply = if (opened) "地図を開くにゃ" else "地図を開けなかったにゃ"
+                            state = MariTanState.SPEAKING
+                            speak(reply) { state = MariTanState.IDLE }
+                            return@launch
+                        }
+                        // #POI マリたん秘書性能② Stage 1: 「Googleマップ開いて」
+                        // 「ドライブ開いて」等、目的地を伴わない単純なアプリ起動。
+                        // detectMapCommand(目的地付き)とは語彙が重ならないため、
+                        // どちらを先に試しても既存の目的地付きMaps機能を横取りしない。
+                        val simpleAppTarget = catBrain.detectSimpleAppLaunch(text)
+                        if (simpleAppTarget != null) {
+                            val opened = when (simpleAppTarget) {
+                                SimpleAppTarget.GOOGLE_MAPS -> AppLauncher.openGoogleMaps(context.applicationContext)
+                                SimpleAppTarget.GOOGLE_DRIVE -> AppLauncher.openGoogleDrive(context.applicationContext)
+                            }
+                            val appName = when (simpleAppTarget) {
+                                SimpleAppTarget.GOOGLE_MAPS -> "マップ"
+                                SimpleAppTarget.GOOGLE_DRIVE -> "ドライブ"
+                            }
+                            val reply = if (opened) "${appName}を開くにゃ" else "${appName}が見つからないにゃ"
                             state = MariTanState.SPEAKING
                             speak(reply) { state = MariTanState.IDLE }
                             return@launch

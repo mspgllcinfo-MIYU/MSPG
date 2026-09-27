@@ -25,6 +25,10 @@ data class MapCommand(val destination: String, val mode: MapCommandMode)
 
 enum class MapCommandMode { SEARCH, NAVIGATION }
 
+/** #POI マリたん秘書性能② Stage 1: [CatBrain.detectSimpleAppLaunch]が返す、
+ * 目的地なしで起動する対象アプリ。実際の起動は[com.mspg.poicat.AppLauncher]の責務。 */
+enum class SimpleAppTarget { GOOGLE_MAPS, GOOGLE_DRIVE }
+
 /**
  * #POI マリたん性能アップ Phase 1: 直前に成立したPOI質問([CatBrain.answerPoiQueryOrNull])
  * の検索条件だけを保持する、メモリ内だけの短命な状態。DB/Firestoreには一切保存
@@ -718,6 +722,34 @@ class CatBrain(
                 if (destination.isNotBlank()) return MapCommand(destination, MapCommandMode.SEARCH)
             }
         }
+        return null
+    }
+
+    // #POI マリたん秘書性能② Stage 1: 目的地なしの単純アプリ起動トリガー。
+    // [mapNavigationSuffixes]/[mapSearchSuffixes](目的地付き)とは語彙が重ならない
+    // ため、[detectMapCommand]の判定を横取りすることはない。「ドライブ開いて」
+    // 等の明確なアプリ起動表現だけに限定し、「ドライブしたい」「ドライブ行こう」
+    // のような自動車のドライブとの誤認を避けるため、必ず末尾が「開いて」で
+    // 終わる場合だけを対象にする(単語単体の「マップ」「ドライブ」だけでは
+    // 判定しない)。
+    private val simpleMapsLaunchSuffixes = listOf("googleマップ開いて", "グーグルマップ開いて", "マップ開いて", "地図開いて")
+    private val simpleDriveLaunchSuffixes = listOf("googleドライブ開いて", "グーグルドライブ開いて", "ドライブ開いて")
+
+    /**
+     * #POI マリたん秘書性能② Stage 1: 「Googleマップ開いて」「ドライブ開いて」の
+     * ような、目的地を伴わない単純なアプリ起動命令の検出。[detectMapCommand]
+     * (目的地付きの地図検索・経路案内)とは完全に独立した判定で、あちらの
+     * ロジック・戻り値([MapCommand])には一切触れない。AI・DB・ネットワークは
+     * いずれも使わない純粋な文字列判定 — 実際にアプリを起動するのは
+     * [com.mspg.poicat.AppLauncher]の責務。
+     */
+    fun detectSimpleAppLaunch(input: String): SimpleAppTarget? {
+        val trimmed = input.trim().replace(Regex("[「」『』]"), "").trim()
+        if (trimmed.isEmpty()) return null
+        val normalized = trimmed.lowercase()
+
+        if (simpleMapsLaunchSuffixes.any { normalized.endsWith(it) }) return SimpleAppTarget.GOOGLE_MAPS
+        if (simpleDriveLaunchSuffixes.any { normalized.endsWith(it) }) return SimpleAppTarget.GOOGLE_DRIVE
         return null
     }
 

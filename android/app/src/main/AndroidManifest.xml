@@ -16,6 +16,11 @@
     <queries>
         <package android:name="com.openai.chatgpt" />
         <package android:name="com.google.android.apps.bard" />
+        <!-- マリたんの単純アプリ起動(AppLauncher)用。上と同じ理由で、ここに
+             宣言していないパッケージはgetLaunchIntentForPackage()が常にnullを
+             返す。 -->
+        <package android:name="com.google.android.apps.maps" />
+        <package android:name="com.google.android.apps.docs" />
     </queries>
 
     <application
