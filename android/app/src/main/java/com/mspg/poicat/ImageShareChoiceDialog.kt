@@ -9,7 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 
 /**
- * #POI画像共有3択: image/*が共有された直後に必ず表示する、最小限のダイアログ。
+ * #POI画像共有3択: 画像MIMEタイプが共有された直後に必ず表示する、最小限のダイアログ。
  * ここではまだ何も保存しない — 4つのボタンのうちどれが押されたかを呼び出し元
  * (AppRoot)へそのまま伝えるだけ。1回の共有につき、これらのコールバックのうち
  * 1つだけが呼ばれる想定([AppRoot]側でpendingをnull化してから各処理を実行する
