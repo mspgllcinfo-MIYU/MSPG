@@ -124,5 +124,10 @@ dependencies {
     implementation("com.google.mlkit:text-recognition:16.0.1")
     implementation("com.google.mlkit:text-recognition-japanese:16.0.1")
 
+    // #POI EXIF回転修正: 保存済み画像のEXIF Orientationを表示時に読むためだけの
+    // Jetpack公式・無料ライブラリ。Kotlinコンパイラのバージョンに依存しない
+    // 素のJavaライブラリのため、firebase-bom等で経験したメタデータ非互換のリスクはない。
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

@@ -5,7 +5,9 @@ import android.app.Activity
 import android.app.DatePickerDialog
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.widget.Toast
+import androidx.exifinterface.media.ExifInterface
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -536,7 +538,15 @@ fun AlbumPhotoPickerDialog(onDismiss: () -> Unit, onPick: (Photo) -> Unit) {
 }
 
 /** Decodes [path] downsampled to roughly [reqSize]px on the long side, to keep
- * thumbnail/detail memory use reasonable regardless of the original photo size. */
+ * thumbnail/detail memory use reasonable regardless of the original photo size.
+ *
+ * #POI EXIF回転修正: BitmapFactory自体はEXIF Orientationタグを無視して生の
+ * ピクセル配列をそのまま返すため、端末が縦持ち撮影でも横向きのピクセルで
+ * 保存している写真がそのまま横向きに表示されてしまっていた。ここで
+ * ExifInterfaceでOrientationタグだけを読み、必要な回転/反転をMatrixで
+ * 表示用Bitmapにだけ適用する — 元ファイル(ローカル/Drive上のいずれも)は
+ * 一切書き換えない。Album/猫AI(ChatBubble)/PhotoDetailDialogは全てこの
+ * 関数を共有しているため、ここ1箇所の修正で3画面すべてに反映される。 */
 suspend fun decodeSampledBitmap(path: String, reqSize: Int): ImageBitmap? = withContext(Dispatchers.IO) {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeFile(path, bounds)
@@ -546,5 +556,31 @@ suspend fun decodeSampledBitmap(path: String, reqSize: Int): ImageBitmap? = with
     while (bounds.outWidth / sample > reqSize || bounds.outHeight / sample > reqSize) sample *= 2
 
     val opts = BitmapFactory.Options().apply { inSampleSize = sample }
-    BitmapFactory.decodeFile(path, opts)?.asImageBitmap()
+    val decoded = BitmapFactory.decodeFile(path, opts) ?: return@withContext null
+
+    val orientation = runCatching {
+        ExifInterface(path).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+    }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+
+    val matrix = Matrix()
+    when (orientation) {
+        ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+        ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+        ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+        ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+        ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+        ExifInterface.ORIENTATION_TRANSPOSE -> {
+            matrix.postRotate(90f)
+            matrix.postScale(-1f, 1f)
+        }
+        ExifInterface.ORIENTATION_TRANSVERSE -> {
+            matrix.postRotate(270f)
+            matrix.postScale(-1f, 1f)
+        }
+        else -> return@withContext decoded.asImageBitmap()
+    }
+
+    runCatching {
+        android.graphics.Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
+    }.getOrDefault(decoded).asImageBitmap()
 }
