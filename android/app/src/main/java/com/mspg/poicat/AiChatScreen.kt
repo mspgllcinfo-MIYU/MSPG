@@ -584,6 +584,20 @@ private fun MariTanRow(catBrain: CatBrain) {
                 else -> {
                     state = MariTanState.THINKING
                     scope.launch {
+                        // #POI 秘書性能② Stage 2: 場所が明示された天気質問を、既存の
+                        // POI質問判定([answerPoiQueryOrNull]先頭のlooksOutOfScope、
+                        // 「天気」等を一般トリビアとして弾く既存ロジック)より先に試す。
+                        // 場所が確定できない発話(「明日の天気は？」等)や天気語を含む
+                        // だけの一般会話は必ずnullが返り、以降の既存ルートへそのまま
+                        // 流れる — 既存のPOI質問・地図命令・予定登録・Gemini雑談の
+                        // どれも一切変更していない。
+                        val weatherReply = catBrain.answerWeatherQueryOrNull(text)
+                        if (weatherReply != null) {
+                            conversationContext = null
+                            state = MariTanState.SPEAKING
+                            speak(weatherReply.text) { state = MariTanState.IDLE }
+                            return@launch
+                        }
                         // #146: Gemini APIを呼ぶ前に、POI内部データ(予定/仕事タスク/
                         // 通常タスク/メモ)への読み取り専用の問い合わせとして高い
                         // 確信度で判定できる場合は、ローカルのCatBrainだけで答える —

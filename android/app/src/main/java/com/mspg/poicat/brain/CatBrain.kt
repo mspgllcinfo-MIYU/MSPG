@@ -7,6 +7,8 @@ import com.mspg.poicat.data.PhotoRepository
 import com.mspg.poicat.gemini.GeminiOutcome
 import com.mspg.poicat.gemini.GeminiRegistrationIntent
 import com.mspg.poicat.gemini.GeminiWorkJudge
+import com.mspg.poicat.weather.GeoCoder
+import com.mspg.poicat.weather.WeatherService
 import java.time.LocalDate
 import java.time.LocalDateTime
 import kotlinx.coroutines.withTimeoutOrNull
@@ -751,6 +753,174 @@ class CatBrain(
         if (simpleMapsLaunchSuffixes.any { normalized.endsWith(it) }) return SimpleAppTarget.GOOGLE_MAPS
         if (simpleDriveLaunchSuffixes.any { normalized.endsWith(it) }) return SimpleAppTarget.GOOGLE_DRIVE
         return null
+    }
+
+    // ============ #POI マリたん秘書性能② Stage 2: 場所明示の天気質問 ============
+
+    /** #POI 秘書性能② Stage 2: [answerWeatherQueryOrNull]が「何を聞かれたか」を
+     * 区別するための、天気質問の焦点。返答の文面(気温を出すか、降水確率+傘の
+     * 目安を出すか等)を切り替えるためだけに使う内部区分。 */
+    private enum class WeatherFocus { GENERAL, RAIN, TEMPERATURE, UMBRELLA }
+
+    private data class WeatherQuery(
+        val place: String,
+        val focus: WeatherFocus,
+        val date: LocalDate?,
+        val dateLabel: String?,
+    )
+
+    private val weatherTriggerWords = listOf("天気", "雨", "降る", "降水", "気温", "暑い", "寒い", "傘")
+
+    private val weatherOfKeywordFocus = listOf(
+        "天気" to WeatherFocus.GENERAL,
+        "気温" to WeatherFocus.TEMPERATURE,
+        "降水確率" to WeatherFocus.RAIN,
+        "降水" to WeatherFocus.RAIN,
+    )
+
+    /**
+     * #POI 秘書性能② Stage 2: 「甲府の天気は？」のような、場所が発話内に明示
+     * された天気質問だけを高い確信度で判定する。場所が明示されていない発話
+     * (「明日の天気は？」等)や、天気語を含むだけの一般会話(「雨の日って
+     * 眠いね」等)は必ずnullを返す — 現在地・[ConversationContext]・予定の
+     * locationTextからの補完はここでは一切行わない(Stage 2の対象外)。
+     *
+     * 判定は2段階: ①天気語([weatherTriggerWords])を含むこと(緩い一次フィルタ)、
+     * ②発話全体が「場所＋天気表現」だけで完結する決まった形([extractPlaceAndFocus]、
+     * 文字列全体の一致のみを許可)であること。②を満たさない場合は場所を確定
+     * できないとみなし、余った文字列を無理に場所として採用することはしない。
+     */
+    private fun parseWeatherQuery(text: String, now: LocalDateTime): WeatherQuery? {
+        val trimmed = text.trim().replace(Regex("[「」『』]"), "").trim()
+        if (trimmed.isEmpty()) return null
+
+        var remaining = trimmed
+        var date: LocalDate? = null
+        var dateLabel: String? = null
+        val dateWords = listOf("明後日" to 2L, "明日" to 1L, "今日" to 0L)
+        for ((word, offset) in dateWords) {
+            if (remaining.contains(word)) {
+                date = now.toLocalDate().plusDays(offset)
+                dateLabel = word
+                remaining = remaining.replace(word, "")
+                break
+            }
+        }
+        // 「明日の甲府...」から「明日」を除去すると先頭に助詞「の」だけが残る
+        // ("の甲府...")ため、日付語の直後の1個だけ剥がす。「甲府、明日雨？」の
+        // ように日付語が文中にある場合はこの助詞は残らないため影響しない。
+        remaining = remaining.removePrefix("の").trim()
+
+        if (weatherTriggerWords.none { remaining.contains(it) }) return null
+
+        val (place, focus) = extractPlaceAndFocus(remaining) ?: return null
+        if (place.isBlank() || place.length > 20) return null
+        return WeatherQuery(place, focus, date, dateLabel)
+    }
+
+    /**
+     * #POI 秘書性能② Stage 2: 天気語を含むと確認済みの残り文字列から、
+     * 「場所＋決まった天気表現」の形にちょうど一致する場合にだけ場所を抽出する。
+     * [Regex.matchEntire]で文字列全体の一致だけを許可しているため、
+     * 「雨の日って眠いね」のように天気語を含むだけの一般会話が余りを場所として
+     * 誤採用することはない。
+     */
+    private fun extractPlaceAndFocus(text: String): Pair<String, WeatherFocus>? {
+        for ((keyword, focus) in weatherOfKeywordFocus) {
+            Regex("^(.+?)の" + keyword + "(?:は)?[?？]?$").matchEntire(text)?.let { m ->
+                val place = m.groupValues[1].trim()
+                if (place.isNotBlank()) return place to focus
+            }
+        }
+        for (keyword in listOf("雨", "降る")) {
+            Regex("^(.+?)、?" + keyword + "[?？]?$").matchEntire(text)?.let { m ->
+                val place = m.groupValues[1].trim().trim('、')
+                if (place.isNotBlank()) return place to WeatherFocus.RAIN
+            }
+        }
+        Regex("^(.+?)は(?:寒い|暑い)[?？]?$").matchEntire(text)?.let { m ->
+            val place = m.groupValues[1].trim()
+            if (place.isNotBlank()) return place to WeatherFocus.TEMPERATURE
+        }
+        Regex("^(.+?)、?傘(?:いる)?[?？]?$").matchEntire(text)?.let { m ->
+            val place = m.groupValues[1].trim().trim('、')
+            if (place.isNotBlank()) return place to WeatherFocus.UMBRELLA
+        }
+        return null
+    }
+
+    /**
+     * #POI 秘書性能② Stage 2: 場所が明示された天気質問への、唯一の読み取り
+     * 専用エントリポイント。[parseWeatherQuery]が場所を確定できた場合だけ
+     * Open-Meteo(APIキー不要・無料)へ問い合わせる。場所が確定できない発話は
+     * 必ずnullを返し、呼び出し元(MariTanRow)は既存のPOI質問判定
+     * ([answerPoiQueryOrNull]、天気語をトリビアとして弾く既存のlooksOutOfScope
+     * を含む)・Gemini雑談へそのまま進む — このメソッドはそれらより前に呼ばれる
+     * ことで、既存のoutOfScope判定より先に安全な天気質問だけを処理できる。
+     *
+     * 通信エラー・タイムアウト・Open-Meteo側の障害は「おネムにゃ。」、無料枠
+     * 超過(HTTP 429)だと明確に判定できた場合だけ「課金しなきゃ答えたく無いニャ
+     * 💢」を返し、どちらの場合も自動的に有料APIへ切り替える処理は一切行わない。
+     * 場所が地名として解決できない場合は天気を捏造せず「場所が分からないにゃ。」
+     * を返す。
+     */
+    suspend fun answerWeatherQueryOrNull(input: String): CatReply? {
+        val query = parseWeatherQuery(input, LocalDateTime.now()) ?: return null
+
+        val geoResult = withTimeoutOrNull(10_000) { GeoCoder.resolve(query.place) }
+        val located = when (val geoOutcome = geoResult?.getOrNull()) {
+            is GeoCoder.Outcome.Found -> geoOutcome.location
+            GeoCoder.Outcome.NotFound -> return CatReply("場所が分からないにゃ。")
+            GeoCoder.Outcome.QuotaExceeded -> return CatReply("課金しなきゃ答えたく無いニャ💢")
+            null -> return CatReply("おネムにゃ。")
+        }
+
+        val weatherResult = withTimeoutOrNull(10_000) { WeatherService.fetch(located.latitude, located.longitude, query.date) }
+        val answer = when (val weatherOutcome = weatherResult?.getOrNull()) {
+            is WeatherService.Outcome.Success -> weatherOutcome.answer
+            WeatherService.Outcome.QuotaExceeded -> return CatReply("課金しなきゃ答えたく無いニャ💢")
+            null -> return CatReply("おネムにゃ。")
+        }
+
+        return CatReply(formatWeatherReply(query, answer))
+    }
+
+    /** #POI 秘書性能② Stage 2: [WeatherService.Answer]をマリたんの短い一言へ整形する。
+     * Open-Meteoが返していない値(nullの項目)を推測で埋めることはしない。 */
+    private fun formatWeatherReply(query: WeatherQuery, answer: WeatherService.Answer): String {
+        val prefix = if (query.dateLabel != null) "${query.dateLabel}の${query.place}" else query.place
+        return when (query.focus) {
+            WeatherFocus.GENERAL -> {
+                val temp = answer.temperature ?: answer.temperatureMax
+                if (temp != null) "${prefix}は${answer.description}、${temp.toInt()}℃くらいにゃ。" else "${prefix}は${answer.description}にゃ。"
+            }
+            WeatherFocus.RAIN, WeatherFocus.UMBRELLA -> {
+                val precip = answer.precipitationProbability
+                val base = if (precip != null) {
+                    "${prefix}は${answer.description}予報。降水確率${precip}％にゃ。"
+                } else {
+                    "${prefix}は${answer.description}にゃ。"
+                }
+                val needsUmbrella = (precip != null && precip >= 50) || answer.description.contains("雨") || answer.description.contains("雪")
+                base + if (needsUmbrella) "傘いるにゃ。" else "傘いらなそうにゃ。"
+            }
+            WeatherFocus.TEMPERATURE -> {
+                val temp = answer.temperature ?: answer.temperatureMin ?: answer.temperatureMax
+                if (temp == null) {
+                    "${prefix}は${answer.description}にゃ。"
+                } else {
+                    val rounded = temp.toInt()
+                    val comment = when {
+                        rounded <= 5 -> "かなり寒いにゃ。"
+                        rounded <= 12 -> "ちょっと寒いにゃ。"
+                        rounded >= 32 -> "かなり暑いにゃ。"
+                        rounded >= 28 -> "ちょっと暑いにゃ。"
+                        else -> "過ごしやすいにゃ。"
+                    }
+                    "${prefix}は${rounded}℃くらい。$comment"
+                }
+            }
+        }
     }
 
     /**
