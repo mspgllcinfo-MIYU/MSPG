@@ -109,6 +109,7 @@ fun CalendarScreen(
     var editingEvent by remember { mutableStateOf<CatEvent?>(null) }
     var showDialog by remember { mutableStateOf(false) }
     var refreshTick by remember { mutableStateOf(0) }
+    var linkedPhotosForEditing by remember { mutableStateOf<List<Photo>>(emptyList()) }
 
     LaunchedEffect(yearMonth, refreshTick) {
         val start = yearMonth.atDay(1).toEpochMilli()
@@ -280,11 +281,16 @@ fun CalendarScreen(
 
     if (showDialog) {
         val current = editingEvent
+        LaunchedEffect(current) {
+            linkedPhotosForEditing = current?.let { photoRepository.photosForMemo(it.id) } ?: emptyList()
+        }
         EventEditDialog(
             initialTitle = current?.title ?: "",
             initialDate = current?.dateTime?.toLocalDate() ?: selectedDate,
             initialTime = current?.dateTime?.toLocalDateTime()?.toLocalTime() ?: LocalTime.of(9, 0),
             isEditing = current != null,
+            linkedPhotos = linkedPhotosForEditing,
+            onViewOriginalPhoto = { linkedPhotosForEditing.firstOrNull()?.let { detailPhoto = it } },
             onDismiss = { showDialog = false; editingEvent = null },
             onDelete = current?.let { event ->
                 {
@@ -551,6 +557,8 @@ private fun EventEditDialog(
     initialDate: LocalDate,
     initialTime: LocalTime,
     isEditing: Boolean,
+    linkedPhotos: List<Photo> = emptyList(),
+    onViewOriginalPhoto: () -> Unit = {},
     onDismiss: () -> Unit,
     onDelete: (() -> Unit)?,
     onSave: (title: String, date: LocalDate, time: LocalTime) -> Unit,
@@ -604,6 +612,15 @@ private fun EventEditDialog(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text("時刻: %02d:%02d".format(time.hour, time.minute))
+                }
+                if (linkedPhotos.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = onViewOriginalPhoto,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("📎 元画像を見る")
+                    }
                 }
             }
         },
