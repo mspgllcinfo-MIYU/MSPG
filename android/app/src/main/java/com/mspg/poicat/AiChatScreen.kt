@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.mspg.poicat.brain.CatBrain
+import com.mspg.poicat.brain.ConversationContext
 import com.mspg.poicat.brain.MapCommandMode
 import com.mspg.poicat.brain.toEpochMilli
 import com.mspg.poicat.data.CatEventRepository
@@ -481,6 +482,13 @@ private fun MariTanRow(catBrain: CatBrain) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var state by remember { mutableStateOf(MariTanState.IDLE) }
+    // #POI マリたん性能アップ Phase 1: 直前に成立したPOI質問(answerPoiQueryOrNull)の
+    // 検索条件だけを保持する、メモリ内だけの短命な状態。DB/Firestoreには一切保存
+    // しない — この画面のComposeスコープを離れる(画面遷移/アプリ再起動)と自然に
+    // 消える。POI質問以外の経路(地図命令/予定登録/Gemini雑談/覚えて・忘れて/外部AI
+    // 起動)を1つでも通った発話の後は必ずnullへ戻す — 「直前に成立したPOI質問」
+    // だけが継続質問の対象という条件を厳密に守るため。
+    var conversationContext by remember { mutableStateOf<ConversationContext?>(null) }
 
     // マリたんの声。画面が破棄される際は必ずshutdown()する（TextToSpeechは
     // ネイティブリソース/バックグラウンドサービス接続を持つため）。
@@ -542,6 +550,7 @@ private fun MariTanRow(catBrain: CatBrain) {
             val forgetQuery = extractForgetQuery(text)
             when {
                 appTarget != null -> {
+                    conversationContext = null
                     val launched = ExternalAiLauncher.launch(context.applicationContext, appTarget)
                     val appName = ExternalAiLauncher.displayName(appTarget)
                     val reply = if (launched) "${appName}を開くにゃ" else "${appName}が見つからないにゃ"
@@ -549,6 +558,7 @@ private fun MariTanRow(catBrain: CatBrain) {
                     speak(reply) { state = MariTanState.IDLE }
                 }
                 rememberContent != null -> {
+                    conversationContext = null
                     state = MariTanState.THINKING
                     scope.launch {
                         MariTanMemoryStore.remember(context.applicationContext, rememberContent)
@@ -557,6 +567,7 @@ private fun MariTanRow(catBrain: CatBrain) {
                     }
                 }
                 forgetQuery != null -> {
+                    conversationContext = null
                     state = MariTanState.THINKING
                     scope.launch {
                         val result = MariTanMemoryStore.forget(context.applicationContext, forgetQuery)
@@ -578,12 +589,18 @@ private fun MariTanRow(catBrain: CatBrain) {
                         // POI内部データをGeminiへ送らない、という既存方針を維持した
                         // まま、マリたんからもPOIの正確な回答を返せるようにする。
                         // 判定できない場合は必ずnullが返り、これまで通りGeminiへ回す。
-                        val poiReply = catBrain.answerPoiQueryOrNull(text)
+                        val poiReply = catBrain.answerPoiQueryOrNull(text, conversationContext)
                         if (poiReply != null) {
+                            val (reply, updatedContext) = poiReply
+                            conversationContext = updatedContext
                             state = MariTanState.SPEAKING
-                            speak(poiReply.text) { state = MariTanState.IDLE }
+                            speak(reply.text) { state = MariTanState.IDLE }
                             return@launch
                         }
+                        // #POI マリたん性能アップ Phase 1: POI質問として成立しなかった
+                        // (nullが返った)ので、以降のどの経路を通っても継続質問の文脈は
+                        // 打ち切る — 「直前に成立したPOI質問」だけが継続対象という条件。
+                        conversationContext = null
                         // #148 Maps-1A(+2D修正): 予定登録の判定より先に、地図/ナビ命令
                         // として明確に解析できるかを試す。「明日、銀行まで案内して」の
                         // ように日付語を含んでいても、末尾が「まで案内して」等の地図

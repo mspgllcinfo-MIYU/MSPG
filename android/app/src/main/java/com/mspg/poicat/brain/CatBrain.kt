@@ -26,6 +26,31 @@ data class MapCommand(val destination: String, val mode: MapCommandMode)
 enum class MapCommandMode { SEARCH, NAVIGATION }
 
 /**
+ * #POI マリたん性能アップ Phase 1: 直前に成立したPOI質問([CatBrain.answerPoiQueryOrNull])
+ * の検索条件だけを保持する、メモリ内だけの短命な状態。DB/Firestoreには一切保存
+ * しない — 呼び出し元(MariTanRow)のComposeスコープが持つ、1回の会話の間だけの
+ * 補助情報で、プロセス終了/アプリ再起動で自然に消える。
+ *
+ * [person]がnullなら「人物指定なし(夫婦共有全体)」、[CatEvent.ASSIGNEE_BOTH]なら
+ * 明示的な「2人」、みゆたん/かっちゃんの名前ならその人物。[personIsSelf]がtrueの
+ * 場合、[person]は「私/自分」経由で解決された値であることを示し、"2人"扱いの
+ * 予定/仕事も自分のものとして一致対象に含める(既存の「私の仕事」判定と同じ考え方)。
+ * [workOnly]はTASK限定で、仕事タスク(category=WORK)だけに絞るか([workTaskQuestionCore]
+ * 経由)、Poiタスク全般([isTaskQuestion]経由)かを区別する。
+ */
+data class ConversationContext(
+    val topic: ConversationTopic,
+    val dateRange: Pair<LocalDate, LocalDate>? = null,
+    val dateLabel: String? = null,
+    val keyword: String? = null,
+    val person: String? = null,
+    val personIsSelf: Boolean = false,
+    val workOnly: Boolean = false,
+)
+
+enum class ConversationTopic { SCHEDULE, TASK, MEMO }
+
+/**
  * The "memory cat" brain: everything is on-device pattern matching against
  * the Room database. No AI model, no network call. Given a line of chat
  * input it either remembers a new schedule/memo, answers a question from
@@ -116,7 +141,8 @@ class CatBrain(
         if (taskContent != null) {
             val (dueDate, titleRaw) = DateTimeParser.parseDueDate(taskContent, now)
             val title = DateTimeParser.cleanTitle(titleRaw, fallback = "タスク")
-            repository.addTask(title, dueDate?.toEpochMilli(), classifyTaskCategory(title))
+            // #POI 仕様変更: 指定なし＝2人(共有)をデフォルト担当とする。
+            repository.addTask(title, dueDate?.toEpochMilli(), classifyTaskCategory(title), resolveRegistrationAssignee(trimmed, currentDisplayName()))
             return CatReply("ポイに入れたにゃ")
         }
 
@@ -135,10 +161,12 @@ class CatBrain(
                 val (saved, judgment) = rememberScheduleWithWorkJudgment(
                     scheduleFromMemo.title,
                     scheduleFromMemo.dateTime.toEpochMilli(),
+                    resolveRegistrationAssignee(trimmed, currentDisplayName()),
                 )
                 return CatReply(scheduleRegisteredReply(saved, judgment, now))
             }
-            repository.remember(memoContent, null)
+            // #POI 仕様変更: 指定なし＝2人(共有)をデフォルト担当とする。
+            repository.remember(memoContent, null, resolveRegistrationAssignee(trimmed, currentDisplayName()))
             return CatReply("メモしたにゃ")
         }
 
@@ -149,7 +177,12 @@ class CatBrain(
         // されない。
         val registration = DateTimeParser.parseRegistration(trimmed, now)
         if (registration != null && judgeRegistrationIntent(trimmed) == RegistrationIntent.SCHEDULE) {
-            val (saved, judgment) = rememberScheduleWithWorkJudgment(registration.title, registration.dateTime.toEpochMilli())
+            // #POI 仕様変更: 指定なし＝2人(共有)をデフォルト担当とする。
+            val (saved, judgment) = rememberScheduleWithWorkJudgment(
+                registration.title,
+                registration.dateTime.toEpochMilli(),
+                resolveRegistrationAssignee(trimmed, currentDisplayName()),
+            )
             return CatReply(scheduleRegisteredReply(saved, judgment, now))
         }
 
@@ -190,7 +223,13 @@ class CatBrain(
         if (taskContent != null) {
             val (dueDate, titleRaw) = DateTimeParser.parseDueDate(taskContent, now)
             val title = DateTimeParser.cleanTitle(titleRaw, fallback = "タスク")
-            val task = repository.addTask(title, dueDate?.toEpochMilli(), classifyTaskCategory(title))
+            // #POI 仕様変更: 指定なし＝2人(共有)をデフォルト担当とする。
+            val task = repository.addTask(
+                title,
+                dueDate?.toEpochMilli(),
+                classifyTaskCategory(title),
+                resolveRegistrationAssignee(trimmed, currentDisplayName()),
+            )
             photoRepository.linkToMemo(photo, task.id)
             return CatReply("ポイに入れて写真も残したにゃ")
         }
@@ -205,10 +244,15 @@ class CatBrain(
                     albumName = photo.albumName,
                     linkedDate = scheduleFromMemo.dateTime.toLocalDate().toEpochMilli(),
                 )
-                repository.remember(scheduleFromMemo.title, scheduleFromMemo.dateTime.toEpochMilli())
+                // #POI 仕様変更: 指定なし＝2人(共有)をデフォルト担当とする。
+                repository.remember(
+                    scheduleFromMemo.title,
+                    scheduleFromMemo.dateTime.toEpochMilli(),
+                    resolveRegistrationAssignee(trimmed, currentDisplayName()),
+                )
                 return CatReply("覚えて写真も残したにゃ")
             }
-            val event = repository.remember(memoContent, null)
+            val event = repository.remember(memoContent, null, resolveRegistrationAssignee(trimmed, currentDisplayName()))
             photoRepository.linkToMemo(photo, event.id)
             return CatReply("メモと一緒に写真も残したにゃ")
         }
@@ -221,7 +265,12 @@ class CatBrain(
                 albumName = photo.albumName,
                 linkedDate = registration.dateTime.toLocalDate().toEpochMilli(),
             )
-            repository.remember(registration.title, registration.dateTime.toEpochMilli())
+            // #POI 仕様変更: 指定なし＝2人(共有)をデフォルト担当とする。
+            repository.remember(
+                registration.title,
+                registration.dateTime.toEpochMilli(),
+                resolveRegistrationAssignee(trimmed, currentDisplayName()),
+            )
             return CatReply("覚えて写真も残したにゃ")
         }
 
@@ -486,8 +535,12 @@ class CatBrain(
      * を呼んで同じCatEventをタスクビューにも表示する。新しいCatEventのinsertは
      * 一切行わない。
      */
-    private suspend fun rememberScheduleWithWorkJudgment(title: String, dateTime: Long): Pair<CatEvent, WorkJudgment> {
-        val saved = repository.remember(title, dateTime)
+    private suspend fun rememberScheduleWithWorkJudgment(
+        title: String,
+        dateTime: Long,
+        assignee: String? = null,
+    ): Pair<CatEvent, WorkJudgment> {
+        val saved = repository.remember(title, dateTime, assignee)
         val judgment = judgeWorkIntent(saved.title)
         if (judgment == WorkJudgment.WORK) {
             repository.setAlsoShowAsTask(saved, true)
@@ -717,7 +770,12 @@ class CatBrain(
         val registration = DateTimeParser.parseRegistration(trimmed, now) ?: return null
         if (judgeRegistrationIntent(trimmed) != RegistrationIntent.SCHEDULE) return null
 
-        return rememberScheduleWithWorkJudgment(registration.title, registration.dateTime.toEpochMilli())
+        // #POI 仕様変更: 指定なし＝2人(共有)をデフォルト担当とする。
+        return rememberScheduleWithWorkJudgment(
+            registration.title,
+            registration.dateTime.toEpochMilli(),
+            resolveRegistrationAssignee(trimmed, currentDisplayName()),
+        )
     }
 
     /**
@@ -794,6 +852,201 @@ class CatBrain(
             }
         }
         return null
+    }
+
+    // #POI マリたん性能アップ Phase 1: 「指定なし＝2人(共有)」仕様に合わせ、既存の
+    // assignee=null(未設定)行は検索時には"2人"と同じ「共有」として扱う。この関数は
+    // 検索(読み取り)専用 — 既存のnull行を書き換えることは一切しない。
+    private fun assigneeMatchesShared(assignee: String?): Boolean =
+        assignee == null || assignee == CatEvent.ASSIGNEE_BOTH
+
+    /**
+     * #POI マリたん性能アップ Phase 1: [ConversationContext.person]で表した人物指定
+     * (null=指定なし、[CatEvent.ASSIGNEE_BOTH]=明示共有、みゆたん/かっちゃん=個人)を、
+     * 1件のCatEventの[assignee]に対して判定する共通ロジック。[personIsSelf]がtrueの
+     * 場合だけ、個人名指定でも"2人"/未設定(null)を追加で一致対象に含める — 既存の
+     * 「私の仕事」「私の予定」判定(2人は自分の責任でもある)と同じ考え方で、他者を
+     * 名前で明示的に尋ねた場合(例:「かっちゃんの予定」)には適用しない。
+     */
+    private fun eventMatchesPersonFilter(assignee: String?, person: String?, personIsSelf: Boolean): Boolean = when {
+        person == null -> true
+        person == CatEvent.ASSIGNEE_BOTH -> assigneeMatchesShared(assignee)
+        personIsSelf -> assignee == person || assignee == CatEvent.ASSIGNEE_BOTH
+        else -> assignee == person
+    }
+
+    /**
+     * #POI マリたん性能アップ Phase 1: 発話中に明示された人物指定(みゆたん/かっちゃん/
+     * 2人/二人)だけを判定する — 「私/自分」の解決は呼び出し元がcurrentDisplayName()と
+     * 組み合わせて別途行う(この関数は話者情報を持たない)。新規登録時のデフォルト
+     * 担当判定([resolveRegistrationAssignee])と質問側の人物判定([answerPoiQueryOrNull])
+     * の両方から共有する、唯一の「人物指定検出」ロジック — 重複した判定を持たない。
+     */
+    private fun explicitPersonInText(text: String): String? = when {
+        text.contains(CatEvent.ASSIGNEE_KATCHAN) -> CatEvent.ASSIGNEE_KATCHAN
+        text.contains(CatEvent.ASSIGNEE_MIYU) -> CatEvent.ASSIGNEE_MIYU
+        text.contains(CatEvent.ASSIGNEE_BOTH) || text.contains("二人") -> CatEvent.ASSIGNEE_BOTH
+        else -> null
+    }
+
+    /**
+     * #POI 仕様変更: POIの担当者デフォルトを「2人」に統一。予定/タスク/メモの新規
+     * 登録時、発話に明示的な人物指定(みゆたん/かっちゃん/2人/二人/私/自分)があれば
+     * その人物、無ければ[CatEvent.ASSIGNEE_BOTH]("2人")をデフォルトの担当として返す
+     * — 常に非null。呼び出し元(BB=[respond]/[respondToPhoto]、マリたん=
+     * [registerScheduleCore]等)がこの値を新規[CatEvent]のassigneeとして渡す。
+     *
+     * 既存データへの影響は一切無い — この関数は新規登録の瞬間にだけ使われ、既存の
+     * assignee=null行を書き換える処理はどこにも無い([CatEventRepository.remember]が
+     * 重複行を見つけた場合はこの値を使わずその既存行をそのまま返す設計、同ファイル
+     * 参照)。
+     */
+    private fun resolveRegistrationAssignee(text: String, myDisplayName: String?): String {
+        explicitPersonInText(text)?.let { return it }
+        if ((text.contains("私") || text.contains("自分")) && myDisplayName != null) return myDisplayName
+        return CatEvent.ASSIGNEE_BOTH
+    }
+
+    private val bareFollowupTrailers = listOf("は？", "は", "？", "?")
+
+    private fun stripBareFollowupTrailer(text: String): String {
+        for (trailer in bareFollowupTrailers) {
+            if (text.endsWith(trailer) && text.length > trailer.length) return text.removeSuffix(trailer)
+        }
+        return text
+    }
+
+    /**
+     * #POI マリたん性能アップ Phase 1: 「かっちゃんは？」「私は？」「二人は？」
+     * 「みゆたんは？」のように、発話全体が人物参照＋素朴な疑問表現だけで構成されて
+     * いる場合にだけ(person, personIsSelf)を返す。それ以外(「かっちゃんは元気？」等、
+     * 他の内容が続く発話)はnull。呼び出し元は[ConversationContext]が存在する場合に
+     * のみこの関数を試す — 文脈が無ければ通常の雑談としてGeminiへ回る。
+     */
+    private fun bareFollowupPerson(text: String, myDisplayName: String?): Pair<String, Boolean>? {
+        val core = stripBareFollowupTrailer(text)
+        return when (core) {
+            CatEvent.ASSIGNEE_KATCHAN -> CatEvent.ASSIGNEE_KATCHAN to false
+            CatEvent.ASSIGNEE_MIYU -> CatEvent.ASSIGNEE_MIYU to false
+            CatEvent.ASSIGNEE_BOTH, "二人" -> CatEvent.ASSIGNEE_BOTH to false
+            "私", "自分" -> myDisplayName?.let { it to true }
+            else -> null
+        }
+    }
+
+    /**
+     * #POI マリたん性能アップ Phase 1: 「じゃあ金曜は？」「来週は？」「翌日は？」の
+     * ように、発話全体が(任意の「じゃあ/じゃ」＋)日付表現＋素朴な疑問表現だけで
+     * 構成されている場合にだけ範囲を返す。「翌日」は今日から見た明日ではなく、
+     * 直前の[ConversationContext.dateRange]の開始日([previousStart])の翌日として
+     * 解決する — 文脈が無ければ(呼び出し元がpreviousStart=nullを渡す)「翌日」は
+     * 解決できずnullを返す。
+     */
+    private fun bareFollowupDateRange(
+        text: String,
+        now: LocalDateTime,
+        previousStart: LocalDate?,
+    ): DateTimeParser.DateRangeMatch? {
+        val stripped = stripBareFollowupTrailer(text)
+        val core = stripped.removePrefix("じゃあ").removePrefix("じゃ").trim()
+        if (core.isBlank()) return null
+
+        if (core == "翌日") {
+            val base = previousStart ?: return null
+            val d = base.plusDays(1)
+            return DateTimeParser.DateRangeMatch(d, d, DateTimeParser.formatWhen(d, now.toLocalDate()), "")
+        }
+        val match = DateTimeParser.extractDateRange(core, now) ?: return null
+        if (match.remainingText.isNotBlank()) return null
+        return match
+    }
+
+    /**
+     * #POI マリたん性能アップ Phase 1: [ConversationContext]駆動の予定回答。既存の
+     * [answerScheduleQueryByPerson](BB/[respond]と共有、日付には未対応)とは別の、
+     * マリたんの[answerPoiQueryOrNull]専用の新しい経路 — 既存のBB向け関数は一切
+     * 変更しない。[ConversationContext.dateRange]が無ければ[CatEventRepository.upcoming]
+     * (現在時刻以降の全予定)、あれば[CatEventRepository.between]で期間を絞り込む
+     * (既存の[CatEventRepository.between]をそのまま使うだけで新規DAOクエリは追加
+     * しない)。isTaskによる絞り込みは行わない — 既存の[answerScheduleQueryByPerson]/
+     * 旧[answerQuery]のdayFilter分岐もisTaskを区別していない、既存の前提を維持する
+     * ためあえて揃えている。
+     */
+    private suspend fun answerScheduleForContext(ctx: ConversationContext, now: LocalDateTime): String {
+        val today = now.toLocalDate()
+        val range = ctx.dateRange
+        val keyword = ctx.keyword
+        val person = ctx.person
+        val personIsSelf = ctx.personIsSelf
+        val pool = if (range != null) {
+            repository.between(range.first.toEpochMilli(), range.second.plusDays(1).toEpochMilli() - 1)
+        } else {
+            repository.upcoming(now.toEpochMilli())
+        }
+        val byKeyword = if (keyword != null) pool.filter { it.title.contains(keyword) } else pool
+        val matched = byKeyword.filter { it.dateTime != null && eventMatchesPersonFilter(it.assignee, person, personIsSelf) }
+
+        if (matched.isEmpty()) {
+            return if (ctx.dateLabel != null) "${ctx.dateLabel}の予定はまだ無いにゃ" else "予定はまだ無いにゃ"
+        }
+        val titles = matched.joinToString("、") { "${DateTimeParser.formatWhen(it.dateTime!!.toLocalDate(), today)}の${it.title}" }
+        return "予定は${titles}だにゃ"
+    }
+
+    /**
+     * #POI マリたん性能アップ Phase 1: [ConversationContext]駆動のタスク回答。
+     * [ConversationContext.workOnly]で仕事タスク(category=WORK、既存の
+     * [answerWorkTaskQuery]と同じ対象)かPoiタスク全般(既存の[answerTaskQuery]と
+     * 同じ対象)かを切り替える、統一された新しい経路。既存の2つのBB向け関数は
+     * どちらも一切変更しない。
+     */
+    private suspend fun answerTaskForContext(ctx: ConversationContext, now: LocalDateTime): String {
+        val range = ctx.dateRange
+        val keyword = ctx.keyword
+        val person = ctx.person
+        val personIsSelf = ctx.personIsSelf
+        val pool = repository.incompleteTasks().let { tasks ->
+            if (ctx.workOnly) tasks.filter { it.category == CatEvent.CATEGORY_WORK } else tasks
+        }
+        val byDate = if (range != null) {
+            pool.filter { it.dateTime == null || (it.dateTime.toLocalDate() >= range.first && it.dateTime.toLocalDate() <= range.second) }
+        } else {
+            pool
+        }
+        val byKeyword = if (keyword != null) byDate.filter { it.title.contains(keyword) } else byDate
+        val matched = byKeyword.filter { eventMatchesPersonFilter(it.assignee, person, personIsSelf) }
+
+        val label = if (ctx.workOnly) "仕事" else "タスク"
+        if (matched.isEmpty()) {
+            return if (ctx.dateLabel != null) "${ctx.dateLabel}の${label}はまだ無いにゃ" else "${label}はまだ無いにゃ"
+        }
+        val titles = matched.joinToString("、") { it.title }
+        return if (ctx.dateLabel != null) "${ctx.dateLabel}の${label}は${titles}だにゃ" else "${label}は${titles}だにゃ"
+    }
+
+    /**
+     * #POI マリたん性能アップ Phase 1: [ConversationContext]駆動のメモ回答。以前の
+     * マリたん専用メモ問い合わせ(今日/明日のみ対応)を、[DateTimeParser.extractDateRange]
+     * の広い語彙(来週/今月等)にも対応するようこの関数へ置き換えた。メモには
+     * 担当者(assignee)の概念が無いため、[ConversationContext.person]は使わない
+     * (呼び出し元がMEMOトピックへの人物継続質問自体を試みない設計)。
+     */
+    private suspend fun answerMemoForContext(ctx: ConversationContext, now: LocalDateTime): String {
+        val range = ctx.dateRange
+        val keyword = ctx.keyword
+        val all = repository.memos()
+        val byDate = if (range != null) {
+            all.filter { val d = it.createdAt.toLocalDate(); d >= range.first && d <= range.second }
+        } else {
+            all
+        }
+        val matched = if (keyword != null) byDate.filter { it.title.contains(keyword) } else byDate
+
+        if (matched.isEmpty()) {
+            return if (ctx.dateLabel != null) "${ctx.dateLabel}のメモは無いにゃ" else "メモはまだ無いにゃ"
+        }
+        val titles = matched.joinToString("、") { it.title }
+        return if (ctx.dateLabel != null) "${ctx.dateLabel}のメモは${titles}だにゃ" else "メモは${titles}だにゃ"
     }
 
     private suspend fun answerQuery(text: String, now: LocalDateTime): String {
@@ -973,10 +1226,13 @@ class CatBrain(
         val matched = when {
             text.contains("みゆたん") -> workTasks.filter { it.assignee == CatEvent.ASSIGNEE_MIYU }
             text.contains("かっちゃん") -> workTasks.filter { it.assignee == CatEvent.ASSIGNEE_KATCHAN }
-            text.contains(CatEvent.ASSIGNEE_BOTH) -> workTasks.filter { it.assignee == CatEvent.ASSIGNEE_BOTH }
+            // #POI 仕様変更: 「指定なし＝2人」統一に合わせ、既存のassignee=null(未設定)行も
+            // "2人"と同じ共有として扱う(assigneeMatchesShared)。既存データを書き換える
+            // 処理ではない — 検索時の一致条件を広げるだけ。
+            text.contains(CatEvent.ASSIGNEE_BOTH) || text.contains("二人") -> workTasks.filter { assigneeMatchesShared(it.assignee) }
             text.contains("私の仕事") || text.contains("自分の仕事") -> {
                 if (myDisplayName == null) return unknownSpeakerReply()
-                workTasks.filter { it.assignee == myDisplayName || it.assignee == CatEvent.ASSIGNEE_BOTH }
+                workTasks.filter { it.assignee == myDisplayName || assigneeMatchesShared(it.assignee) }
             }
             else -> workTasks
         }
@@ -1014,7 +1270,8 @@ class CatBrain(
         val core = stripWorkQuestionTrailer(text)
         if (!core.endsWith("の予定")) return false
         return core.contains("みゆたん") || core.contains("かっちゃん") ||
-            core.contains(CatEvent.ASSIGNEE_BOTH) || core.contains("私の予定") || core.contains("自分の予定")
+            core.contains(CatEvent.ASSIGNEE_BOTH) || core.contains("二人") ||
+            core.contains("私の予定") || core.contains("自分の予定")
     }
 
     /**
@@ -1048,10 +1305,13 @@ class CatBrain(
         val matched = when {
             text.contains("みゆたん") -> schedules.filter { it.assignee == CatEvent.ASSIGNEE_MIYU }
             text.contains("かっちゃん") -> schedules.filter { it.assignee == CatEvent.ASSIGNEE_KATCHAN }
-            text.contains(CatEvent.ASSIGNEE_BOTH) -> schedules.filter { it.assignee == CatEvent.ASSIGNEE_BOTH }
+            // #POI 仕様変更: 「指定なし＝2人」統一に合わせ、既存のassignee=null(未設定)行も
+            // "2人"と同じ共有として扱う(assigneeMatchesShared)。既存データを書き換える
+            // 処理ではない — 検索時の一致条件を広げるだけ。
+            text.contains(CatEvent.ASSIGNEE_BOTH) || text.contains("二人") -> schedules.filter { assigneeMatchesShared(it.assignee) }
             else -> {
                 if (myDisplayName == null) return unknownSpeakerReply()
-                schedules.filter { it.assignee == myDisplayName || it.assignee == CatEvent.ASSIGNEE_BOTH }
+                schedules.filter { it.assignee == myDisplayName || assigneeMatchesShared(it.assignee) }
             }
         }
 
@@ -1099,46 +1359,6 @@ class CatBrain(
     }
 
     /**
-     * #146: [isMemoQuery]が真の場合にのみ呼ばれる、メモの読み取り専用の回答。
-     * 新しいDB問い合わせは追加せず、既存の[CatEventRepository.memos]が返す
-     * 全件をKotlin側でfilterするだけ。「今日」「明日」は日付ワードとして扱い
-     * (メモ自体にdateTimeは無いため、createdAtの日付で絞り込む)、それ以外の
-     * 語は既存メモのタイトルに対するキーワード検索として扱う。
-     */
-    private suspend fun answerMemoQuery(text: String, now: LocalDateTime): String {
-        val today = now.toLocalDate()
-        val core = stripMemoQuestionTrailer(text)
-        val keyword = if (core == "メモ") null else core.removeSuffix("のメモ").trim().ifBlank { null }
-        val scopeDate = when (keyword) {
-            "今日" -> today
-            "明日" -> today.plusDays(1)
-            else -> null
-        }
-        val effectiveKeyword = if (scopeDate != null) null else keyword
-
-        val allMemos = repository.memos()
-        val filtered = when {
-            scopeDate != null -> allMemos.filter { it.createdAt.toLocalDate() == scopeDate }
-            effectiveKeyword != null -> allMemos.filter { it.title.contains(effectiveKeyword) }
-            else -> allMemos
-        }
-
-        if (filtered.isEmpty()) {
-            return when {
-                effectiveKeyword != null -> "${effectiveKeyword}のメモは無いにゃ"
-                scopeDate != null -> "${DateTimeParser.formatWhen(scopeDate, today)}のメモは無いにゃ"
-                else -> "メモはまだ無いにゃ"
-            }
-        }
-        val titles = filtered.joinToString("、") { it.title }
-        return when {
-            effectiveKeyword != null -> "${effectiveKeyword}のメモは${titles}だにゃ"
-            scopeDate != null -> "${DateTimeParser.formatWhen(scopeDate, today)}のメモは${titles}だにゃ"
-            else -> "メモは${titles}だにゃ"
-        }
-    }
-
-    /**
      * #146: マリたん(Gemini経由の音声アシスタント)からPOI内部データへの読み取り
      * 専用の問い合わせだけを、高い確信度で判定できる場合にのみ処理する。
      * respond()とは完全に独立した新しいエントリポイントで、重要な違いがある:
@@ -1162,8 +1382,21 @@ class CatBrain(
      *    (respond()と共通、形状一致のみ)を使う。人物指定の無い「今日の予定は？」
      *    等はこれまで通り4番の日付限定answerQuery()側で処理する(query.keywordが
      *    nullでない限りそちらもnullを返す点は変更していない)。
+     *
+     * #POI マリたん性能アップ Phase 1: 戻り値を[CatReply]から`Pair<CatReply,
+     * ConversationContext?>`へ拡張した。呼び出し元(MariTanRow)はこの[ConversationContext]
+     * を次の発話まで保持し、直前に成立したPOI質問の続きとして「かっちゃんは？」
+     * 「じゃあ金曜は？」のような単独では情報不足の継続質問を[context]引数として
+     * 渡し戻す。[context]がnull(直前の発話がPOI質問として成立していない)場合は
+     * 継続質問の判定を一切行わない — respond()と同様、判定に確信が持てない発話を
+     * 誤ってPOIデータの検索/登録に結び付けないための安全側の設計をそのまま維持する。
+     * このメソッドは今回も読み取り専用のまま — 予定登録・タスク登録・メモ登録・
+     * 編集・削除は一切行わない。
      */
-    suspend fun answerPoiQueryOrNull(input: String): CatReply? {
+    suspend fun answerPoiQueryOrNull(
+        input: String,
+        context: ConversationContext? = null,
+    ): Pair<CatReply, ConversationContext?>? {
         val trimmed = input.trim().replace(Regex("[「」『』]"), "").trim()
         if (trimmed.isEmpty()) return null
         if (looksOutOfScope(trimmed)) return null
@@ -1171,29 +1404,125 @@ class CatBrain(
         val now = LocalDateTime.now()
 
         if (isPhotoQuery(trimmed)) {
-            return answerPhotoQuery(trimmed, now)
+            // Phase 1: アルバム/写真は今回の会話文脈の対象外 — 応答は返すが、
+            // 次の発話へ引き継ぐ文脈はここで打ち切る(null)。
+            return answerPhotoQuery(trimmed, now) to null
+        }
+
+        // #POI マリたん性能アップ Phase 1: 直前に成立したPOI質問の文脈がある場合
+        // だけ、「かっちゃんは？」「じゃあ金曜は？」のような単独では情報不足の
+        // 継続質問を許可する。文脈が無い発話はここを素通りし、以下の既存判定へ
+        // そのまま流れる — 通常の雑談を継続質問と誤判定することはない。
+        if (context != null) {
+            if (context.topic != ConversationTopic.MEMO) {
+                bareFollowupPerson(trimmed, currentDisplayName())?.let { (person, isSelf) ->
+                    val updated = context.copy(person = person, personIsSelf = isSelf)
+                    val text = if (updated.topic == ConversationTopic.SCHEDULE) {
+                        answerScheduleForContext(updated, now)
+                    } else {
+                        answerTaskForContext(updated, now)
+                    }
+                    return CatReply(text) to updated
+                }
+            }
+            bareFollowupDateRange(trimmed, now, context.dateRange?.first)?.let { range ->
+                val updated = context.copy(dateRange = range.start to range.end, dateLabel = range.label)
+                val text = when (updated.topic) {
+                    ConversationTopic.SCHEDULE -> answerScheduleForContext(updated, now)
+                    ConversationTopic.TASK -> answerTaskForContext(updated, now)
+                    ConversationTopic.MEMO -> answerMemoForContext(updated, now)
+                }
+                return CatReply(text) to updated
+            }
         }
 
         if (workTaskQuestionCore(trimmed)) {
-            return CatReply(answerWorkTaskQuery(trimmed, now, currentDisplayName()))
+            val explicit = explicitPersonInText(trimmed)
+            val wantsSelf = explicit == null && (trimmed.contains("私の仕事") || trimmed.contains("自分の仕事"))
+            if (wantsSelf && currentDisplayName() == null) return CatReply(unknownSpeakerReply()) to null
+            val person = explicit ?: if (wantsSelf) currentDisplayName() else null
+            val range = DateTimeParser.extractDateRange(trimmed, now)
+            val keyword = range?.let { DateTimeParser.parseQuery(it.remainingText, now).keyword }
+            val ctx = ConversationContext(
+                ConversationTopic.TASK,
+                workOnly = true,
+                person = person,
+                personIsSelf = wantsSelf,
+                dateRange = range?.let { it.start to it.end },
+                dateLabel = range?.label,
+                keyword = keyword,
+            )
+            return CatReply(answerTaskForContext(ctx, now)) to ctx
         }
 
         if (isScheduleQuestionWithPerson(trimmed)) {
-            return CatReply(answerScheduleQueryByPerson(trimmed, now, currentDisplayName()))
+            val explicit = explicitPersonInText(trimmed)
+            val wantsSelf = explicit == null && (trimmed.contains("私の予定") || trimmed.contains("自分の予定"))
+            if (wantsSelf && currentDisplayName() == null) return CatReply(unknownSpeakerReply()) to null
+            val person = explicit ?: if (wantsSelf) currentDisplayName() else null
+            val range = DateTimeParser.extractDateRange(trimmed, now)
+            val keyword = range?.let { DateTimeParser.parseQuery(it.remainingText, now).keyword }
+            val ctx = ConversationContext(
+                ConversationTopic.SCHEDULE,
+                person = person,
+                personIsSelf = wantsSelf,
+                dateRange = range?.let { it.start to it.end },
+                dateLabel = range?.label,
+                keyword = keyword,
+            )
+            return CatReply(answerScheduleForContext(ctx, now)) to ctx
         }
 
         if (isTaskQuestion(trimmed) && DateTimeParser.isQuery(trimmed)) {
-            return CatReply(answerTaskQuery(trimmed, now))
+            val person = explicitPersonInText(trimmed)
+            val range = DateTimeParser.extractDateRange(trimmed, now)
+            val keyword = range?.let { DateTimeParser.parseQuery(it.remainingText, now).keyword }
+            val ctx = ConversationContext(
+                ConversationTopic.TASK,
+                workOnly = false,
+                person = person,
+                dateRange = range?.let { it.start to it.end },
+                dateLabel = range?.label,
+                keyword = keyword,
+            )
+            return CatReply(answerTaskForContext(ctx, now)) to ctx
         }
 
         if (isMemoQuery(trimmed)) {
-            return CatReply(answerMemoQuery(trimmed, now))
+            val core = stripMemoQuestionTrailer(trimmed)
+            val withoutMemoWord = if (core == "メモ") "" else core.removeSuffix("のメモ").trim()
+            val range = if (withoutMemoWord.isBlank()) null else DateTimeParser.extractDateRange(withoutMemoWord, now)
+            val keyword = when {
+                withoutMemoWord.isBlank() -> null
+                range != null -> range.remainingText.trim().ifBlank { null }
+                else -> withoutMemoWord.ifBlank { null }
+            }
+            val ctx = ConversationContext(
+                ConversationTopic.MEMO,
+                dateRange = range?.let { it.start to it.end },
+                dateLabel = range?.label,
+                keyword = keyword,
+            )
+            return CatReply(answerMemoForContext(ctx, now)) to ctx
         }
 
+        // #POI マリたん性能アップ Phase 1: 上のどの形状にも一致しなかった、
+        // 「来週忙しい？」「今月病院あった？」「金曜なんかある？」のような、
+        // 「の予定」等の決まった言い回しを含まない自由な期間質問。日付/期間の
+        // 語(来週/今週/再来週/今月/来月/曜日名/今日/明日/明後日)が実際に見つかった
+        // 場合にだけ処理する — 日付語が全く無いキーワードだけの質問(「駐車場の
+        // 番号なんだっけ？」等)は、一般トリビアの誤爆を避けるため従来通り対象外
+        // (何も返さずnull、呼び出し元はGeminiへフォールバックする)のまま。
         if (DateTimeParser.isQuery(trimmed)) {
-            val query = DateTimeParser.parseQuery(trimmed, now)
-            if (query.dayFilter != null && query.keyword == null) {
-                return CatReply(answerQuery(trimmed, now))
+            DateTimeParser.extractDateRange(trimmed, now)?.let { range ->
+                val keyword = DateTimeParser.parseQuery(range.remainingText, now).keyword
+                val ctx = ConversationContext(
+                    ConversationTopic.SCHEDULE,
+                    dateRange = range.start to range.end,
+                    dateLabel = range.label,
+                    keyword = keyword,
+                )
+                return CatReply(answerScheduleForContext(ctx, now)) to ctx
             }
         }
 

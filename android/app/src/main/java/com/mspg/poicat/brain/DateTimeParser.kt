@@ -26,6 +26,15 @@ object DateTimeParser {
     data class ParsedRegistration(val dateTime: LocalDateTime, val title: String)
     data class ParsedQuery(val keyword: String?, val dayFilter: LocalDate?)
 
+    /**
+     * #POI マリたん性能アップ Phase 1: 質問側の期間解決結果。[start]/[end]は
+     * 両端を含む(inclusive)。単日の場合はstart==end。[remainingText]は
+     * マッチした日付表現を取り除いた残りの文字列 — 呼び出し元(CatBrain)が
+     * そこにキーワードが残っているか(「今月病院あった？」の「病院」)、
+     * それとも何も残っていないか(単なる期間だけの質問)を判定するために使う。
+     */
+    data class DateRangeMatch(val start: LocalDate, val end: LocalDate, val label: String, val remainingText: String)
+
     private val weekdayChar = mapOf(
         '月' to DayOfWeek.MONDAY,
         '火' to DayOfWeek.TUESDAY,
@@ -261,6 +270,87 @@ object DateTimeParser {
         val trimmed = remaining.trim()
         val keyword = if (trimmed in genericQueryFillers) null else trimmed.ifBlank { null }
         return ParsedQuery(keyword = keyword, dayFilter = dayFilter)
+    }
+
+    /**
+     * #POI マリたん性能アップ Phase 1: [extractDate]の登録専用の日付語彙(単日のみ)を、
+     * 質問側でも同じ語彙で解決できるようにする**追加**関数。[extractDate]自体は
+     * 一切変更しない(登録側の既存動作・既存呼び出し元は無影響)。既存の[parseQuery]の
+     * 明後日/明日/今日のみという狭い語彙も変更しない — こちらは新しい呼び出し元
+     * ([CatBrain]の期間質問専用の新しい経路)だけが使う。
+     *
+     * 単日表現(今日/明日/明後日/曜日単体/来週の●曜/再来週の●曜/今週の●曜)は
+     * start==endの1日範囲、週/月表現(今週/来週/再来週/今月/来月)は月曜〜日曜、
+     * また1日〜末日の範囲を返す。[extractDate]と同じ「解析できない場合は
+     * nullを返し、月末やまたは別の日へ丸めない」方針。
+     */
+    fun extractDateRange(text: String, now: LocalDateTime = LocalDateTime.now()): DateRangeMatch? {
+        val today = now.toLocalDate()
+        var remaining = text
+        var result: DateRangeMatch? = null
+
+        fun tryMatch(regex: Regex, resolve: (MatchResult) -> Triple<LocalDate, LocalDate, String>?): Boolean {
+            if (result != null) return false
+            val m = regex.find(remaining) ?: return false
+            val (start, end, label) = resolve(m) ?: return false
+            remaining = remaining.removeRange(m.range)
+            result = DateRangeMatch(start, end, label, remaining)
+            return true
+        }
+
+        // 再来週の●曜/来週の●曜/今週の●曜は、それぞれ「再来週」「来週」「今週」を
+        // 部分文字列として含むため、より具体的(長い)方を必ず先に判定する
+        // ([extractDate]と同じ理由・同じ順序)。
+        tryMatch(Regex("再来週の?([月火水木金土日])曜?日?")) { m ->
+            val d = thisWeekWeekday(today, weekdayChar.getValue(m.groupValues[1][0])).plusWeeks(2)
+            Triple(d, d, formatWhen(d, today))
+        }
+        tryMatch(Regex("来週の?([月火水木金土日])曜?日?")) { m ->
+            val d = nextWeekWeekday(today, weekdayChar.getValue(m.groupValues[1][0]))
+            Triple(d, d, formatWhen(d, today))
+        }
+        tryMatch(Regex("今週の?([月火水木金土日])曜?日?")) { m ->
+            val d = thisWeekWeekday(today, weekdayChar.getValue(m.groupValues[1][0]))
+            Triple(d, d, formatWhen(d, today))
+        }
+        tryMatch(Regex("再来週")) {
+            val monday = thisWeekWeekday(today, DayOfWeek.MONDAY).plusWeeks(2)
+            Triple(monday, monday.plusDays(6), "再来週")
+        }
+        tryMatch(Regex("来週")) {
+            val monday = thisWeekWeekday(today, DayOfWeek.MONDAY).plusWeeks(1)
+            Triple(monday, monday.plusDays(6), "来週")
+        }
+        tryMatch(Regex("今週")) {
+            val monday = thisWeekWeekday(today, DayOfWeek.MONDAY)
+            Triple(monday, monday.plusDays(6), "今週")
+        }
+        // #148既存のresolveMonthDay等と同じ「実在しない日付を丸めない」方針とは別に、
+        // 今月/来月は「月そのもの」を指す期間表現なので実在チェックは不要(atEndOfMonth
+        // が常にその月の正しい末日を返す)。
+        tryMatch(Regex("今月")) {
+            val ym = YearMonth.of(today.year, today.monthValue)
+            Triple(ym.atDay(1), ym.atEndOfMonth(), "今月")
+        }
+        tryMatch(Regex("来月")) {
+            val ym = YearMonth.of(today.year, today.monthValue).plusMonths(1)
+            Triple(ym.atDay(1), ym.atEndOfMonth(), "来月")
+        }
+        tryMatch(Regex("明後日")) {
+            val d = today.plusDays(2)
+            Triple(d, d, formatWhen(d, today))
+        }
+        tryMatch(Regex("明日")) {
+            val d = today.plusDays(1)
+            Triple(d, d, formatWhen(d, today))
+        }
+        tryMatch(Regex("今日")) { Triple(today, today, formatWhen(today, today)) }
+        tryMatch(Regex("([月火水木金土日])曜日?")) { m ->
+            val d = nearestWeekday(today, weekdayChar.getValue(m.groupValues[1][0]))
+            Triple(d, d, formatWhen(d, today))
+        }
+
+        return result
     }
 
     /** A short, natural way to refer to a date relative to today ("明日", "水曜日", "来週の金曜日", "3月5日"). */

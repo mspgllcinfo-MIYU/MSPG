@@ -63,12 +63,18 @@ class CatEventRepository(context: Context) {
         dao.update(current.copy(roomEventId = roomEventId))
     }
 
-    /** Inserts a new dated/date-less item, unless a dated one with the same title+time already exists. */
-    suspend fun remember(title: String, dateTime: Long?): CatEvent {
+    /**
+     * Inserts a new dated/date-less item, unless a dated one with the same title+time
+     * already exists. [assignee] is applied only to a genuinely new row — when an
+     * existing duplicate is found and returned instead, its current assignee (whatever
+     * it already is) is left completely untouched, never overwritten by this call's
+     * [assignee] argument. Defaults to null (existing callers unaffected).
+     */
+    suspend fun remember(title: String, dateTime: Long?, assignee: String? = null): CatEvent {
         if (dateTime != null) {
             findDuplicateByNormalizedTitle(title, dateTime)?.let { return it }
         }
-        return insertAndSync(CatEvent(title = title, dateTime = dateTime))
+        return insertAndSync(CatEvent(title = title, dateTime = dateTime, assignee = assignee))
     }
 
     /**
@@ -124,8 +130,8 @@ class CatEventRepository(context: Context) {
 
     suspend fun allMatching(keyword: String) = dao.allMatching(keyword)
 
-    suspend fun addTask(title: String, dueDateTime: Long?, category: String? = null): CatEvent =
-        insertAndSync(CatEvent(title = title, dateTime = dueDateTime, isTask = true, category = category))
+    suspend fun addTask(title: String, dueDateTime: Long?, category: String? = null, assignee: String? = null): CatEvent =
+        insertAndSync(CatEvent(title = title, dateTime = dueDateTime, isTask = true, category = category, assignee = assignee))
 
     suspend fun tasks() = dao.tasks()
 
