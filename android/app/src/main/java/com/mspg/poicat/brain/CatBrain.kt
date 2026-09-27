@@ -1007,7 +1007,30 @@ class CatBrain(
         val matched = byKeyword.filter { it.dateTime != null && eventMatchesPersonFilter(it.assignee, person, personIsSelf) }
 
         if (matched.isEmpty()) {
-            return if (ctx.dateLabel != null) "${ctx.dateLabel}の予定はまだ無いにゃ" else "予定はまだ無いにゃ"
+            // #POI 実機不具合追跡(一時診断・要削除): 静的トレース(独立2系統)では
+            // このケースが再現できないため、実機で実際に何が起きているかを直接
+            // 得るための一時的な診断出力。range/pool(Kotlin側filter適用前の
+            // between()の生の戻り値)/keyword/personを全て文字列化して返す —
+            // 次の実機テストでこの内容をそのまま報告してもらい、DB取得段階と
+            // Kotlin側filter段階のどちらで対象行が消えているかを特定する。
+            // 原因確定後は、この診断ブロックごと削除する。
+            val debug = buildString {
+                append("【診断】range=")
+                append(range?.let { "${it.first}..${it.second}" } ?: "null(upcoming使用)")
+                append(" pool.size=").append(pool.size)
+                append(" keyword=").append(keyword ?: "null")
+                append(" person=").append(person ?: "null")
+                append(" personIsSelf=").append(personIsSelf)
+                append(" poolRows=[")
+                append(
+                    pool.joinToString("; ") {
+                        "title=${it.title} isTask=${it.isTask} dateTime=${it.dateTime} assignee=${it.assignee ?: "null"}"
+                    },
+                )
+                append("]")
+            }
+            val label = if (ctx.dateLabel != null) "${ctx.dateLabel}の予定はまだ無いにゃ" else "予定はまだ無いにゃ"
+            return "$label $debug"
         }
         val titles = matched.joinToString("、") { "${DateTimeParser.formatWhen(it.dateTime!!.toLocalDate(), today)}の${it.title}" }
         return "予定は${titles}だにゃ"
