@@ -123,7 +123,15 @@ private fun ChatView(modifier: Modifier = Modifier) {
     // — 固定値ではないので、設定画面で表示名を変えても次の発話から反映される。
     val roomStore = remember { RoomStore(context.applicationContext) }
     val catBrain = remember {
-        CatBrain(CatEventRepository(context.applicationContext), photoRepository) { roomStore.displayName }
+        // #POI 実機不具合修正: Open-MeteoがNotFoundの場合のAndroid Geocoder
+        // フォールバック用に、Activity ContextではなくapplicationContextだけを
+        // 渡す(CatBrainインスタンスがApplicationより長く生き延びてリークする
+        // ことはない)。
+        CatBrain(
+            CatEventRepository(context.applicationContext),
+            photoRepository,
+            appContext = context.applicationContext,
+        ) { roomStore.displayName }
     }
     var detailPhoto by remember { mutableStateOf<Photo?>(null) }
     // Phase B: a photo picked but not yet sent, shown as a preview next to the input.
