@@ -115,6 +115,20 @@ class CatBrain(
             return answerPhotoQuery(trimmed, now)
         }
 
+        // #POI 実機不具合追跡: 猫AI(黒猫AIチャット、この関数)は今まで
+        // answerWeatherQueryOrNull(Stage 2の場所明示型天気質問)を一切呼んで
+        // おらず、「東京の天気は？」等は下のDateTimeParser.isQuery+
+        // looksOutOfScope(天気語を含むため)に先に捕まって「天気予報に聞けにゃ」
+        // 系の定型文で終わっていた — マリたん(MariTanRow)側にだけ配線されて
+        // いた、既存のPOI質問判定より前に天気質問を試すという設計が、この
+        // 関数には最初から存在しなかった。実機テストが猫AIチャット経由で
+        // 行われていたため、GeoCoder側をどれだけ修正しても症状が変わらな
+        // かった実際の原因はここにある。マリたんと全く同じ既存の
+        // answerWeatherQueryOrNullをそのまま再利用するだけで、新しい天気
+        // 取得ロジックは追加していない。
+        val weatherReply = answerWeatherQueryOrNull(trimmed)
+        if (weatherReply != null) return weatherReply
+
         // #144: 「私の仕事」「今日の仕事」のような、仕事タスクの担当を尋ねる質問は
         // 「？」等を伴わない体言止めの言い方が多く、下のDateTimeParser.isQuery()の
         // 判定(「？」「いつ」や「教えて」「の予定は」等の特定の言い回しに限定した、
@@ -899,32 +913,76 @@ class CatBrain(
      * 別実装は作らない。
      */
     private suspend fun fetchWeatherReply(place: String, date: LocalDate?, dateLabel: String?, focus: WeatherFocus): CatReply {
-        val geoResult = withTimeoutOrNull(10_000) { GeoCoder.resolve(place) }
         // #POI 実機不具合追跡(一時診断): これまで2回、GeoCoderへのリクエスト
         // 条件を推測で調整したが(language削除・count増加・countryCode追加)、
         // 実機再テストの結果いずれも「東京」「品川」の場所解決失敗を解消
-        // できなかった。これ以上リクエスト条件を推測で変え続けるより、まず
-        // 実際に何が起きているかを実機で確認する — 呼び出し元へ渡る[place]
-        // 文字列そのもの(音声認識がひらがな/カタカナで返している可能性等を
-        // 切り分けるため)と、NotFound以外の失敗(通信/JSON解析例外)だった
-        // 場合はその例外の種類も、応答文言に一時的に追記する。原因確定後は
-        // この診断表示だけを削除し、検索ロジック自体は変更しない。
-        val located = when (val geoOutcome = geoResult?.getOrNull()) {
+        // できなかった。原因を推測で直し続けるのではなく、失敗時に何が
+        // 起きているかを猫AI/マリたんのチャット画面へ直接表示する — logcat
+        // (adb)を使わずに実機だけで確認できるようにするための一時的な診断。
+        // 原因確定後はこの診断ブロックの追記だけを削除する(既存の検索
+        // ロジック・WeatherService自体は今回も変更していない)。
+        fun diagnosticBlock(
+            selectedLocation: String,
+            lat: String,
+            lon: String,
+            weatherRequest: String,
+            error: String,
+            geocodeResult: String,
+        ): String = "\n【診断】" +
+            "\nintent=${focus.name}" +
+            "\nplace=\"$place\"" +
+            "\ngeocodeQuery=\"$place\"" +
+            "\ngeocodeResult=$geocodeResult" +
+            "\nselectedLocation=$selectedLocation" +
+            "\nlat=$lat" +
+            "\nlon=$lon" +
+            "\nweatherRequest=$weatherRequest" +
+            "\nerror=$error"
+
+        val geoResult = withTimeoutOrNull(10_000) { GeoCoder.resolve(place) }
+        val geoOutcome = geoResult?.getOrNull()
+        val located = when (geoOutcome) {
             is GeoCoder.Outcome.Found -> geoOutcome.location
-            GeoCoder.Outcome.NotFound -> return CatReply("場所が分からないにゃ。【診断:place=\"$place\"】")
-            GeoCoder.Outcome.QuotaExceeded -> return CatReply("課金しなきゃ答えたく無いニャ💢")
+            GeoCoder.Outcome.NotFound -> return CatReply(
+                "場所が分からないにゃ。" +
+                    diagnosticBlock("NONE", "NONE", "NONE", "未実行", "NONE", "0件(NotFound)"),
+            )
+            GeoCoder.Outcome.QuotaExceeded -> return CatReply(
+                "課金しなきゃ答えたく無いニャ💢" +
+                    diagnosticBlock("NONE", "NONE", "NONE", "未実行", "NONE", "QuotaExceeded"),
+            )
             null -> {
                 val err = geoResult?.exceptionOrNull()
                 val errText = if (err != null) "${err::class.simpleName}:${err.message}" else "timeout"
-                return CatReply("おネムにゃ。【診断:place=\"$place\",err=$errText】")
+                return CatReply(
+                    "おネムにゃ。" +
+                        diagnosticBlock("NONE", "NONE", "NONE", "未実行", errText, "FAILED:$errText"),
+                )
             }
         }
 
         val weatherResult = withTimeoutOrNull(10_000) { WeatherService.fetch(located.latitude, located.longitude, date) }
-        val answer = when (val weatherOutcome = weatherResult?.getOrNull()) {
+        val weatherOutcome = weatherResult?.getOrNull()
+        val answer = when (weatherOutcome) {
             is WeatherService.Outcome.Success -> weatherOutcome.answer
-            WeatherService.Outcome.QuotaExceeded -> return CatReply("課金しなきゃ答えたく無いニャ💢")
-            null -> return CatReply("おネムにゃ。")
+            WeatherService.Outcome.QuotaExceeded -> return CatReply(
+                "課金しなきゃ答えたく無いニャ💢" +
+                    diagnosticBlock(
+                        located.name, located.latitude.toString(), located.longitude.toString(),
+                        "実行", "NONE", "1件(Found)",
+                    ),
+            )
+            null -> {
+                val err = weatherResult?.exceptionOrNull()
+                val errText = if (err != null) "${err::class.simpleName}:${err.message}" else "timeout"
+                return CatReply(
+                    "おネムにゃ。" +
+                        diagnosticBlock(
+                            located.name, located.latitude.toString(), located.longitude.toString(),
+                            "実行", errText, "1件(Found)",
+                        ),
+                )
+            }
         }
 
         return CatReply(formatWeatherReply(place, dateLabel, focus, answer))
