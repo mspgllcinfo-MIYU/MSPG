@@ -1120,10 +1120,18 @@ class CatBrain(
             val ctx = appContext
                 ?: return@withContext AndroidGeocoderResult(0, emptyList(), null, "NoContext")
             try {
-                val geocoder = android.location.Geocoder(ctx, java.util.Locale.JAPAN)
-                if (!geocoder.isPresent()) {
+                // #POI 実機不具合修正: Geocoder.isPresent()はstaticメソッドで
+                // API 33(Build.VERSION_CODES.TIRAMISU)以降にしか存在しない
+                // (minSdk=26のためコンパイル時にAPI存在チェックが必要)。
+                // API 33未満の端末では判定自体を行わず、Geocoderが実際に
+                // 利用できない場合は下のgetFromLocationNameの例外(IOException
+                // 等)としてcatchされる — クラッシュはしない。
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
+                    !android.location.Geocoder.isPresent()
+                ) {
                     return@withContext AndroidGeocoderResult(0, emptyList(), null, "NotPresent")
                 }
+                val geocoder = android.location.Geocoder(ctx, java.util.Locale.JAPAN)
                 @Suppress("DEPRECATION")
                 val addresses = geocoder.getFromLocationName(placeName, 10) ?: emptyList()
                 val candidates = addresses.map {
