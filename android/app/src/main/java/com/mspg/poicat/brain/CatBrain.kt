@@ -920,6 +920,36 @@ class CatBrain(
         // そのまま表示するだけで、検索ロジック・フィルタ条件自体は変更して
         // いない。TTSには絶対に渡さない(画面表示専用、AiChatScreen.kt側で
         // 【診断】以降を読み上げから除外する)。
+        //
+        // #POI 実機不具合追跡(比較診断): 「東京」(name="東京")がAPI側で
+        // 0件になる件について、同じ端末・同じAPI・同じ条件で"Tokyo"
+        // (ローマ字)を送った場合の生レスポンスと直接比較するための、
+        // 診断専用の追加リクエスト。comparisonRawCandidateCount等の結果は
+        // 画面表示のためだけに使い、実際の天気取得(located/weatherRequest)
+        // には一切使わない — 「東京→Tokyo」という本番変換や東京専用
+        // フォールバックはまだ実装していない。GeoCoder.resolve自体は
+        // 呼び出すだけで、検索ロジック・フィルタ条件は無変更。
+        val comparisonQuery = "Tokyo"
+        val comparisonResult = withTimeoutOrNull(10_000) { GeoCoder.resolve(comparisonQuery) }
+        val comparisonOutcome = comparisonResult?.getOrNull()
+        val (comparisonRawCount, comparisonRawList, comparisonJpCount) = when (comparisonOutcome) {
+            is GeoCoder.Outcome.Found -> Triple(
+                comparisonOutcome.rawCandidateCount.toString(),
+                comparisonOutcome.rawCandidates.joinToString().ifBlank { "NONE" },
+                comparisonOutcome.jpCandidateCount.toString(),
+            )
+            is GeoCoder.Outcome.NotFound -> Triple(
+                comparisonOutcome.rawCandidateCount.toString(),
+                comparisonOutcome.rawCandidates.joinToString().ifBlank { "NONE" },
+                comparisonOutcome.jpCandidateCount.toString(),
+            )
+            GeoCoder.Outcome.QuotaExceeded -> Triple("NONE", "QuotaExceeded", "NONE")
+            null -> {
+                val err = comparisonResult?.exceptionOrNull()
+                Triple("NONE", "FAILED:${if (err != null) "${err::class.simpleName}:${err.message}" else "timeout"}", "NONE")
+            }
+        }
+
         fun diagnosticBlock(
             selectedLocation: String,
             lat: String,
@@ -933,10 +963,17 @@ class CatBrain(
         ): String = "\n【診断】" +
             "\nintent=${focus.name}" +
             "\nplace=\"$place\"" +
+            "\n" +
             "\ngeocodeQuery=\"$place\"" +
             "\nrawCandidateCount=$rawCandidateCount" +
             "\nrawCandidates=$rawCandidates" +
             "\njpCandidateCount=$jpCandidateCount" +
+            "\n" +
+            "\ncomparisonQuery=\"$comparisonQuery\"" +
+            "\ncomparisonRawCandidateCount=$comparisonRawCount" +
+            "\ncomparisonRawCandidates=$comparisonRawList" +
+            "\ncomparisonJpCandidateCount=$comparisonJpCount" +
+            "\n" +
             "\ngeocodeResult=$geocodeResult" +
             "\nselectedLocation=$selectedLocation" +
             "\nlat=$lat" +
