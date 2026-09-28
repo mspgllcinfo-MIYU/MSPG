@@ -900,11 +900,24 @@ class CatBrain(
      */
     private suspend fun fetchWeatherReply(place: String, date: LocalDate?, dateLabel: String?, focus: WeatherFocus): CatReply {
         val geoResult = withTimeoutOrNull(10_000) { GeoCoder.resolve(place) }
+        // #POI 実機不具合追跡(一時診断): これまで2回、GeoCoderへのリクエスト
+        // 条件を推測で調整したが(language削除・count増加・countryCode追加)、
+        // 実機再テストの結果いずれも「東京」「品川」の場所解決失敗を解消
+        // できなかった。これ以上リクエスト条件を推測で変え続けるより、まず
+        // 実際に何が起きているかを実機で確認する — 呼び出し元へ渡る[place]
+        // 文字列そのもの(音声認識がひらがな/カタカナで返している可能性等を
+        // 切り分けるため)と、NotFound以外の失敗(通信/JSON解析例外)だった
+        // 場合はその例外の種類も、応答文言に一時的に追記する。原因確定後は
+        // この診断表示だけを削除し、検索ロジック自体は変更しない。
         val located = when (val geoOutcome = geoResult?.getOrNull()) {
             is GeoCoder.Outcome.Found -> geoOutcome.location
-            GeoCoder.Outcome.NotFound -> return CatReply("場所が分からないにゃ。")
+            GeoCoder.Outcome.NotFound -> return CatReply("場所が分からないにゃ。【診断:place=\"$place\"】")
             GeoCoder.Outcome.QuotaExceeded -> return CatReply("課金しなきゃ答えたく無いニャ💢")
-            null -> return CatReply("おネムにゃ。")
+            null -> {
+                val err = geoResult?.exceptionOrNull()
+                val errText = if (err != null) "${err::class.simpleName}:${err.message}" else "timeout"
+                return CatReply("おネムにゃ。【診断:place=\"$place\",err=$errText】")
+            }
         }
 
         val weatherResult = withTimeoutOrNull(10_000) { WeatherService.fetch(located.latitude, located.longitude, date) }
