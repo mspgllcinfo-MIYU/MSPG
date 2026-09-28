@@ -490,6 +490,12 @@ private fun MariTanRow(catBrain: CatBrain) {
     // 起動)を1つでも通った発話の後は必ずnullへ戻す — 「直前に成立したPOI質問」
     // だけが継続質問の対象という条件を厳密に守るため。
     var conversationContext by remember { mutableStateOf<ConversationContext?>(null) }
+    // #POI 実機不具合追跡: 天気診断ブロック(【診断】以降)を、画面にだけ表示し
+    // TTSには絶対に読み上げさせないための表示専用state。CatReply.text自体
+    // (BB/黒猫AIチャットが表示に使う値)には診断ブロックを引き続き含めたまま
+    // 変更しない — ここではspeak()に渡す直前に、この画面の中でだけ音声用
+    // テキストと画面表示用テキストを分離する。
+    var diagnosticText by remember { mutableStateOf<String?>(null) }
 
     // マリたんの声。画面が破棄される際は必ずshutdown()する（TextToSpeechは
     // ネイティブリソース/バックグラウンドサービス接続を持つため）。
@@ -535,6 +541,16 @@ private fun MariTanRow(catBrain: CatBrain) {
         engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "mari_tan_answer")
     }
 
+    // #POI 実機不具合追跡: CatReply.textの末尾に付いている一時的な【診断】
+    // ブロック(CatBrain.fetchWeatherReplyが失敗時にだけ追記する)を、画面表示用
+    // とspeak()用に分離する。診断ブロックが無い通常の返答はspokenがtext全体、
+    // diagnosticはnullのまま(既存の挙動と完全に同じ)。
+    fun splitDiagnostic(text: String): Pair<String, String?> {
+        val marker = "\n【診断】"
+        val idx = text.indexOf(marker)
+        return if (idx < 0) text to null else text.substring(0, idx) to text.substring(idx + 1)
+    }
+
     val speechLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
@@ -544,6 +560,10 @@ private fun MariTanRow(catBrain: CatBrain) {
         if (text.isNullOrBlank()) {
             state = MariTanState.IDLE
         } else {
+            // #POI 実機不具合追跡: 新しい発話の処理を始めるたびに、前回の
+            // 【診断】表示を必ずクリアする — 診断が付かない今回の返答なのに
+            // 前回の診断が画面に残り続けることを防ぐ。
+            diagnosticText = null
             // Gemini APIを呼ぶ前に、ローカルだけで判定できる3種類の意図を優先的に
             // 処理する（クラス冒頭のコメント参照）。
             val appTarget = ExternalAiLauncher.detectTarget(text)
@@ -593,8 +613,10 @@ private fun MariTanRow(catBrain: CatBrain) {
                         // 続けて聞けるようにするため、あえてクリアしない。
                         val hereWeatherReply = catBrain.answerContextualWeatherQueryOrNull(text, conversationContext)
                         if (hereWeatherReply != null) {
+                            val (spoken, diag) = splitDiagnostic(hereWeatherReply.text)
+                            diagnosticText = diag
                             state = MariTanState.SPEAKING
-                            speak(hereWeatherReply.text) { state = MariTanState.IDLE }
+                            speak(spoken) { state = MariTanState.IDLE }
                             return@launch
                         }
                         // #POI 秘書性能② Stage 2: 場所が明示された天気質問を、既存の
@@ -607,8 +629,10 @@ private fun MariTanRow(catBrain: CatBrain) {
                         val weatherReply = catBrain.answerWeatherQueryOrNull(text)
                         if (weatherReply != null) {
                             conversationContext = null
+                            val (spoken, diag) = splitDiagnostic(weatherReply.text)
+                            diagnosticText = diag
                             state = MariTanState.SPEAKING
-                            speak(weatherReply.text) { state = MariTanState.IDLE }
+                            speak(spoken) { state = MariTanState.IDLE }
                             return@launch
                         }
                         // #146: Gemini APIを呼ぶ前に、POI内部データ(予定/仕事タスク/
@@ -759,6 +783,19 @@ private fun MariTanRow(catBrain: CatBrain) {
             },
             fontSize = 12.sp,
             color = AiInk.copy(alpha = 0.6f),
+        )
+    }
+
+    // #POI 実機不具合追跡: 天気問い合わせが失敗した場合だけ、【診断】ブロックを
+    // 画面へそのまま表示する(TTSでは絶対に読み上げない、上のsplitDiagnostic
+    // 参照)。長いerrorでも省略せず全文を表示するため、maxLines/overflowは
+    // 指定しない。診断が無い(diagnosticText == null)通常時は何も表示しない。
+    diagnosticText?.let { diag ->
+        Text(
+            text = diag,
+            fontSize = 11.sp,
+            color = AiInk.copy(alpha = 0.8f),
+            modifier = Modifier.padding(top = 4.dp),
         )
     }
 
