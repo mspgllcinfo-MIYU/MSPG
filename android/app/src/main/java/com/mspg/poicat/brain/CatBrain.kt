@@ -186,7 +186,7 @@ class CatBrain(
             // 従来通りメモとして保存する — 明示的な保存指示自体は常に尊重する。
             val scheduleFromMemo = DateTimeParser.parseRegistration(memoContent, now)
             if (scheduleFromMemo != null && judgeRegistrationIntent(memoContent) == RegistrationIntent.SCHEDULE) {
-                val (saved, judgment) = rememberScheduleWithWorkJudgment(
+                val (saved, judgment) = rememberScheduleSplittingLocation(
                     scheduleFromMemo.title,
                     scheduleFromMemo.dateTime.toEpochMilli(),
                     resolveRegistrationAssignee(trimmed, currentDisplayName()),
@@ -206,7 +206,7 @@ class CatBrain(
         val registration = DateTimeParser.parseRegistration(trimmed, now)
         if (registration != null && judgeRegistrationIntent(trimmed) == RegistrationIntent.SCHEDULE) {
             // #POI 仕様変更: 指定なし＝2人(共有)をデフォルト担当とする。
-            val (saved, judgment) = rememberScheduleWithWorkJudgment(
+            val (saved, judgment) = rememberScheduleSplittingLocation(
                 registration.title,
                 registration.dateTime.toEpochMilli(),
                 resolveRegistrationAssignee(trimmed, currentDisplayName()),
@@ -1062,16 +1062,31 @@ class CatBrain(
         val registration = DateTimeParser.parseRegistration(trimmed, now) ?: return null
         if (judgeRegistrationIntent(trimmed) != RegistrationIntent.SCHEDULE) return null
 
-        // #POI 場所抽出: 「東京でテスト」のようなタイトルから、安全に地名だと
-        // 確定できた場合だけ場所を分離する(詳細は[splitLocationFromTitle])。
-        val (title, locationCandidate) = splitLocationFromTitle(registration.title)
-
         // #POI 仕様変更: 指定なし＝2人(共有)をデフォルト担当とする。
-        val result = rememberScheduleWithWorkJudgment(
-            title,
+        return rememberScheduleSplittingLocation(
+            registration.title,
             registration.dateTime.toEpochMilli(),
             resolveRegistrationAssignee(trimmed, currentDisplayName()),
         )
+    }
+
+    /**
+     * #POI 場所抽出: [rememberScheduleWithWorkJudgment]の直前に
+     * [splitLocationFromTitle]を必ず挟む共有ラッパー。予定を実際に保存する
+     * 経路が複数([registerScheduleCore](マリたん)/[respond](黒猫AIチャット))
+     * ある中、場所分離を1箇所にだけ書いて全ての保存経路から確実に再利用する
+     * ためのもの — 経路ごとに同じ分離コードを重複させたり、一部の経路だけ
+     * 分離を書き忘れたりしないようにする。
+     */
+    private suspend fun rememberScheduleSplittingLocation(
+        rawTitle: String,
+        dateTime: Long,
+        assignee: String?,
+    ): Pair<CatEvent, WorkJudgment> {
+        // #POI 場所抽出: 「東京でテスト」のようなタイトルから、安全に地名だと
+        // 確定できた場合だけ場所を分離する(詳細は[splitLocationFromTitle])。
+        val (title, locationCandidate) = splitLocationFromTitle(rawTitle)
+        val result = rememberScheduleWithWorkJudgment(title, dateTime, assignee)
         if (locationCandidate != null) {
             // #148 Maps-2A/2Cの[CatEventRepository.setLocation]と全く同じ
             // 経路を再利用する(新しい保存経路は作らない)。予定の保存自体は

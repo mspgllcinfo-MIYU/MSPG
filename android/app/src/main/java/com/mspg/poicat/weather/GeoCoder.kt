@@ -44,11 +44,28 @@ object GeoCoder {
      *
      * [Result]がfailureになるのは、レスポンス自体が壊れている等の予期しない
      * 例外の場合のみ — 呼び出し元はこれを通信障害として扱う。
+     *
+     * #POI 実機不具合修正: 実機で「甲府」は解決できるのに「東京」「品川」が
+     * [Outcome.NotFound]になる(＝通信自体は成功しレスポンスも正常に届いている
+     * が、country_code=="JP"の候補が1件も返って来ない)という報告があった。
+     * この関数は[Location.name](APIが返す表示用の地名)をどこからも参照して
+     * いない — 呼び出し元は常に[latitude]/[longitude]だけを使い、実際に画面や
+     * 発話へ出す地名は常にユーザー自身が入力した元の文字列(Stage 2/3の
+     * `place`)をそのまま使っている。つまり`language=ja`は表示目的では一切
+     * 使われておらず、それでいて検索対象の地名マッチング自体を日本語の
+     * 別名データだけに絞り込んでしまっている可能性がある(Open-Meteoの
+     * 検索仕様の詳細は非公開であり確証は無いが、"東京"/"品川"のように
+     * 行政上の正式名(東京都/品川区)と口語の短い呼び方が異なる地名で
+     * 症状が出ていることと矛盾しない)。表示用途に使っていない
+     * `language=ja`を外し、`count`も10→20へ増やして「本来一致する候補が
+     * 上位10件からこぼれる」ケースに備える — 特定の地名(「東京」等)を
+     * 個別に救済するコードは一切追加していない、地名によらない一般的な
+     * 検索条件の調整のみ。
      */
     suspend fun resolve(placeName: String): Result<Outcome> = withContext(Dispatchers.IO) {
         runCatching {
             val encoded = URLEncoder.encode(placeName, "UTF-8")
-            val url = "$BASE_URL?name=$encoded&count=10&language=ja&format=json"
+            val url = "$BASE_URL?name=$encoded&count=20&format=json"
             val connection = URL(url).openConnection() as HttpURLConnection
             try {
                 connection.connectTimeout = 8_000
