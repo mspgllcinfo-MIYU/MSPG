@@ -288,6 +288,7 @@ fun CalendarScreen(
             initialTitle = current?.title ?: "",
             initialDate = current?.dateTime?.toLocalDate() ?: selectedDate,
             initialTime = current?.dateTime?.toLocalDateTime()?.toLocalTime() ?: LocalTime.of(9, 0),
+            initialLocationText = current?.locationText ?: "",
             isEditing = current != null,
             linkedPhotos = linkedPhotosForEditing,
             onViewOriginalPhoto = { linkedPhotosForEditing.firstOrNull()?.let { detailPhoto = it } },
@@ -302,15 +303,22 @@ fun CalendarScreen(
                     }
                 }
             },
-            onSave = { title, date, time ->
+            onSave = { title, date, time, locationText ->
                 scope.launch {
                     val dateTimeMillis = LocalDateTime.of(date, time).toEpochMilli()
                     val cleanedTitle = stripEdgeQuoteMarks(title)
-                    if (current != null) {
+                    val normalizedLocation = locationText.trim().ifBlank { null }
+                    val saved = if (current != null) {
                         repository.edit(current, cleanedTitle, dateTimeMillis)
+                        current
                     } else {
                         repository.remember(cleanedTitle, dateTimeMillis)
                     }
+                    // #POI 場所欄: 手動で入力/修正/削除された場所を既存の
+                    // CatEvent.locationTextへそのまま保存する(既存のsetLocation
+                    // をそのまま再利用、新しい保存経路は作らない)。空欄で保存
+                    // すればnullへ戻り、場所を削除できる。
+                    repository.setLocation(saved, normalizedLocation)
                     showDialog = false
                     editingEvent = null
                     onSelectedDateChange(date)
@@ -556,17 +564,19 @@ private fun EventEditDialog(
     initialTitle: String,
     initialDate: LocalDate,
     initialTime: LocalTime,
+    initialLocationText: String = "",
     isEditing: Boolean,
     linkedPhotos: List<Photo> = emptyList(),
     onViewOriginalPhoto: () -> Unit = {},
     onDismiss: () -> Unit,
     onDelete: (() -> Unit)?,
-    onSave: (title: String, date: LocalDate, time: LocalTime) -> Unit,
+    onSave: (title: String, date: LocalDate, time: LocalTime, locationText: String) -> Unit,
 ) {
     val context = LocalContext.current
     var title by remember { mutableStateOf(initialTitle) }
     var date by remember { mutableStateOf(initialDate) }
     var time by remember { mutableStateOf(initialTime) }
+    var locationText by remember { mutableStateOf(initialLocationText) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -580,6 +590,14 @@ private fun EventEditDialog(
                     value = title,
                     onValueChange = { title = it },
                     label = { Text("予定の内容") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = CalendarInk, unfocusedTextColor = CalendarInk),
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = locationText,
+                    onValueChange = { locationText = it },
+                    label = { Text("場所") },
                     modifier = Modifier.fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(focusedTextColor = CalendarInk, unfocusedTextColor = CalendarInk),
                 )
@@ -626,7 +644,7 @@ private fun EventEditDialog(
         },
         confirmButton = {
             Button(
-                onClick = { if (title.isNotBlank()) onSave(title.trim(), date, time) },
+                onClick = { if (title.isNotBlank()) onSave(title.trim(), date, time, locationText.trim()) },
                 enabled = title.isNotBlank(),
                 colors = ButtonDefaults.buttonColors(containerColor = CalendarPink, contentColor = Color.White),
             ) { Text("保存") }

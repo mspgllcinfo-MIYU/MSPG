@@ -1062,12 +1062,62 @@ class CatBrain(
         val registration = DateTimeParser.parseRegistration(trimmed, now) ?: return null
         if (judgeRegistrationIntent(trimmed) != RegistrationIntent.SCHEDULE) return null
 
+        // #POI 場所抽出: 「東京でテスト」のようなタイトルから、安全に地名だと
+        // 確定できた場合だけ場所を分離する(詳細は[splitLocationFromTitle])。
+        val (title, locationCandidate) = splitLocationFromTitle(registration.title)
+
         // #POI 仕様変更: 指定なし＝2人(共有)をデフォルト担当とする。
-        return rememberScheduleWithWorkJudgment(
-            registration.title,
+        val result = rememberScheduleWithWorkJudgment(
+            title,
             registration.dateTime.toEpochMilli(),
             resolveRegistrationAssignee(trimmed, currentDisplayName()),
         )
+        if (locationCandidate != null) {
+            // #148 Maps-2A/2Cの[CatEventRepository.setLocation]と全く同じ
+            // 経路を再利用する(新しい保存経路は作らない)。予定の保存自体は
+            // 既に完了済みのため、ここが失敗しても予定登録そのものには
+            // 影響しない。
+            repository.setLocation(result.first, locationCandidate)
+        }
+        return result
+    }
+
+    // #POI 場所抽出: 「<場所>で<内容>」の「で」を場所の区切りだと誤認しやすい、
+    // 手段/話題を表す代表的な語。GeoCoderへ問い合わせる前の高速な足切りとして
+    // 使う(ネットワーク呼び出しを減らすためだけの最適化であり、安全性の根拠は
+    // 下のGeoCoder確認そのもの — このリストが不完全でも、地名として実際に
+    // 解決できない語はどのみち分離されない)。
+    private val nonLocationReasonWords = setOf(
+        "会議", "電話", "仕事", "メール", "LINE", "チャット", "オンライン",
+        "リモート", "テレワーク", "在宅", "打ち合わせ", "面談", "面接", "相談",
+        "メッセージ", "資料", "研修", "会社",
+    )
+
+    /**
+     * #POI 場所抽出: 予定タイトルから「<場所>で<内容>」の形を安全に分離する。
+     * 「明日10時、東京でテスト」→ title「テスト」+ locationText「東京」のように、
+     * 場所として実際に確定できた場合だけ分離する。判定は完全にルールベース
+     * (Gemini等による曖昧な場所推測は一切行わない) — 最初の「で」の前の
+     * 部分を候補として取り出し、[nonLocationReasonWords]に該当しない場合
+     * だけ、既存のStage 2/3で使っている[GeoCoder](Open-Meteo Geocoding API、
+     * APIキー不要・無料)へ問い合わせ、実際に日本国内の地名として解決できた
+     * 場合だけ分離を確定する。GeoCoderが解決できない(=「会議」「電話」
+     * 「仕事」等、場所ではない語だった)場合やタイムアウト等の通信エラーの
+     * 場合は、分離せず元のタイトルをそのまま返す — 安全に確定できない場合は
+     * 従来通りタイトルへ残す、という仕様上のデフォルト。
+     */
+    private suspend fun splitLocationFromTitle(rawTitle: String): Pair<String, String?> {
+        val match = Regex("^(.{1,12}?)で(.+)$").find(rawTitle) ?: return rawTitle to null
+        val candidate = match.groupValues[1].trim()
+        val rest = match.groupValues[2].trim()
+        if (candidate.isBlank() || rest.isBlank()) return rawTitle to null
+        if (candidate in nonLocationReasonWords) return rawTitle to null
+
+        val geoResult = withTimeoutOrNull(6_000) { GeoCoder.resolve(candidate) }
+        val isRealPlace = geoResult?.getOrNull() is GeoCoder.Outcome.Found
+        if (!isRealPlace) return rawTitle to null
+
+        return rest to candidate
     }
 
     /**
