@@ -23,11 +23,26 @@ object GeoCoder {
     data class Location(val name: String, val latitude: Double, val longitude: Double)
 
     sealed class Outcome {
-        data class Found(val location: Location) : Outcome()
+        // #POI 実機不具合追跡: 「東京」等がAPI側で0件返っているのか、候補は
+        // 返っているがcountry_code=="JP"フィルタで全て除外されているのかを
+        // 実機の画面上で切り分けられるよう、Open-Meteoが実際に返した生の
+        // 候補件数/一覧/JPフィルタ後の件数を呼び出し元へそのまま運ぶだけの
+        // 追加フィールド。判定ロジック(country_code=="JP"でのfirstOrNull)
+        // 自体は一切変更していない — 既に計算済みの値を捨てずに渡すだけ。
+        data class Found(
+            val location: Location,
+            val rawCandidateCount: Int,
+            val rawCandidates: List<String>,
+            val jpCandidateCount: Int,
+        ) : Outcome()
 
         /** 通信は成功したが、日本国内の候補が1件も見つからなかった。海外の
          * 同名地名を誤って採用しないための、意図的な「決定しない」結果。 */
-        object NotFound : Outcome()
+        data class NotFound(
+            val rawCandidateCount: Int,
+            val rawCandidates: List<String>,
+            val jpCandidateCount: Int,
+        ) : Outcome()
 
         /** 無料枠を使い切った(HTTP 429)。自動的に有料プランへ移行することは
          * 絶対にしない。 */
@@ -95,22 +110,20 @@ object GeoCoder {
 
                 val results = JSONObject(text).optJSONArray("results")
                 val candidates = (0 until (results?.length() ?: 0)).map { i -> results!!.getJSONObject(i) }
+                // #POI 実機不具合追跡: found/絞り込み条件自体は元のまま —
+                // 診断用にrawCandidates/jpCandidateCountを追加で計算している
+                // だけで、どの候補を採用するかの判定には一切影響しない。
                 val found = candidates.firstOrNull { it.optString("country_code") == "JP" }
+                val rawCandidates = candidates.map { "${it.optString("name")}(${it.optString("country_code")})" }
+                val jpCandidateCount = candidates.count { it.optString("country_code") == "JP" }
 
                 if (found == null) {
-                    // #POI 実機不具合修正: ユーザーへの応答文言は一切変えず
-                    // (「場所が分からないにゃ。」のまま)、logcat(タグ:
-                    // MariTanWeather)にだけ、返って来た候補の件数と
-                    // country_codeを記録する — 万一この修正でも解決しない
-                    // 場合に、次の実機確認で原因を素早く特定できるようにする
-                    // ための保険。
                     Log.w(
                         TAG,
                         "Open-Meteo geocoding: no JP match for \"$placeName\" among " +
-                            "${candidates.size} candidate(s): " +
-                            candidates.joinToString { "${it.optString("name")}(${it.optString("country_code")})" },
+                            "${candidates.size} candidate(s): " + rawCandidates.joinToString(),
                     )
-                    Outcome.NotFound
+                    Outcome.NotFound(candidates.size, rawCandidates, jpCandidateCount)
                 } else {
                     Outcome.Found(
                         Location(
@@ -118,6 +131,9 @@ object GeoCoder {
                             latitude = found.getDouble("latitude"),
                             longitude = found.getDouble("longitude"),
                         ),
+                        candidates.size,
+                        rawCandidates,
+                        jpCandidateCount,
                     )
                 }
             } finally {

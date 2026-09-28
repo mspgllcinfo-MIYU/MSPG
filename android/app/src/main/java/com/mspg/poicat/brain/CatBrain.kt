@@ -913,14 +913,13 @@ class CatBrain(
      * 別実装は作らない。
      */
     private suspend fun fetchWeatherReply(place: String, date: LocalDate?, dateLabel: String?, focus: WeatherFocus): CatReply {
-        // #POI 実機不具合追跡(一時診断): これまで2回、GeoCoderへのリクエスト
-        // 条件を推測で調整したが(language削除・count増加・countryCode追加)、
-        // 実機再テストの結果いずれも「東京」「品川」の場所解決失敗を解消
-        // できなかった。原因を推測で直し続けるのではなく、失敗時に何が
-        // 起きているかを猫AI/マリたんのチャット画面へ直接表示する — logcat
-        // (adb)を使わずに実機だけで確認できるようにするための一時的な診断。
-        // 原因確定後はこの診断ブロックの追記だけを削除する(既存の検索
-        // ロジック・WeatherService自体は今回も変更していない)。
+        // #POI 実機不具合追跡(診断): 「東京」等がOpen-Meteo API側で0件返って
+        // いるのか、候補は返っているがcountry_code=="JP"フィルタで全て
+        // 除外されているのかを実機の画面上で切り分けるための診断ブロック。
+        // GeoCoder.Outcomeが実際に運んできたraw candidate件数/一覧/JP件数を
+        // そのまま表示するだけで、検索ロジック・フィルタ条件自体は変更して
+        // いない。TTSには絶対に渡さない(画面表示専用、AiChatScreen.kt側で
+        // 【診断】以降を読み上げから除外する)。
         fun diagnosticBlock(
             selectedLocation: String,
             lat: String,
@@ -928,10 +927,16 @@ class CatBrain(
             weatherRequest: String,
             error: String,
             geocodeResult: String,
+            rawCandidateCount: String,
+            rawCandidates: String,
+            jpCandidateCount: String,
         ): String = "\n【診断】" +
             "\nintent=${focus.name}" +
             "\nplace=\"$place\"" +
             "\ngeocodeQuery=\"$place\"" +
+            "\nrawCandidateCount=$rawCandidateCount" +
+            "\nrawCandidates=$rawCandidates" +
+            "\njpCandidateCount=$jpCandidateCount" +
             "\ngeocodeResult=$geocodeResult" +
             "\nselectedLocation=$selectedLocation" +
             "\nlat=$lat" +
@@ -941,25 +946,31 @@ class CatBrain(
 
         val geoResult = withTimeoutOrNull(10_000) { GeoCoder.resolve(place) }
         val geoOutcome = geoResult?.getOrNull()
-        val located = when (geoOutcome) {
-            is GeoCoder.Outcome.Found -> geoOutcome.location
-            GeoCoder.Outcome.NotFound -> return CatReply(
+        val foundOutcome = when (geoOutcome) {
+            is GeoCoder.Outcome.Found -> geoOutcome
+            is GeoCoder.Outcome.NotFound -> return CatReply(
                 "場所が分からないにゃ。" +
-                    diagnosticBlock("NONE", "NONE", "NONE", "未実行", "NONE", "0件(NotFound)"),
+                    diagnosticBlock(
+                        "NONE", "NONE", "NONE", "未実行", "NONE", "NotFound",
+                        geoOutcome.rawCandidateCount.toString(),
+                        geoOutcome.rawCandidates.joinToString().ifBlank { "NONE" },
+                        geoOutcome.jpCandidateCount.toString(),
+                    ),
             )
             GeoCoder.Outcome.QuotaExceeded -> return CatReply(
                 "課金しなきゃ答えたく無いニャ💢" +
-                    diagnosticBlock("NONE", "NONE", "NONE", "未実行", "NONE", "QuotaExceeded"),
+                    diagnosticBlock("NONE", "NONE", "NONE", "未実行", "NONE", "QuotaExceeded", "NONE", "NONE", "NONE"),
             )
             null -> {
                 val err = geoResult?.exceptionOrNull()
                 val errText = if (err != null) "${err::class.simpleName}:${err.message}" else "timeout"
                 return CatReply(
                     "おネムにゃ。" +
-                        diagnosticBlock("NONE", "NONE", "NONE", "未実行", errText, "FAILED:$errText"),
+                        diagnosticBlock("NONE", "NONE", "NONE", "未実行", errText, "FAILED:$errText", "NONE", "NONE", "NONE"),
                 )
             }
         }
+        val located = foundOutcome.location
 
         val weatherResult = withTimeoutOrNull(10_000) { WeatherService.fetch(located.latitude, located.longitude, date) }
         val weatherOutcome = weatherResult?.getOrNull()
@@ -969,7 +980,10 @@ class CatBrain(
                 "課金しなきゃ答えたく無いニャ💢" +
                     diagnosticBlock(
                         located.name, located.latitude.toString(), located.longitude.toString(),
-                        "実行", "NONE", "1件(Found)",
+                        "実行", "NONE", "Found",
+                        foundOutcome.rawCandidateCount.toString(),
+                        foundOutcome.rawCandidates.joinToString().ifBlank { "NONE" },
+                        foundOutcome.jpCandidateCount.toString(),
                     ),
             )
             null -> {
@@ -979,7 +993,10 @@ class CatBrain(
                     "おネムにゃ。" +
                         diagnosticBlock(
                             located.name, located.latitude.toString(), located.longitude.toString(),
-                            "実行", errText, "1件(Found)",
+                            "実行", errText, "Found",
+                            foundOutcome.rawCandidateCount.toString(),
+                            foundOutcome.rawCandidates.joinToString().ifBlank { "NONE" },
+                            foundOutcome.jpCandidateCount.toString(),
                         ),
                 )
             }
