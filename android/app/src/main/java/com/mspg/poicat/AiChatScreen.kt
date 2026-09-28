@@ -584,6 +584,19 @@ private fun MariTanRow(catBrain: CatBrain) {
                 else -> {
                     state = MariTanState.THINKING
                     scope.launch {
+                        // #POI 秘書性能② Stage 3: 「そこ雨？」等、直前にマリたんが答えた
+                        // 予定(conversationContext.lastAnsweredEvent)を指す天気継続質問を、
+                        // Stage 2の場所明示型天気質問より先に試す。直前の質問が安全に
+                        // 1件へ確定していない(lastAnsweredEventがnull)場合は必ずnullが
+                        // 返り、天気検索へは一切進まない。成功時はconversationContextを
+                        // 変更しない — 「そこ寒い？」のように同じ予定への継続質問を
+                        // 続けて聞けるようにするため、あえてクリアしない。
+                        val hereWeatherReply = catBrain.answerContextualWeatherQueryOrNull(text, conversationContext)
+                        if (hereWeatherReply != null) {
+                            state = MariTanState.SPEAKING
+                            speak(hereWeatherReply.text) { state = MariTanState.IDLE }
+                            return@launch
+                        }
                         // #POI 秘書性能② Stage 2: 場所が明示された天気質問を、既存の
                         // POI質問判定([answerPoiQueryOrNull]先頭のlooksOutOfScope、
                         // 「天気」等を一般トリビアとして弾く既存ロジック)より先に試す。

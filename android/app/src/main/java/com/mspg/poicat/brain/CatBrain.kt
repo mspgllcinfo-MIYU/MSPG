@@ -7,6 +7,7 @@ import com.mspg.poicat.data.PhotoRepository
 import com.mspg.poicat.gemini.GeminiOutcome
 import com.mspg.poicat.gemini.GeminiRegistrationIntent
 import com.mspg.poicat.gemini.GeminiWorkJudge
+import com.mspg.poicat.maps.LocationDisplayName
 import com.mspg.poicat.weather.GeoCoder
 import com.mspg.poicat.weather.WeatherService
 import java.time.LocalDate
@@ -52,9 +53,30 @@ data class ConversationContext(
     val person: String? = null,
     val personIsSelf: Boolean = false,
     val workOnly: Boolean = false,
+    /**
+     * #POI マリたん秘書性能② Stage 3: 直前のSCHEDULE系の質問が「安全に1件だけ」に
+     * 絞れた場合のみ設定されるスナップショット。0件または2件以上の場合は必ずnull —
+     * 複数候補からAI判断で「たぶんこれ」と選ぶことは一切しない。「そこ雨？」等の
+     * 場所非明示の天気継続質問だけがこれを参照する。DB/Firestoreへの永続化は行わない
+     * (ConversationContext全体と同じくメモリ上のみ)。
+     */
+    val lastAnsweredEvent: AnsweredEventSnapshot? = null,
 )
 
 enum class ConversationTopic { SCHEDULE, TASK, MEMO }
+
+/**
+ * [ConversationContext.lastAnsweredEvent]用の最小スナップショット。[CatEvent]全体では
+ * なく、Stage 3の「そこ雨？」に必要な最小限(一意識別用のid・title・dateTime・
+ * locationText)だけを保持する — 予定登録側の仕様やRegistrationIntent等には一切
+ * 関与しない、読み取り専用の複製。
+ */
+data class AnsweredEventSnapshot(
+    val id: Long,
+    val title: String,
+    val dateTime: Long,
+    val locationText: String?,
+)
 
 /**
  * The "memory cat" brain: everything is on-device pattern matching against
@@ -866,8 +888,18 @@ class CatBrain(
      */
     suspend fun answerWeatherQueryOrNull(input: String): CatReply? {
         val query = parseWeatherQuery(input, LocalDateTime.now()) ?: return null
+        return fetchWeatherReply(query.place, query.date, query.dateLabel, query.focus)
+    }
 
-        val geoResult = withTimeoutOrNull(10_000) { GeoCoder.resolve(query.place) }
+    /**
+     * #POI 秘書性能② Stage 3: Stage 2の地名解決(GeoCoder)＋天気取得(WeatherService)
+     * ＋エラー整形ロジックを、場所文字列さえ渡せば呼べる共通処理として切り出した
+     * もの。[answerWeatherQueryOrNull](場所明示型)と[answerContextualWeatherQueryOrNull]
+     * (「そこ雨？」型)の両方から呼ばれる — 天気取得の実装は1つだけで、Stage 3用に
+     * 別実装は作らない。
+     */
+    private suspend fun fetchWeatherReply(place: String, date: LocalDate?, dateLabel: String?, focus: WeatherFocus): CatReply {
+        val geoResult = withTimeoutOrNull(10_000) { GeoCoder.resolve(place) }
         val located = when (val geoOutcome = geoResult?.getOrNull()) {
             is GeoCoder.Outcome.Found -> geoOutcome.location
             GeoCoder.Outcome.NotFound -> return CatReply("場所が分からないにゃ。")
@@ -875,21 +907,21 @@ class CatBrain(
             null -> return CatReply("おネムにゃ。")
         }
 
-        val weatherResult = withTimeoutOrNull(10_000) { WeatherService.fetch(located.latitude, located.longitude, query.date) }
+        val weatherResult = withTimeoutOrNull(10_000) { WeatherService.fetch(located.latitude, located.longitude, date) }
         val answer = when (val weatherOutcome = weatherResult?.getOrNull()) {
             is WeatherService.Outcome.Success -> weatherOutcome.answer
             WeatherService.Outcome.QuotaExceeded -> return CatReply("課金しなきゃ答えたく無いニャ💢")
             null -> return CatReply("おネムにゃ。")
         }
 
-        return CatReply(formatWeatherReply(query, answer))
+        return CatReply(formatWeatherReply(place, dateLabel, focus, answer))
     }
 
     /** #POI 秘書性能② Stage 2: [WeatherService.Answer]をマリたんの短い一言へ整形する。
      * Open-Meteoが返していない値(nullの項目)を推測で埋めることはしない。 */
-    private fun formatWeatherReply(query: WeatherQuery, answer: WeatherService.Answer): String {
-        val prefix = if (query.dateLabel != null) "${query.dateLabel}の${query.place}" else query.place
-        return when (query.focus) {
+    private fun formatWeatherReply(place: String, dateLabel: String?, focus: WeatherFocus, answer: WeatherService.Answer): String {
+        val prefix = if (dateLabel != null) "${dateLabel}の${place}" else place
+        return when (focus) {
             WeatherFocus.GENERAL -> {
                 val temp = answer.temperature ?: answer.temperatureMax
                 if (temp != null) "${prefix}は${answer.description}、${temp.toInt()}℃くらいにゃ。" else "${prefix}は${answer.description}にゃ。"
@@ -921,6 +953,64 @@ class CatBrain(
                 }
             }
         }
+    }
+
+    /**
+     * #POI 秘書性能② Stage 3: 「そこ雨？」のような、直前に確定した予定の場所を
+     * 指す天気継続質問だけを認識する。[Regex.matchEntire]で発話全体の一致だけを
+     * 許可しているため、Stage 2の[extractPlaceAndFocus]と同じ理由で、一般会話を
+     * 誤って天気質問として拾うことはない。この判定自体は[ConversationContext]の
+     * 有無を問わない(文字列だけの判定) — 実際に「そこ」を使えるかどうかは、
+     * 呼び出し元の[answerContextualWeatherQueryOrNull]が
+     * [ConversationContext.lastAnsweredEvent]の有無で別途ガードする。
+     */
+    private fun detectHereWeatherFocus(text: String): WeatherFocus? {
+        val core = text.trim().replace(Regex("[「」『』]"), "").trim().trimEnd('？', '?', '。')
+        return when (core) {
+            "そこ雨" -> WeatherFocus.RAIN
+            "そこ天気どう" -> WeatherFocus.GENERAL
+            "そこ天気は" -> WeatherFocus.GENERAL
+            "そこ寒い" -> WeatherFocus.TEMPERATURE
+            "そこ暑い" -> WeatherFocus.TEMPERATURE
+            "傘いる" -> WeatherFocus.UMBRELLA
+            "そこ傘いる" -> WeatherFocus.UMBRELLA
+            else -> null
+        }
+    }
+
+    /**
+     * #POI 秘書性能② Stage 3: 「そこ雨？」等、直前にマリたんが答えた予定
+     * ([ConversationContext.lastAnsweredEvent])を指す天気継続質問への、唯一の
+     * 読み取り専用エントリポイント。[context]に予定が1件も確定していない
+     * (nullの)場合は必ずnullを返す — この場合は天気検索へ一切進まない
+     * (呼び出し元は既存のPOI質問判定・Gemini雑談へそのまま進む)。
+     *
+     * 場所([AnsweredEventSnapshot.locationText])が無い/空白の場合は、現在地や
+     * 別の予定の場所を代わりに使ったりGeminiに推測させたりせず、必ず
+     * 「その予定、場所が入ってないにゃ。」を返す。地名/施設名/Google Maps URLが
+     * 混在した生テキストは、既存の[LocationDisplayName.extractDisplayName]
+     * (Maps共有機能が既に使っている、URLを安全に取り除くだけの既存ロジック)で
+     * 場所名だけを取り出す — 短縮URLの展開や座標抽出等の新しい処理は追加しない。
+     * それでも安全に場所名を取り出せない(URLだけで文字が残らない等)場合は
+     * 「場所が分からないにゃ。」を返す。
+     *
+     * 天気の取得自体は[fetchWeatherReply]、つまりStage 2と全く同じ
+     * GeoCoder/WeatherServiceを再利用する — 別の天気取得実装は作らない。
+     * 予定の日時([AnsweredEventSnapshot.dateTime])の日付だけを使う日単位予報
+     * ([WeatherService.fetch]の既存仕様通り)で、hourly化のような大きな変更は
+     * 今回は行わない。
+     */
+    suspend fun answerContextualWeatherQueryOrNull(input: String, context: ConversationContext?): CatReply? {
+        val snapshot = context?.lastAnsweredEvent ?: return null
+        val focus = detectHereWeatherFocus(input) ?: return null
+
+        val locationText = snapshot.locationText
+        if (locationText.isNullOrBlank()) return CatReply("その予定、場所が入ってないにゃ。")
+        val place = LocationDisplayName.extractDisplayName(locationText) ?: return CatReply("場所が分からないにゃ。")
+
+        val eventDate = snapshot.dateTime.toLocalDate()
+        val dateLabel = DateTimeParser.formatWhen(eventDate, LocalDate.now())
+        return fetchWeatherReply(place, eventDate, dateLabel, focus)
     }
 
     /**
@@ -1194,7 +1284,15 @@ class CatBrain(
      * 旧[answerQuery]のdayFilter分岐もisTaskを区別していない、既存の前提を維持する
      * ためあえて揃えている。
      */
-    private suspend fun answerScheduleForContext(ctx: ConversationContext, now: LocalDateTime): String {
+    /**
+     * #POI 秘書性能② Stage 3: 戻り値を`Pair<String, AnsweredEventSnapshot?>`へ
+     * 拡張した — 応答テキストに加え、「そこ雨？」継続質問が参照できる
+     * [AnsweredEventSnapshot]を返す。この結果が安全に1件へ確定した場合
+     * ([matched.size]==1)だけスナップショットを返し、0件または複数件の場合は
+     * 必ずnull(呼び出し元は[ConversationContext.lastAnsweredEvent]をnullへ
+     * 戻す) — 複数件からAI判断で「たぶんこれ」と選ぶことは一切しない。
+     */
+    private suspend fun answerScheduleForContext(ctx: ConversationContext, now: LocalDateTime): Pair<String, AnsweredEventSnapshot?> {
         val today = now.toLocalDate()
         val range = ctx.dateRange
         val keyword = ctx.keyword
@@ -1209,10 +1307,13 @@ class CatBrain(
         val matched = byKeyword.filter { it.dateTime != null && eventMatchesPersonFilter(it.assignee, person, personIsSelf) }
 
         if (matched.isEmpty()) {
-            return if (ctx.dateLabel != null) "${ctx.dateLabel}の予定はまだ無いにゃ" else "予定はまだ無いにゃ"
+            return (if (ctx.dateLabel != null) "${ctx.dateLabel}の予定はまだ無いにゃ" else "予定はまだ無いにゃ") to null
         }
         val titles = matched.joinToString("、") { "${DateTimeParser.formatWhen(it.dateTime!!.toLocalDate(), today)}の${it.title}" }
-        return "予定は${titles}だにゃ"
+        val snapshot = matched.singleOrNull()?.let {
+            AnsweredEventSnapshot(id = it.id, title = it.title, dateTime = it.dateTime!!, locationText = it.locationText)
+        }
+        return "予定は${titles}だにゃ" to snapshot
     }
 
     /**
@@ -1638,30 +1739,41 @@ class CatBrain(
         if (context != null) {
             if (context.topic != ConversationTopic.MEMO) {
                 bareFollowupPerson(trimmed, currentDisplayName())?.let { (person, isSelf) ->
-                    val updated = context.copy(person = person, personIsSelf = isSelf)
-                    val text = if (updated.topic == ConversationTopic.SCHEDULE) {
-                        answerScheduleForContext(updated, now)
+                    val base = context.copy(person = person, personIsSelf = isSelf)
+                    if (base.topic == ConversationTopic.SCHEDULE) {
+                        val (text, snapshot) = answerScheduleForContext(base, now)
+                        val updated = base.copy(lastAnsweredEvent = snapshot)
+                        return CatReply(text) to updated
                     } else {
-                        answerTaskForContext(updated, now)
+                        val text = answerTaskForContext(base, now)
+                        val updated = base.copy(lastAnsweredEvent = null)
+                        return CatReply(text) to updated
                     }
-                    return CatReply(text) to updated
                 }
             }
             bareFollowupDateRange(trimmed, now, context.dateRange?.first)?.let { (range, inheritsPerson) ->
                 // #POI 実機不具合修正: 「今日」「明日」「明後日」の単独継続質問は
                 // 担当者文脈を引き継がず、指定なし(POI全体)へ戻す。曜日名/週相対語/
                 // 「翌日」はinheritsPerson=trueのまま既存の担当者文脈を維持する。
-                val updated = if (inheritsPerson) {
+                val base = if (inheritsPerson) {
                     context.copy(dateRange = range.start to range.end, dateLabel = range.label)
                 } else {
                     context.copy(dateRange = range.start to range.end, dateLabel = range.label, person = null, personIsSelf = false)
                 }
-                val text = when (updated.topic) {
-                    ConversationTopic.SCHEDULE -> answerScheduleForContext(updated, now)
-                    ConversationTopic.TASK -> answerTaskForContext(updated, now)
-                    ConversationTopic.MEMO -> answerMemoForContext(updated, now)
+                return when (base.topic) {
+                    ConversationTopic.SCHEDULE -> {
+                        val (text, snapshot) = answerScheduleForContext(base, now)
+                        CatReply(text) to base.copy(lastAnsweredEvent = snapshot)
+                    }
+                    ConversationTopic.TASK -> {
+                        val text = answerTaskForContext(base, now)
+                        CatReply(text) to base.copy(lastAnsweredEvent = null)
+                    }
+                    ConversationTopic.MEMO -> {
+                        val text = answerMemoForContext(base, now)
+                        CatReply(text) to base.copy(lastAnsweredEvent = null)
+                    }
                 }
-                return CatReply(text) to updated
             }
         }
 
@@ -1699,7 +1811,8 @@ class CatBrain(
                 dateLabel = range?.label,
                 keyword = keyword,
             )
-            return CatReply(answerScheduleForContext(ctx, now)) to ctx
+            val (text, snapshot) = answerScheduleForContext(ctx, now)
+            return CatReply(text) to ctx.copy(lastAnsweredEvent = snapshot)
         }
 
         if (isTaskQuestion(trimmed) && DateTimeParser.isQuery(trimmed)) {
@@ -1751,7 +1864,8 @@ class CatBrain(
                     dateLabel = range.label,
                     keyword = keyword,
                 )
-                return CatReply(answerScheduleForContext(ctx, now)) to ctx
+                val (text, snapshot) = answerScheduleForContext(ctx, now)
+                return CatReply(text) to ctx.copy(lastAnsweredEvent = snapshot)
             }
         }
 
