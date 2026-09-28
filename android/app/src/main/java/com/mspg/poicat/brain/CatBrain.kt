@@ -1224,6 +1224,18 @@ class CatBrain(
      * 「仕事」等、場所ではない語だった)場合やタイムアウト等の通信エラーの
      * 場合は、分離せず元のタイトルをそのまま返す — 安全に確定できない場合は
      * 従来通りタイトルへ残す、という仕様上のデフォルト。
+     *
+     * #POI 実機不具合修正: Open-Meteo Geocoding APIは「東京」等の日本語表記を
+     * 0件(NotFound)としか返さない(ローマ字表記でしか解決できない、天気機能の
+     * 調査で確定済みの制約)ため、候補がNotFoundの場合だけ、天気機能と同じ
+     * [androidGeocoderFallback]へフォールバックする。Foundの場合の既存挙動
+     * (Open-Meteoだけで確定)は変更しない。QuotaExceeded/通信エラー/タイム
+     * アウトの場合はフォールバックせず、従来通り分離しない。採用可否は
+     * Android Geocoder側もcountryCode=="JP"の候補が見つかるかどうかだけで
+     * 判定し、都市ごとの個別ハードコードは行わない — 保存する場所文字列は
+     * どちらの経路でも常にユーザーの発話そのままの[candidate]であり、
+     * Geocoderが返した正規化済みの地名("東京都"等)へ勝手に置き換えることは
+     * しない。
      */
     private suspend fun splitLocationFromTitle(rawTitle: String): Pair<String, String?> {
         val match = Regex("^(.{1,12}?)で(.+)$").find(rawTitle) ?: return rawTitle to null
@@ -1233,7 +1245,11 @@ class CatBrain(
         if (candidate in nonLocationReasonWords) return rawTitle to null
 
         val geoResult = withTimeoutOrNull(6_000) { GeoCoder.resolve(candidate) }
-        val isRealPlace = geoResult?.getOrNull() is GeoCoder.Outcome.Found
+        val isRealPlace = when (geoResult?.getOrNull()) {
+            is GeoCoder.Outcome.Found -> true
+            GeoCoder.Outcome.NotFound -> androidGeocoderFallback(candidate).selected != null
+            else -> false
+        }
         if (!isRealPlace) return rawTitle to null
 
         return rest to candidate
