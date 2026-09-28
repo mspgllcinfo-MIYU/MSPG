@@ -925,180 +925,41 @@ class CatBrain(
      * 別実装は作らない。
      */
     private suspend fun fetchWeatherReply(place: String, date: LocalDate?, dateLabel: String?, focus: WeatherFocus): CatReply {
-        // #POI 実機不具合追跡(診断): Open-Meteoの生candidate件数・一覧・JP件数、
-        // およびAndroid Geocoderフォールバックの結果を、実機の画面上で確認する
-        // ための診断ブロック。原因調査専用だった"Tokyo"比較リクエスト
-        // (comparisonQuery)は原因確定により削除した。TTSには絶対に渡さない
-        // (画面表示専用、AiChatScreen.kt側で【診断】以降を読み上げから除外する)。
-        fun diagnosticBlock(
-            selectedLocation: String,
-            lat: String,
-            lon: String,
-            weatherRequest: String,
-            error: String,
-            geocodeResult: String,
-            rawCandidateCount: String,
-            rawCandidates: String,
-            jpCandidateCount: String,
-            fallbackUsed: String,
-            fallbackGeocoder: String,
-            fallbackCandidateCount: String,
-            fallbackCandidates: String,
-            fallbackSelectedLocation: String,
-            fallbackLat: String,
-            fallbackLon: String,
-            fallbackError: String,
-        ): String = "\n【診断】" +
-            "\nintent=${focus.name}" +
-            "\nplace=\"$place\"" +
-            "\n" +
-            "\ngeocodeQuery=\"$place\"" +
-            "\nrawCandidateCount=$rawCandidateCount" +
-            "\nrawCandidates=$rawCandidates" +
-            "\njpCandidateCount=$jpCandidateCount" +
-            "\n" +
-            "\nprimaryGeocoder=OpenMeteo" +
-            "\nfallbackUsed=$fallbackUsed" +
-            "\nfallbackGeocoder=$fallbackGeocoder" +
-            "\nfallbackCandidateCount=$fallbackCandidateCount" +
-            "\nfallbackCandidates=$fallbackCandidates" +
-            "\nfallbackSelectedLocation=$fallbackSelectedLocation" +
-            "\nfallbackLat=$fallbackLat" +
-            "\nfallbackLon=$fallbackLon" +
-            "\nfallbackError=$fallbackError" +
-            "\n" +
-            "\ngeocodeResult=$geocodeResult" +
-            "\nselectedLocation=$selectedLocation" +
-            "\nlat=$lat" +
-            "\nlon=$lon" +
-            "\nweatherRequest=$weatherRequest" +
-            "\nerror=$error"
-
         val geoResult = withTimeoutOrNull(10_000) { GeoCoder.resolve(place) }
         val geoOutcome = geoResult?.getOrNull()
 
         val located: GeoCoder.Location
-        val primaryRawCount: Int
-        val primaryRawCandidates: List<String>
-        val primaryJpCount: Int
-        var fallbackUsed = false
-        var fallbackGeocoderLabel = "NONE"
-        var fallbackCandidateCountText = "NONE"
-        var fallbackCandidatesText = "NONE"
-        var fallbackSelectedLocationText = "NONE"
-        var fallbackLatText = "NONE"
-        var fallbackLonText = "NONE"
-        var fallbackErrorText = "NONE"
-
         when (geoOutcome) {
             is GeoCoder.Outcome.Found -> {
                 located = geoOutcome.location
-                primaryRawCount = geoOutcome.rawCandidateCount
-                primaryRawCandidates = geoOutcome.rawCandidates
-                primaryJpCount = geoOutcome.jpCandidateCount
             }
             is GeoCoder.Outcome.NotFound -> {
-                primaryRawCount = geoOutcome.rawCandidateCount
-                primaryRawCandidates = geoOutcome.rawCandidates
-                primaryJpCount = geoOutcome.jpCandidateCount
                 // #POI 実機不具合修正: Open-MeteoがNotFoundの場合だけ、Android
                 // 端末自体が提供するGeocoderサービスへフォールバックする。
                 // country_code=="JP"の候補があれば(端末が返す順序の)先頭を
                 // 機械的に採用するだけで、都市ごとの独自推測・座標補正・
                 // ハードコードは一切行わない(詳細はandroidGeocoderFallback参照)。
                 val fallback = androidGeocoderFallback(place)
-                fallbackUsed = true
-                fallbackGeocoderLabel = "AndroidGeocoder"
-                fallbackCandidateCountText = fallback.candidateCount.toString()
-                fallbackCandidatesText = fallback.candidates.joinToString().ifBlank { "NONE" }
-                fallbackErrorText = fallback.errorLabel
-                val selected = fallback.selected
-                if (selected == null) {
-                    return CatReply(
-                        "場所が分からないにゃ。" +
-                            diagnosticBlock(
-                                "NONE", "NONE", "NONE", "未実行", "NONE", "NotFound",
-                                primaryRawCount.toString(),
-                                primaryRawCandidates.joinToString().ifBlank { "NONE" },
-                                primaryJpCount.toString(),
-                                fallbackUsed.toString(), fallbackGeocoderLabel, fallbackCandidateCountText,
-                                fallbackCandidatesText, "NONE", "NONE", "NONE", fallbackErrorText,
-                            ),
-                    )
-                }
+                val selected = fallback.selected ?: return CatReply("場所が分からないにゃ。")
                 located = GeoCoder.Location(
                     name = selected.featureName ?: selected.locality ?: selected.adminArea ?: place,
                     latitude = selected.latitude,
                     longitude = selected.longitude,
                 )
-                fallbackSelectedLocationText = located.name
-                fallbackLatText = located.latitude.toString()
-                fallbackLonText = located.longitude.toString()
             }
-            GeoCoder.Outcome.QuotaExceeded -> return CatReply(
-                "課金しなきゃ答えたく無いニャ💢" +
-                    diagnosticBlock(
-                        "NONE", "NONE", "NONE", "未実行", "NONE", "QuotaExceeded",
-                        "NONE", "NONE", "NONE", "false", "NONE", "NONE", "NONE", "NONE", "NONE", "NONE", "NONE",
-                    ),
-            )
-            null -> {
-                val err = geoResult?.exceptionOrNull()
-                val errText = if (err != null) "${err::class.simpleName}:${err.message}" else "timeout"
-                return CatReply(
-                    "おネムにゃ。" +
-                        diagnosticBlock(
-                            "NONE", "NONE", "NONE", "未実行", errText, "FAILED:$errText",
-                            "NONE", "NONE", "NONE", "false", "NONE", "NONE", "NONE", "NONE", "NONE", "NONE", "NONE",
-                        ),
-                )
-            }
+            GeoCoder.Outcome.QuotaExceeded -> return CatReply("課金しなきゃ答えたく無いニャ💢")
+            null -> return CatReply("おネムにゃ。")
         }
 
         val weatherResult = withTimeoutOrNull(10_000) { WeatherService.fetch(located.latitude, located.longitude, date) }
         val weatherOutcome = weatherResult?.getOrNull()
         val answer = when (weatherOutcome) {
             is WeatherService.Outcome.Success -> weatherOutcome.answer
-            WeatherService.Outcome.QuotaExceeded -> return CatReply(
-                "課金しなきゃ答えたく無いニャ💢" +
-                    diagnosticBlock(
-                        located.name, located.latitude.toString(), located.longitude.toString(),
-                        "実行", "NONE", "Found",
-                        primaryRawCount.toString(), primaryRawCandidates.joinToString().ifBlank { "NONE" }, primaryJpCount.toString(),
-                        fallbackUsed.toString(), fallbackGeocoderLabel, fallbackCandidateCountText,
-                        fallbackCandidatesText, fallbackSelectedLocationText, fallbackLatText, fallbackLonText, fallbackErrorText,
-                    ),
-            )
-            null -> {
-                val err = weatherResult?.exceptionOrNull()
-                val errText = if (err != null) "${err::class.simpleName}:${err.message}" else "timeout"
-                return CatReply(
-                    "おネムにゃ。" +
-                        diagnosticBlock(
-                            located.name, located.latitude.toString(), located.longitude.toString(),
-                            "実行", errText, "Found",
-                            primaryRawCount.toString(), primaryRawCandidates.joinToString().ifBlank { "NONE" }, primaryJpCount.toString(),
-                            fallbackUsed.toString(), fallbackGeocoderLabel, fallbackCandidateCountText,
-                            fallbackCandidatesText, fallbackSelectedLocationText, fallbackLatText, fallbackLonText, fallbackErrorText,
-                        ),
-                )
-            }
+            WeatherService.Outcome.QuotaExceeded -> return CatReply("課金しなきゃ答えたく無いニャ💢")
+            null -> return CatReply("おネムにゃ。")
         }
 
-        // #POI 実機不具合追跡: 修正確認が終わるまでは、成功時の応答にも診断
-        // ブロックを残す — Open-MeteoがNotFound→Android Geocoderフォールバック
-        // →座標取得→WeatherService実行、という一連の流れを画面上で確認できる
-        // ようにするため。TTSには従来通り【診断】より前の部分だけが渡る。
-        return CatReply(
-            formatWeatherReply(place, dateLabel, focus, answer) +
-                diagnosticBlock(
-                    located.name, located.latitude.toString(), located.longitude.toString(),
-                    "実行", "NONE", "Found",
-                    primaryRawCount.toString(), primaryRawCandidates.joinToString().ifBlank { "NONE" }, primaryJpCount.toString(),
-                    fallbackUsed.toString(), fallbackGeocoderLabel, fallbackCandidateCountText,
-                    fallbackCandidatesText, fallbackSelectedLocationText, fallbackLatText, fallbackLonText, fallbackErrorText,
-                ),
-        )
+        return CatReply(formatWeatherReply(place, dateLabel, focus, answer))
     }
 
     /**
