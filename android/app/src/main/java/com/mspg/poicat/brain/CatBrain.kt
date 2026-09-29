@@ -178,6 +178,12 @@ class CatBrain(
         // (詳細は[tryDeleteSchedule])。
         tryDeleteSchedule(trimmed, now)?.let { return it }
 
+        // #POI 予定日付変更 第1段階: 時刻変更([tryUpdateScheduleTime])より
+        // 先に日付だけの変更を試す(詳細は[tryUpdateScheduleDate])。日付変更
+        // の形に一致しない入力(時刻変更・複合変更を含む)は必ずnullを返す
+        // ため、既存の時刻変更の判定順序・挙動には影響しない。
+        tryUpdateScheduleDate(trimmed, now)?.let { return it }
+
         // #POI 予定変更 第1段階: 新規登録(タスク完了報告/タスク作成/メモ/予定
         // 登録)より必ず先にUPDATE判定を試す(詳細は[tryUpdateScheduleTime])。
         tryUpdateScheduleTime(trimmed, now)?.let { return it }
@@ -1158,6 +1164,10 @@ class CatBrain(
         // #POI 予定削除 第1段階: 新規登録判定より必ず先にDELETE判定を試す
         // (詳細は[tryDeleteSchedule])。
         tryDeleteSchedule(input, now)?.let { return it }
+        // #POI 予定日付変更 第1段階: 時刻変更より先に日付だけの変更を試す
+        // (詳細は[tryUpdateScheduleDate])。日付変更の形に一致しない入力は
+        // 必ずnullを返すため、既存の時刻変更の判定順序・挙動には影響しない。
+        tryUpdateScheduleDate(input, now)?.let { return it }
         // #POI 予定変更 第1段階: 新規登録判定より必ず先にUPDATE判定を試す
         // (詳細は[tryUpdateScheduleTime])。
         tryUpdateScheduleTime(input, now)?.let { return it }
@@ -1238,6 +1248,82 @@ class CatBrain(
         )
 
         val newDateTime = LocalDateTime.of(targetDate, LocalTime.of(hour, minute)).toEpochMilli()
+        repository.edit(target, target.title, newDateTime)
+        return CatReply("変更したにゃ")
+    }
+
+    /**
+     * #POI 予定日付変更 第1段階: 「<日付>の<タイトル>を<新しい日付>に変更
+     * して」という明確な「日付だけの変更」命令だけを認識する、DATE変更専用
+     * の最小実装。[tryUpdateScheduleTime](時刻変更)は完全に無変更のまま
+     * 残しており、この関数はそれとは独立したsibling — マリたん
+     * ([registerScheduleIfRecognized])とBB([respond])の両方から、既存の
+     * 新規登録処理(CREATE)より必ず先に、かつ[tryUpdateScheduleTime]より
+     * 先に呼ばれる。
+     *
+     * 【重要】発話全体を一度に[DateTimeParser.parseDueDate]へ渡さない。
+     * 既存の[DateTimeParser]の日付語彙は「明後日」を「明日」より先に評価
+     * する(実機不具合調査で確定済み)ため、全文解析では「対象を検索する
+     * ための日付(明日)」と「変更後に設定する日付(明後日)」を取り違える。
+     * そのため、まずこの関数専用の構造分割用正規表現で発話を「対象部分」
+     * (「を」の前、例:「明日のテスト」)と「変更後部分」(「に変更」の前、
+     * 例:「明後日」)へ分離し、それぞれに対して独立して
+     * [DateTimeParser.parseDueDate]を呼ぶ([DateTimeParser.kt]自体は一切
+     * 変更していない、既存の日付語彙をそのまま2回再利用するだけ)。
+     *
+     * 「変更後部分」を日付解析した際、日付を取り除いた残り文字列が空でない
+     * 場合(例:「明後日の11時」のように時刻が併記された複合変更)は、日付
+     * 変更として確定させずnullを返す — [tryUpdateScheduleTime](時刻変更)
+     * 側に処理を委ねる。時刻変更側は全文を独自に解析するため、この場合は
+     * タイトルキーワードが空/該当なしとなり、0件/該当なしの安全な失敗
+     * 応答で終わる(実機不具合調査で確認済みの挙動)。日付・時刻いずれの
+     * 形にも安全に一致しない入力を、この関数が誤って日付だけ変更したり、
+     * 逆に時刻変更側の処理を横取りしたりすることを防ぐための安全策。
+     *
+     * 対象の予定は、対象日＋タイトルキーワードの部分一致で、その日の既存
+     * 予定([CatEventRepository.onDay]、[tryUpdateScheduleTime]と全く同じ
+     * 検索方針、新しい検索APIは追加していない)から絞り込む。1件に確実に
+     * 特定できた場合だけ変更し、0件/複数件の場合は「曖昧な候補から独自に
+     * 決めない」という既存の方針で、変更も新規登録も行わない。
+     *
+     * 変更の保存には新しいAPIを作らず、既存の[CatEventRepository.edit]を
+     * そのまま再利用する。対象イベントの既存タイトル([CatEvent.title])と
+     * 既存時刻(対象イベントの[CatEvent.dateTime]から取り出した時刻部分)を
+     * そのまま渡すため、日付だけが変わり、タイトル・時刻・
+     * [CatEvent.locationText]/[CatEvent.assignee]等の他フィールドは全て
+     * 維持される。
+     *
+     * 「日付＋時刻の同時変更」「タイトル変更」「場所変更」「ずらして」等の
+     * 言い回しは今回のスコープ外 — 構造分割用正規表現が一致しない、または
+     * 「変更後部分」が複合形の入力は、上記の通り安全にnullを返す。
+     */
+    private suspend fun tryUpdateScheduleDate(rawInput: String, now: LocalDateTime): CatReply? {
+        val trimmed = rawInput.trim().replace(Regex("[「」『』]"), "").trim()
+        if (!trimmed.contains(scheduleUpdateSignalWord)) return null
+
+        val structureMatch = Regex("^(.+?)を(.+?)に変更").find(trimmed) ?: return null
+        val targetPart = structureMatch.groupValues[1].trim()
+        val newDatePart = structureMatch.groupValues[2].trim()
+        if (targetPart.isBlank() || newDatePart.isBlank()) return null
+
+        val (newDate, newDateRemaining) = DateTimeParser.parseDueDate(newDatePart, now)
+        if (newDate == null || newDateRemaining.isNotBlank()) return null
+
+        val (targetDate, afterTargetDate) = DateTimeParser.parseDueDate(targetPart, now)
+        val titleKeyword = afterTargetDate.replaceFirst(Regex("^[のを、\\s]+"), "").trim()
+        if (targetDate == null || titleKeyword.isBlank()) {
+            return CatReply("どの予定か分からなかったにゃ。")
+        }
+
+        val dayStart = targetDate.toEpochMilli()
+        val dayEnd = targetDate.plusDays(1).toEpochMilli() - 1
+        val candidates = repository.onDay(dayStart, dayEnd).filter { it.title.contains(titleKeyword) }
+        val target = candidates.singleOrNull() ?: return CatReply(
+            if (candidates.isEmpty()) "そんな予定見つからなかったにゃ。" else "予定が複数あって特定できなかったにゃ。",
+        )
+
+        val existingTime = target.dateTime?.toLocalDateTime()?.toLocalTime() ?: LocalTime.of(9, 0)
+        val newDateTime = LocalDateTime.of(newDate, existingTime).toEpochMilli()
         repository.edit(target, target.title, newDateTime)
         return CatReply("変更したにゃ")
     }
