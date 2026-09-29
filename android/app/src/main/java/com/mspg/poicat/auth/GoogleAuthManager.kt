@@ -2,6 +2,7 @@ package com.mspg.poicat.auth
 
 import android.app.Activity
 import android.content.Intent
+import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
@@ -36,6 +37,29 @@ private const val GOOGLE_TASK_TIMEOUT_MS = 20_000L
  */
 object GoogleAuthManager {
     fun currentUserEmail(): String? = FirebaseAuth.getInstance().currentUser?.email
+
+    /**
+     * #POI Google連携アカウント選び直し: 複数Googleアカウントが登録された端末で、
+     * Credential Managerが「デフォルトアカウント」として記憶している状態を
+     * リセットするだけの関数。公式ドキュメント(Android Identity, "Authorization
+     * from a non-default account")の記載通り: 「Credential Managerで認証すると、
+     * 以降のAuthorizationClient.authorize()呼び出しは全てそのアカウントを
+     * デフォルトとして使う。アカウント選択画面を強制的に出すには、Credential
+     * ManagerのclearCredentialState()でサインアウトさせる」という、公式に唯一
+     * ドキュメント化されている手段をそのまま使う — AuthorizationRequest.Builder
+     * 自体には特定アカウントを明示指定するメソッドは存在しない(調査済み)。
+     *
+     * この関数はCredential Manager側の状態をクリアするだけで、Firebase Authの
+     * サインアウトやDrive権限の取り消しは行わない。呼び出し元は必ずこの直後に
+     * [signIn]を呼び、Googleの公式アカウント選択画面からユーザー自身に
+     * アカウントを選び直させること(このオブジェクト自身は109等の特定
+     * アカウントを一切ハードコードしていない)。
+     */
+    suspend fun clearCredentialState(activity: Activity): Result<Unit> = runCatching {
+        withTimeout(GOOGLE_TASK_TIMEOUT_MS) {
+            CredentialManager.create(activity).clearCredentialState(ClearCredentialStateRequest())
+        }
+    }
 
     suspend fun signIn(activity: Activity, webClientId: String): Result<Unit> = runCatching {
         withTimeout(GOOGLE_TASK_TIMEOUT_MS) {

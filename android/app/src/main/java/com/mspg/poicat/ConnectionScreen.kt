@@ -97,6 +97,42 @@ fun ConnectionScreen(onBack: () -> Unit) {
     var roomStatusText by remember { mutableStateOf<String?>(null) }
     var roomBusy by remember { mutableStateOf(false) }
 
+    // #POI Google連携アカウント選び直し: 複数Googleアカウントが登録された端末で、
+    // Credential Managerが記憶している「デフォルトアカウント」をリセットしてから
+    // 既存のsignIn()をそのまま呼ぶだけ — Googleの公式アカウント選択画面から
+    // ユーザー自身に選ばせる(このアプリ側で特定のアカウントを一切ハードコード
+    // しない)。ボタンを押した時だけ実行し、自動的には一切実行しない。
+    // albumFolderId/fileFolderId(DriveConnectionStore)やFirestore側の情報には
+    // 一切触れない — アカウントを選び直しても既存のDriveフォルダ接続情報は
+    // そのまま残る。
+    fun reselectAccount() {
+        isBusy = true
+        statusText = "アカウントを選び直しています…"
+        scope.launch {
+            try {
+                GoogleAuthManager.clearCredentialState(activity)
+                    .onFailure {
+                        statusText = "アカウント選択のリセットに失敗したにゃ：${it.message ?: it.javaClass.simpleName}"
+                    }
+                // clearCredentialStateが失敗しても致命的ではない(その場合は単に
+                // 従来通りの挙動になるだけ)ため、成否に関わらずsignIn()を試す。
+                // 古いアカウントのアクセストークンを新しい選択後に誤って使い回さ
+                // ないよう、キャッシュはここで必ず破棄する。
+                cachedAccessToken = null
+                GoogleAuthManager.signIn(activity, context.getString(R.string.default_web_client_id))
+                    .onSuccess {
+                        signedInEmail = GoogleAuthManager.currentUserEmail()
+                        statusText = "サインインしたにゃ"
+                    }
+                    .onFailure {
+                        statusText = "サインインに失敗したにゃ：${it.message ?: it.javaClass.simpleName}"
+                    }
+            } finally {
+                isBusy = false
+            }
+        }
+    }
+
     fun joinRoom() {
         val pin = pinInput.trim()
         if (pin.length != 4 || pin.any { !it.isDigit() }) {
@@ -291,6 +327,14 @@ fun ConnectionScreen(onBack: () -> Unit) {
                     colors = ButtonDefaults.buttonColors(containerColor = ConnPink, contentColor = Color.White),
                     shape = RoundedCornerShape(percent = 50),
                 ) { Text("Googleでサインイン") }
+            }
+            // #POI Google連携アカウント選び直し: 複数Googleアカウントが登録された
+            // 端末向けの補助操作。通常操作で誤って押しにくいよう、主CTAより控えめな
+            // 見た目(小さく・薄い色)にし、押しただけではデータ削除・Driveフォルダ
+            // 再構築等は一切起きない(clearCredentialState→signIn()のみ)。
+            Spacer(Modifier.height(8.dp))
+            TextButton(onClick = { reselectAccount() }, enabled = !isBusy) {
+                Text("Googleアカウントを選び直す", color = ConnInk.copy(alpha = 0.4f), fontSize = 11.sp)
             }
         }
 
