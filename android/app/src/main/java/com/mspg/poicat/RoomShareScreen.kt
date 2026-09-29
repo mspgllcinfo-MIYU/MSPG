@@ -266,6 +266,35 @@ fun RoomShareScreen(onBack: () -> Unit) {
         }
     }
 
+    // #POI Google連携アカウント選び直し: ConnectionScreen.ktのreselectAccount()と同じ
+    // 処理をこの画面にも追加する(実機で実際に使われているのはConnectionScreen.ktでは
+    // なくこの画面だったため)。GoogleAuthManager.clearCredentialState()でCredential
+    // Managerの「デフォルトアカウント」記憶をリセットしてから、既存のsignIn()で
+    // Google公式のアカウント選択画面を再度出す。ボタン押下時にのみ呼ばれる — 画面表示時
+    // やLaunchedEffectからは呼ばない。cachedDriveAccessTokenも古いアカウントのトークンを
+    // 使い回さないようnullに戻す(Drive/Firestore/Room等への書き込みは一切行わない)。
+    fun reselectAccount() {
+        isBusy = true
+        statusText = "アカウントを選び直しています…"
+        scope.launch {
+            try {
+                GoogleAuthManager.clearCredentialState(activity)
+                    .onFailure { statusText = "アカウント選択のリセットに失敗したにゃ：${it.message ?: it.javaClass.simpleName}" }
+                cachedDriveAccessToken = null
+                GoogleAuthManager.signIn(activity, context.getString(R.string.default_web_client_id))
+                    .onSuccess {
+                        signedInEmail = GoogleAuthManager.currentUserEmail()
+                        statusText = "サインインしたにゃ"
+                    }
+                    .onFailure {
+                        statusText = "サインインに失敗したにゃ：${it.message ?: it.javaClass.simpleName}"
+                    }
+            } finally {
+                isBusy = false
+            }
+        }
+    }
+
     fun joinRoom() {
         val pin = pinInput.trim()
         if (pin.length != 4 || pin.any { !it.isDigit() }) {
@@ -373,6 +402,13 @@ fun RoomShareScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(16.dp))
         } else {
             Text("サインイン済み：${signedInEmail}", fontSize = 12.sp, color = RoomInk.copy(alpha = 0.5f))
+            TextButton(onClick = { reselectAccount() }, enabled = !isBusy) {
+                Text("Googleアカウントを選び直す", color = RoomInk.copy(alpha = 0.4f), fontSize = 11.sp)
+            }
+            statusText?.let { text ->
+                Spacer(Modifier.height(4.dp))
+                Text(text, color = RoomGold, fontSize = 12.sp)
+            }
             Spacer(Modifier.height(16.dp))
         }
 
