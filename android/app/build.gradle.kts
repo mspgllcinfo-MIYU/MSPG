@@ -13,8 +13,8 @@ android {
         applicationId = "com.mspg.poicat"
         minSdk = 26
         targetSdk = 34
-        versionCode = 7
-        versionName = "0.8"
+        versionCode = 8
+        versionName = "0.9"
 
         // マリたん(外部検索キャラクター)用のGemini APIキー。リポジトリには一切コミット
         // しない — CI(GitHub Actions)がGEMINI_API_KEYというリポジトリシークレットを
