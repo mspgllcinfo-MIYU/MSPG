@@ -174,6 +174,10 @@ class CatBrain(
             return CatReply(text)
         }
 
+        // #POI 予定削除 第1段階: 新規登録より必ず先にDELETE判定を試す
+        // (詳細は[tryDeleteSchedule])。
+        tryDeleteSchedule(trimmed, now)?.let { return it }
+
         // #POI 予定変更 第1段階: 新規登録(タスク完了報告/タスク作成/メモ/予定
         // 登録)より必ず先にUPDATE判定を試す(詳細は[tryUpdateScheduleTime])。
         tryUpdateScheduleTime(trimmed, now)?.let { return it }
@@ -1151,6 +1155,9 @@ class CatBrain(
      */
     suspend fun registerScheduleIfRecognized(input: String): CatReply? {
         val now = LocalDateTime.now()
+        // #POI 予定削除 第1段階: 新規登録判定より必ず先にDELETE判定を試す
+        // (詳細は[tryDeleteSchedule])。
+        tryDeleteSchedule(input, now)?.let { return it }
         // #POI 予定変更 第1段階: 新規登録判定より必ず先にUPDATE判定を試す
         // (詳細は[tryUpdateScheduleTime])。
         tryUpdateScheduleTime(input, now)?.let { return it }
@@ -1233,6 +1240,58 @@ class CatBrain(
         val newDateTime = LocalDateTime.of(targetDate, LocalTime.of(hour, minute)).toEpochMilli()
         repository.edit(target, target.title, newDateTime)
         return CatReply("変更したにゃ")
+    }
+
+    // #POI 予定削除 第1段階: 今回対応するDELETEシグナルは「削除」のみ。
+    // 「消して」「取り消して」「キャンセル」等は今回のスコープ外(対応する
+    // 場合は別途追加する)。
+    private val scheduleDeleteSignalWord = "削除"
+
+    /**
+     * #POI 予定削除 第1段階: 「<日付>の<タイトル>を削除して」という明確な
+     * 削除命令だけを認識する、DELETE専用の最小実装。[tryUpdateScheduleTime]
+     * と同じ安全方針を踏襲する: マリたん([registerScheduleIfRecognized])と
+     * BB([respond])の両方から、既存の新規登録処理(CREATE)より必ず先に
+     * 呼ばれる。[rawInput]に[scheduleDeleteSignalWord]が含まれる場合、この
+     * 関数は対象が特定できなかった場合でも必ず非nullの[CatReply]を返す —
+     * 呼び出し元はこれを見て即座に返答を確定させ、以降の新規登録処理へは
+     * 絶対に進まない(「明日のテストを削除して」が削除意図をそもそも判定
+     * できるIntentが無いために新規予定として誤登録されてしまう事故を防ぐ
+     * ため — 詳細は本チケットの事前調査を参照)。
+     *
+     * 日付の抽出には既存の[DateTimeParser.parseDueDate](内部の日時解析自体は
+     * 一切変更していない)をそのまま使う。対象の予定は、日付＋タイトル
+     * キーワードの部分一致で、その日の既存予定([CatEventRepository.onDay]、
+     * [tryUpdateScheduleTime]と全く同じ検索方針、新しい検索APIは追加して
+     * いない)から絞り込む。1件に確実に特定できた場合だけ削除し、0件/複数件
+     * の場合は「曖昧な候補から独自に決めない」という既存のGeoCoder/場所
+     * 抽出/予定変更と同じ方針で、削除も新規登録も行わない。
+     *
+     * 削除の実行には新しいAPIを作らず、既存の[CatEventRepository.delete]を
+     * そのまま再利用する。
+     */
+    private suspend fun tryDeleteSchedule(rawInput: String, now: LocalDateTime): CatReply? {
+        val trimmed = rawInput.trim().replace(Regex("[「」『』]"), "").trim()
+        if (!trimmed.contains(scheduleDeleteSignalWord)) return null
+
+        val (targetDate, afterDate) = DateTimeParser.parseDueDate(trimmed, now)
+        val match = targetDate?.let {
+            Regex("^[のを、\\s]*(.+?)を削除").find(afterDate)
+        }
+        val titleKeyword = match?.groupValues?.get(1)?.trim()
+        if (targetDate == null || match == null || titleKeyword.isNullOrBlank()) {
+            return CatReply("どの予定か分からなかったにゃ。")
+        }
+
+        val dayStart = targetDate.toEpochMilli()
+        val dayEnd = targetDate.plusDays(1).toEpochMilli() - 1
+        val candidates = repository.onDay(dayStart, dayEnd).filter { it.title.contains(titleKeyword) }
+        val target = candidates.singleOrNull() ?: return CatReply(
+            if (candidates.isEmpty()) "そんな予定見つからなかったにゃ。" else "予定が複数あって特定できなかったにゃ。",
+        )
+
+        repository.delete(target)
+        return CatReply("${target.title}、削除したにゃ。")
     }
 
     /**
