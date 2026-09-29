@@ -66,6 +66,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import com.mspg.poicat.album.AlbumPhotoDisplayName
 import com.mspg.poicat.brain.toEpochMilli
 import com.mspg.poicat.brain.toLocalDate
 import com.mspg.poicat.data.Photo
@@ -113,6 +114,11 @@ fun AlbumScreen(
 
     var photos by remember { mutableStateOf<List<Photo>>(emptyList()) }
     var albums by remember { mutableStateOf<List<String>>(emptyList()) }
+    // #POIアルバム表示名(YYMMDD-連番): 写真一覧が更新されたタイミング(reload())で
+    // まとめて1回だけ計算し、ここに保持する — PhotoThumbnail/PhotoDetailDialog側は
+    // このMapを参照するだけで、再コンポジションのたびにEXIFを読み直さない。
+    // Photo.filePath/caption等は一切書き換えない、表示専用のラベル。
+    var displayNames by remember { mutableStateOf<Map<Long, String>>(emptyMap()) }
     var detailPhoto by remember { mutableStateOf<Photo?>(null) }
     var pendingCameraFile by remember { mutableStateOf<File?>(null) }
     // Drive認可がサイレントに取れずカタログ同期を試せなかった場合だけ出す、
@@ -132,6 +138,7 @@ fun AlbumScreen(
     suspend fun reload() {
         photos = selectedAlbum?.let { repository.byAlbum(it) } ?: repository.all()
         albums = repository.albumNames()
+        displayNames = AlbumPhotoDisplayName.computeDisplayNames(photos)
     }
 
     LaunchedEffect(selectedAlbum) { reload() }
@@ -293,7 +300,7 @@ fun AlbumScreen(
                     .align(Alignment.CenterHorizontally),
             ) {
                 items(photos, key = { it.id }) { photo ->
-                    PhotoThumbnail(photo = photo, onClick = { detailPhoto = photo })
+                    PhotoThumbnail(photo = photo, onClick = { detailPhoto = photo }, displayName = displayNames[photo.id])
                 }
             }
         }
@@ -302,6 +309,7 @@ fun AlbumScreen(
     detailPhoto?.let { photo ->
         PhotoDetailDialog(
             photo = photo,
+            displayName = displayNames[photo.id],
             onDismiss = { detailPhoto = null },
             onSave = { caption, album, linkedDate ->
                 scope.launch {
@@ -325,7 +333,15 @@ fun AlbumScreen(
 }
 
 @Composable
-fun PhotoThumbnail(photo: Photo, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun PhotoThumbnail(
+    photo: Photo,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    // #POIアルバム表示名(YYMMDD-連番): 表示専用のラベル、既定はnull(非表示)。
+    // AlbumScreen以外の既存呼び出し元(PoiScreen/MemoScreen/AiChatScreen/
+    // CalendarScreen)はこの引数を渡さないため、見た目は一切変わらない。
+    displayName: String? = null,
+) {
     var bitmap by remember(photo.id) { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(photo.filePath) { bitmap = decodeSampledBitmap(photo.filePath, 300) }
 
@@ -342,6 +358,18 @@ fun PhotoThumbnail(photo: Photo, onClick: () -> Unit, modifier: Modifier = Modif
                 contentDescription = photo.caption,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
+            )
+        }
+        displayName?.let { name ->
+            Text(
+                text = name,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .background(Color.Black.copy(alpha = 0.45f))
+                    .padding(horizontal = 4.dp, vertical = 1.dp),
+                color = Color.White,
+                fontSize = 9.sp,
+                maxLines = 1,
             )
         }
         photo.caption?.takeIf { it.isNotBlank() }?.let { caption ->
@@ -366,6 +394,9 @@ fun PhotoDetailDialog(
     onDismiss: () -> Unit,
     onSave: (caption: String?, album: String?, linkedDate: LocalDate?) -> Unit,
     onDelete: () -> Unit,
+    // #POIアルバム表示名(YYMMDD-連番): 表示専用のラベル、既定はnull(非表示)。
+    // AlbumScreen以外の既存呼び出し元はこの引数を渡さないため、見た目は変わらない。
+    displayName: String? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -403,6 +434,9 @@ fun PhotoDetailDialog(
             }
 
             Spacer(Modifier.height(10.dp))
+            displayName?.let { name ->
+                Text(text = name, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AlbumInk)
+            }
             Text(
                 text = "登録日: ${addedDate.monthValue}月${addedDate.dayOfMonth}日",
                 fontSize = 12.sp,
