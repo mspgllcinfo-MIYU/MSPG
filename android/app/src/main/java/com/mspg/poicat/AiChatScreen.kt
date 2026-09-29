@@ -498,6 +498,11 @@ private fun MariTanRow(catBrain: CatBrain) {
     // 起動)を1つでも通った発話の後は必ずnullへ戻す — 「直前に成立したPOI質問」
     // だけが継続質問の対象という条件を厳密に守るため。
     var conversationContext by remember { mutableStateOf<ConversationContext?>(null) }
+    // #POI 予定変更 第1段階(一時診断): tryUpdateScheduleTimeが失敗時/成功時
+    // ともに付ける【予定変更診断】ブロックを、画面にだけ表示しTTSには絶対に
+    // 読み上げさせないための表示専用state。原因確定後、正規表現の修正と共に
+    // この診断機構ごと撤去する。
+    var scheduleUpdateDiagnosticText by remember { mutableStateOf<String?>(null) }
 
     // マリたんの声。画面が破棄される際は必ずshutdown()する（TextToSpeechは
     // ネイティブリソース/バックグラウンドサービス接続を持つため）。
@@ -543,6 +548,16 @@ private fun MariTanRow(catBrain: CatBrain) {
         engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "mari_tan_answer")
     }
 
+    // #POI 予定変更 第1段階(一時診断): CatReply.textの末尾に付いている
+    // 一時的な【予定変更診断】ブロック(CatBrain.tryUpdateScheduleTimeが
+    // 付ける)を、画面表示用とspeak()用に分離する。診断ブロックが無い通常の
+    // 返答はspokenがtext全体、diagnosticはnullのまま(既存の挙動と完全に同じ)。
+    fun splitScheduleUpdateDiagnostic(text: String): Pair<String, String?> {
+        val marker = "\n【予定変更診断】"
+        val idx = text.indexOf(marker)
+        return if (idx < 0) text to null else text.substring(0, idx) to text.substring(idx + 1)
+    }
+
     val speechLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
@@ -552,6 +567,9 @@ private fun MariTanRow(catBrain: CatBrain) {
         if (text.isNullOrBlank()) {
             state = MariTanState.IDLE
         } else {
+            // #POI 予定変更 第1段階(一時診断): 新しい発話の処理を始めるたびに、
+            // 前回の【予定変更診断】表示を必ずクリアする。
+            scheduleUpdateDiagnosticText = null
             // Gemini APIを呼ぶ前に、ローカルだけで判定できる3種類の意図を優先的に
             // 処理する（クラス冒頭のコメント参照）。
             val appTarget = ExternalAiLauncher.detectTarget(text)
@@ -693,8 +711,10 @@ private fun MariTanRow(catBrain: CatBrain) {
                         // として保存されることはない。
                         val scheduleReply = catBrain.registerScheduleIfRecognized(text)
                         if (scheduleReply != null) {
+                            val (spoken, diag) = splitScheduleUpdateDiagnostic(scheduleReply.text)
+                            scheduleUpdateDiagnosticText = diag
                             state = MariTanState.SPEAKING
-                            speak(scheduleReply.text) { state = MariTanState.IDLE }
+                            speak(spoken) { state = MariTanState.IDLE }
                             return@launch
                         }
                         val memories = MariTanMemoryStore.all(context.applicationContext).map { it.text }
@@ -767,6 +787,19 @@ private fun MariTanRow(catBrain: CatBrain) {
             },
             fontSize = 12.sp,
             color = AiInk.copy(alpha = 0.6f),
+        )
+    }
+
+    // #POI 予定変更 第1段階(一時診断): 予定変更命令の解析に失敗した場合だけ
+    // でなく成功した場合も、【予定変更診断】ブロックを画面へそのまま表示する
+    // (TTSでは絶対に読み上げない、上のsplitScheduleUpdateDiagnostic参照)。
+    // 診断が無い(scheduleUpdateDiagnosticText == null)通常時は何も表示しない。
+    scheduleUpdateDiagnosticText?.let { diag ->
+        Text(
+            text = diag,
+            fontSize = 11.sp,
+            color = AiInk.copy(alpha = 0.8f),
+            modifier = Modifier.padding(top = 4.dp),
         )
     }
 

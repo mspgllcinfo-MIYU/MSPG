@@ -1209,8 +1209,46 @@ class CatBrain(
             Regex("^[のを、\\s]*(.+?)を(\\d{1,2})時(半)?に変更").find(afterDate)
         }
         val titleKeyword = match?.groupValues?.get(1)?.trim()
+        val newHourText = match?.groupValues?.get(2) ?: "NONE"
+        val newMinuteText = when {
+            match == null -> "NONE"
+            match.groupValues[3] == "半" -> "30"
+            else -> "0"
+        }
+
+        // #POI 予定変更 第1段階(一時診断): 実機テストで「明日のテストを11時に
+        // 変更して」が既存予定を1件に特定できず「どの予定か分からなかった
+        // にゃ。」になったが、原因(日付/タイトルキーワード/変更後時刻の抽出
+        // 段階なのか、その日の候補検索・タイトル絞り込み段階なのか)を実機の
+        // 生データ無しに推測で直すことを避けるため、原因確定までの一時的な
+        // 診断だけを追加する。正規表現・UPDATE判定・CREATE防止処理・
+        // repository検索条件・CatEventRepository.editは一切変更していない —
+        // 既に計算済みの値を画面表示用に文字列化するだけ。TTSには絶対に渡さ
+        // ない(画面表示専用、AiChatScreen.kt側でマーカー以降を読み上げから
+        // 除外する)。原因が確定し正規表現を修正した後はこの診断ブロックごと
+        // 撤去する。
+        fun diagnosticBlock(repositorySearchExecuted: Boolean, dayCandidateCount: Int?, matchedCandidateCount: Int?): String =
+            "\n【予定変更診断】" +
+                "\nrawInput=\"$rawInput\"" +
+                "\ntrimmed=\"$trimmed\"" +
+                "\ntargetDate=${targetDate ?: "NONE"}" +
+                "\nafterDate=\"$afterDate\"" +
+                "\nupdateRegexMatched=${match != null}" +
+                "\ntitleKeyword=${titleKeyword ?: "NONE"}" +
+                "\nnewHour=$newHourText" +
+                "\nnewMinute=$newMinuteText" +
+                "\nrepositorySearchExecuted=$repositorySearchExecuted" +
+                (
+                    if (repositorySearchExecuted) {
+                        "\ndayCandidateCount=$dayCandidateCount" +
+                            "\nmatchedCandidateCount=$matchedCandidateCount"
+                    } else {
+                        ""
+                    }
+                )
+
         if (targetDate == null || match == null || titleKeyword.isNullOrBlank()) {
-            return CatReply("どの予定か分からなかったにゃ。")
+            return CatReply("どの予定か分からなかったにゃ。" + diagnosticBlock(false, null, null))
         }
 
         val hour = match.groupValues[2].toInt().coerceIn(0, 23)
@@ -1218,14 +1256,16 @@ class CatBrain(
 
         val dayStart = targetDate.toEpochMilli()
         val dayEnd = targetDate.plusDays(1).toEpochMilli() - 1
-        val candidates = repository.onDay(dayStart, dayEnd).filter { it.title.contains(titleKeyword) }
-        val target = candidates.singleOrNull() ?: return CatReply(
-            if (candidates.isEmpty()) "そんな予定見つからなかったにゃ。" else "予定が複数あって特定できなかったにゃ。",
+        val dayCandidates = repository.onDay(dayStart, dayEnd)
+        val matchedCandidates = dayCandidates.filter { it.title.contains(titleKeyword) }
+        val target = matchedCandidates.singleOrNull() ?: return CatReply(
+            (if (matchedCandidates.isEmpty()) "そんな予定見つからなかったにゃ。" else "予定が複数あって特定できなかったにゃ。") +
+                diagnosticBlock(true, dayCandidates.size, matchedCandidates.size),
         )
 
         val newDateTime = LocalDateTime.of(targetDate, LocalTime.of(hour, minute)).toEpochMilli()
         repository.edit(target, target.title, newDateTime)
-        return CatReply("変更したにゃ")
+        return CatReply("変更したにゃ" + diagnosticBlock(true, dayCandidates.size, matchedCandidates.size))
     }
 
     /**
