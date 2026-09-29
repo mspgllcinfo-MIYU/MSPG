@@ -12,6 +12,7 @@ import com.mspg.poicat.weather.GeoCoder
 import com.mspg.poicat.weather.WeatherService
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.LocalTime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -172,6 +173,10 @@ class CatBrain(
             val text = if (isTaskQuestion(trimmed)) answerTaskQuery(trimmed, now) else answerQuery(trimmed, now)
             return CatReply(text)
         }
+
+        // #POI 予定変更 第1段階: 新規登録(タスク完了報告/タスク作成/メモ/予定
+        // 登録)より必ず先にUPDATE判定を試す(詳細は[tryUpdateScheduleTime])。
+        tryUpdateScheduleTime(trimmed, now)?.let { return it }
 
         // Checked before schedule registration: "今日ゴミ出しやる" contains "今日", a
         // valid schedule date, but the "やる" ending means it's a to-do, not an event.
@@ -1146,8 +1151,81 @@ class CatBrain(
      */
     suspend fun registerScheduleIfRecognized(input: String): CatReply? {
         val now = LocalDateTime.now()
+        // #POI 予定変更 第1段階: 新規登録判定より必ず先にUPDATE判定を試す
+        // (詳細は[tryUpdateScheduleTime])。
+        tryUpdateScheduleTime(input, now)?.let { return it }
         val (saved, judgment) = registerScheduleCore(input, now) ?: return null
         return CatReply(scheduleRegisteredReply(saved, judgment, now))
+    }
+
+    // #POI 予定変更 第1段階: 「変更して」「変更する」を含む場合はもちろん、単に
+    // 「変更」とだけ言った場合も含めてUPDATEシグナルとして認識する(この3語は
+    // 「変更」という共通の部分文字列を持つため、containsの判定1つでまとめて
+    // カバーできる)。
+    private val scheduleUpdateSignalWord = "変更"
+
+    /**
+     * #POI 予定変更 第1段階: 「<日付>の<タイトル>を<時刻>に変更して」という
+     * 明確な時刻変更命令だけを認識する、UPDATE専用の最小実装。マリたん
+     * ([registerScheduleIfRecognized])とBB([respond])の両方から、既存の
+     * 新規予定登録処理(CREATE)へ入る前に必ず呼ばれる — [rawInput]に
+     * [scheduleUpdateSignalWord]が含まれる場合、この関数は対象が特定できな
+     * かった場合でも必ず非nullの[CatReply]を返す。呼び出し元はこれを見て
+     * 即座に返答を確定させ、以降の新規登録処理へは絶対に進まない(「明日の
+     * テストを11時に変更して」が対象を見失った結果、誤って「テストをに変更」
+     * という新規予定として登録されてしまう事故を再発させないため)。
+     *
+     * 日付の抽出には既存の[DateTimeParser.parseDueDate](内部の日時解析自体は
+     * 一切変更していない)をそのまま使うが、タイトルキーワードと変更後時刻は
+     * [DateTimeParser.parseRegistration]を経由せず、この関数専用の正規表現で
+     * 個別に取り出す — [DateTimeParser.parseRegistration]のタイトル整形
+     * ([DateTimeParser.cleanTitle])は文頭/文末の助詞・口語表現しか除去できず、
+     * 「Xを11時に変更して」のように時刻が文の途中に挟まる文型では「テストをに
+     * 変更」のような破綻したタイトルを生成してしまうため、新規登録用のパーサー
+     * をそのまま流用することは意図的に避けている。
+     *
+     * 対象の予定は、日付＋タイトルキーワードの部分一致で、その日の既存予定
+     * ([CatEventRepository.onDay]、新しい検索APIは追加していない)から絞り込む。
+     * 1件に確実に特定できた場合だけ更新し、0件/複数件の場合は「曖昧な候補
+     * から独自に決めない」という既存のGeoCoder/場所抽出と同じ方針で、更新も
+     * 新規登録も行わない。
+     *
+     * 更新の保存には新しいAPIを作らず、既存の[CatEventRepository.edit]を
+     * そのまま再利用する。タイトルは対象イベントの既存タイトル([CatEvent.title])
+     * をそのまま渡すため、[CatEvent.locationText]/[CatEvent.assignee]等の
+     * 他フィールドは[CatEvent.copy]によりすべて維持される(この関数自身は
+     * それらを一切参照・変更しない)。
+     *
+     * 「ずらして」「遅らせて」「早めて」等の言い回し、タイトル変更・場所変更・
+     * 日付変更・複数候補からの会話選択は今回のスコープ外 — 正規表現が一致
+     * しない入力は「対象を特定できない」として扱う。
+     */
+    private suspend fun tryUpdateScheduleTime(rawInput: String, now: LocalDateTime): CatReply? {
+        val trimmed = rawInput.trim().replace(Regex("[「」『』]"), "").trim()
+        if (!trimmed.contains(scheduleUpdateSignalWord)) return null
+
+        val (targetDate, afterDate) = DateTimeParser.parseDueDate(trimmed, now)
+        val match = targetDate?.let {
+            Regex("^[のを、\\s]*(.+?)を(\\d{1,2})時(半)?に変更").find(afterDate)
+        }
+        val titleKeyword = match?.groupValues?.get(1)?.trim()
+        if (targetDate == null || match == null || titleKeyword.isNullOrBlank()) {
+            return CatReply("どの予定か分からなかったにゃ。")
+        }
+
+        val hour = match.groupValues[2].toInt().coerceIn(0, 23)
+        val minute = if (match.groupValues[3] == "半") 30 else 0
+
+        val dayStart = targetDate.toEpochMilli()
+        val dayEnd = targetDate.plusDays(1).toEpochMilli() - 1
+        val candidates = repository.onDay(dayStart, dayEnd).filter { it.title.contains(titleKeyword) }
+        val target = candidates.singleOrNull() ?: return CatReply(
+            if (candidates.isEmpty()) "そんな予定見つからなかったにゃ。" else "予定が複数あって特定できなかったにゃ。",
+        )
+
+        val newDateTime = LocalDateTime.of(targetDate, LocalTime.of(hour, minute)).toEpochMilli()
+        repository.edit(target, target.title, newDateTime)
+        return CatReply("変更したにゃ")
     }
 
     /**
