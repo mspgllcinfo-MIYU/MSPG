@@ -50,6 +50,14 @@ interface PhotoDao {
     @Query("SELECT * FROM photos WHERE deletedAt IS NULL ORDER BY addedAt DESC")
     suspend fun all(): List<Photo>
 
+    /** #POIアルバム復旧調査 Phase 1: 論理削除済み(deletedAt != null)行も含めた、
+     * 読み取り専用の全件取得。[all]は既存アルバム一覧表示用にdeletedAt IS NULLで
+     * 絞っており、その条件・呼び出し元は一切変更していない — これは復旧スキャン
+     * (実ファイルとRoom行の突き合わせ)専用に追加した別のSELECTクエリで、
+     * INSERT/UPDATE/DELETEは一切行わない。 */
+    @Query("SELECT * FROM photos ORDER BY addedAt DESC")
+    suspend fun allIncludingDeleted(): List<Photo>
+
     @Query("SELECT * FROM photos WHERE albumName = :album AND deletedAt IS NULL ORDER BY addedAt DESC")
     suspend fun byAlbum(album: String): List<Photo>
 

@@ -90,6 +90,11 @@ class PhotoRepository(private val context: Context) {
 
     suspend fun all() = dao.all()
 
+    /** #POIアルバム復旧調査 Phase 1: 論理削除済みも含めた全件(読み取り専用)。
+     * [AlbumRecoveryScanner]専用 — 既存のall()や他の書き込み系メソッドは
+     * 一切変更していない。 */
+    suspend fun allIncludingDeleted() = dao.allIncludingDeleted()
+
     suspend fun byAlbum(album: String) = dao.byAlbum(album)
 
     suspend fun albumNames() = dao.albumNames()

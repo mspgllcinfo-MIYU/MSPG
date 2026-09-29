@@ -118,6 +118,16 @@ fun AlbumScreen(
     // Drive認可がサイレントに取れずカタログ同期を試せなかった場合だけ出す、
     // 非侵襲的な案内（自動での再ログイン・同意画面表示は一切行わない）。
     var driveSyncNotice by remember { mutableStateOf<String?>(null) }
+    // #POIアルバム復旧調査 Phase 1: 読み取り専用のスキャン画面(AlbumRecoveryScreen)
+    // を開くかどうかだけの状態。trueの間はこの画面のComposable本体をまるごと
+    // 差し替えるだけで、既存のreload()/pickMedia/takePicture等の挙動には一切
+    // 触れない — 完全に独立した画面。
+    var showRecoveryScreen by remember { mutableStateOf(false) }
+
+    if (showRecoveryScreen) {
+        AlbumRecoveryScreen(onBack = { showRecoveryScreen = false })
+        return
+    }
 
     suspend fun reload() {
         photos = selectedAlbum?.let { repository.byAlbum(it) } ?: repository.all()
@@ -223,6 +233,12 @@ fun AlbumScreen(
         driveSyncNotice?.let { notice ->
             Spacer(Modifier.height(8.dp))
             Text(notice, color = AlbumGold, fontSize = 12.sp)
+        }
+
+        // #POIアルバム復旧調査 Phase 1: 読み取り専用のスキャン画面を開くだけの
+        // 入り口。既存の写真一覧・追加・削除・Drive同期には一切触れない。
+        TextButton(onClick = { showRecoveryScreen = true }) {
+            Text("データ復旧チェック(実験的・読み取り専用)", color = AlbumGold, fontSize = 11.sp)
         }
 
         Spacer(Modifier.height(12.dp))

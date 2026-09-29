@@ -59,6 +59,11 @@ class FileRepository(private val context: Context) {
 
     suspend fun all() = dao.all()
 
+    /** #POIアルバム復旧調査 Phase 1: 論理削除済みも含めた全件(読み取り専用)。
+     * [PhotoRepository.allIncludingDeleted]と同じ位置付け — 既存のall()や
+     * 他の書き込み系メソッドは一切変更していない。 */
+    suspend fun allIncludingDeleted() = dao.allIncludingDeleted()
+
     /** Saves bytes already downloaded from the shared Drive file folder (room-share catalog
      * refresh) as a new local file — already marked SYNCED with the given [driveFileId] since
      * it's already on Drive, so it's never re-uploaded from this device. Keeps the original

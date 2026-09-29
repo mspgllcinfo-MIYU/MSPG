@@ -27,6 +27,13 @@ interface StoredFileDao {
     @Query("SELECT * FROM stored_files WHERE deletedAt IS NULL ORDER BY savedAt DESC")
     suspend fun all(): List<StoredFile>
 
+    /** #POIアルバム復旧調査 Phase 1: 論理削除済み(deletedAt != null)行も含めた、
+     * 読み取り専用の全件取得。[all]の条件・呼び出し元は一切変更していない —
+     * 復旧スキャン専用に追加した別のSELECTクエリで、INSERT/UPDATE/DELETEは
+     * 一切行わない。 */
+    @Query("SELECT * FROM stored_files ORDER BY savedAt DESC")
+    suspend fun allIncludingDeleted(): List<StoredFile>
+
     /** Batch fetch by id — used to re-read a single file's current row before updating it.
      * Deliberately NOT filtered by deletedAt: this is a read-modify-write lookup (e.g. to mark
      * a Drive sync status), not a user-facing list, so it must still find a soft-deleted row. */
