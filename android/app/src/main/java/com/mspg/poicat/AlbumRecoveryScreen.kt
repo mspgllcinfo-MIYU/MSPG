@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -32,6 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mspg.poicat.data.PhotoRepository
+import com.mspg.poicat.recovery.AlbumRecoveryExecutor
 import com.mspg.poicat.recovery.AlbumRecoveryScanner
 import kotlinx.coroutines.launch
 
@@ -41,16 +43,17 @@ private val RecCard = Color(0xFFEFE7DE)
 private val RecGold = Color(0xFFC9A66B)
 
 /**
- * #POIアルバム復旧調査 Phase 1: みゆタン/かっちゃん2台分の写真について、ローカル/
- * Google Drive/Firestoreのどこに何が残っているかを非破壊でスキャンし、件数だけを
- * 表示するプレビュー画面。
+ * #POIアルバム復旧: みゆタン/かっちゃん2台分の写真について、ローカル/Google Drive/
+ * Firestoreのどこに何が残っているかを非破壊でスキャンして件数を表示するプレビュー
+ * (Phase 1、[AlbumRecoveryScanner]は引き続き読み取り専用のまま無変更)に加え、
+ * 見つかった実ファイルをCOPY＋INSERTだけで救出する「全部復活」機能を持つ。
  *
- * 【重要】この画面(および[AlbumRecoveryScanner])には「復旧する」「削除する」
- * 「統合する」の類のボタンは一切無い — Phase 1の役割は「残っているものを全部
- * 見つけて件数を見せるだけ」であり、実際の復旧・削除・統合はまだ実装しない
- * (次のPhase以降で、ユーザーが個別に確認・承認した項目だけを対象に行う設計)。
- * この画面を開いている間も既存アルバム機能([AlbumScreen])の一覧・追加・削除・
- * Drive同期には一切触れない — 完全に独立した読み取り専用画面。
+ * 【「全部復活」の絶対原則】①再スキャン→②復旧予定件数の表示→③ユーザーの明示的な
+ * 確認(ダイアログの「復旧する」)→④復旧実行→⑤自動で再スキャン→⑥結果表示、の順を
+ * 必ず経由し、ボタン1回のタップで即復旧が始まることはない。復旧処理自体は
+ * [AlbumRecoveryExecutor]がCOPY＋INSERTのみで行い、DELETE/UPDATE/MOVE/上書きは
+ * 一切ない — 削除・統合・整理の類のボタンは今回も無い。この画面を開いている間も
+ * 既存アルバム機能([AlbumScreen])の一覧・追加・削除・Drive同期には一切触れない。
  */
 @Composable
 fun AlbumRecoveryScreen(onBack: () -> Unit) {
@@ -60,6 +63,7 @@ fun AlbumRecoveryScreen(onBack: () -> Unit) {
     val photoRepository = remember { PhotoRepository(context.applicationContext) }
 
     var uiState by remember { mutableStateOf<RecoveryUiState>(RecoveryUiState.Scanning) }
+    var restoreState by remember { mutableStateOf<RestoreUiState>(RestoreUiState.Idle) }
 
     fun startScan() {
         uiState = RecoveryUiState.Scanning
@@ -73,6 +77,46 @@ fun AlbumRecoveryScreen(onBack: () -> Unit) {
     }
 
     LaunchedEffect(Unit) { startScan() }
+
+    // 「全部復活」①最新状態を再スキャン→②復旧予定件数を表示(確認ダイアログ)。
+    // 実際の復旧([AlbumRecoveryExecutor.executeRecovery])はまだ一切実行しない —
+    // ③のユーザー確認(ダイアログの「復旧する」ボタン)を必ず経由する。
+    fun startRestorePlanning() {
+        restoreState = RestoreUiState.Planning
+        scope.launch {
+            uiState = RecoveryUiState.Scanning
+            val scanResult = runCatching { AlbumRecoveryScanner.scan(activity, photoRepository) }
+            val preview = scanResult.getOrNull()
+            if (preview == null) {
+                uiState = RecoveryUiState.ScanFailed(
+                    scanResult.exceptionOrNull()?.message ?: scanResult.exceptionOrNull()?.let { it::class.simpleName } ?: "unknown",
+                )
+                restoreState = RestoreUiState.Idle
+                return@launch
+            }
+            uiState = RecoveryUiState.Done(preview)
+            val plan = runCatching { AlbumRecoveryExecutor.buildPlan(preview, photoRepository) }
+            restoreState = plan.fold(
+                onSuccess = { RestoreUiState.PlanReady(it) },
+                onFailure = { RestoreUiState.RestoreFailed(it.message ?: it::class.simpleName ?: "unknown") },
+            )
+        }
+    }
+
+    // ④復旧実行。②で確認した[plan]をそのまま渡す(表示した件数と実際に処理する対象を
+    // 食い違わせないため)。⑤完了後は自動で再スキャンし、⑥結果はrestoreStateとして
+    // 画面に残す(再スキャンはuiStateだけを更新するため、結果表示は消えない)。
+    fun startRestoreExecution(plan: AlbumRecoveryExecutor.RecoveryPlan) {
+        restoreState = RestoreUiState.Restoring
+        scope.launch {
+            val result = runCatching { AlbumRecoveryExecutor.executeRecovery(activity, photoRepository, plan) }
+            restoreState = result.fold(
+                onSuccess = { RestoreUiState.RestoreDone(it) },
+                onFailure = { RestoreUiState.RestoreFailed(it.message ?: it::class.simpleName ?: "unknown") },
+            )
+            startScan()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -102,7 +146,94 @@ fun AlbumRecoveryScreen(onBack: () -> Unit) {
 
         Spacer(Modifier.height(16.dp))
         Button(onClick = { startScan() }) { Text("再スキャン") }
+
+        Spacer(Modifier.height(24.dp))
+        Text(
+            "見つかった実ファイルを、消さず・上書きせず、全部アルバムに救出するにゃ。" +
+                "重複していても今回は消さないにゃ（整理は別の機会に行うにゃ）。",
+            fontSize = 12.sp,
+            color = RecInk.copy(alpha = 0.6f),
+        )
+        Spacer(Modifier.height(8.dp))
+        Button(
+            onClick = { startRestorePlanning() },
+            enabled = restoreState !is RestoreUiState.Planning && restoreState !is RestoreUiState.Restoring,
+        ) { Text("全部復活") }
+
+        when (val state = restoreState) {
+            is RestoreUiState.Idle -> Unit
+            is RestoreUiState.Planning -> {
+                Spacer(Modifier.height(8.dp))
+                Text("復旧予定を確認中…", color = RecGold, fontSize = 12.sp)
+            }
+            is RestoreUiState.PlanReady -> {
+                // ③確認ダイアログ。ここでユーザーが「復旧する」を押すまで、実際の復旧
+                // ([AlbumRecoveryExecutor.executeRecovery])は一切呼ばれない。
+                AlertDialog(
+                    onDismissRequest = { restoreState = RestoreUiState.Idle },
+                    title = { Text("この件数を復活しますか？") },
+                    text = {
+                        Column {
+                            Text("孤立ローカル：${state.plan.orphanLocalCount}件")
+                            Text("自分Drive：${state.plan.ownDriveCount}件")
+                            Text("パートナーDrive：${state.plan.partnerDriveCount}件")
+                            Text("削除記録(tombstone)経由：${state.plan.tombstoneCount}件")
+                            Text("softDelete経由：${state.plan.softDeleteCount}件")
+                            Spacer(Modifier.height(8.dp))
+                            Text("合計：${state.plan.totalCount}件", fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "既存の写真・Drive原本・削除記録はどれも変更・削除しないにゃ。" +
+                                    "新しいコピーを追加するだけにゃ。",
+                                fontSize = 11.sp,
+                                color = RecInk.copy(alpha = 0.6f),
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = { startRestoreExecution(state.plan) },
+                            enabled = state.plan.totalCount > 0,
+                        ) { Text("復旧する") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { restoreState = RestoreUiState.Idle }) { Text("キャンセル") }
+                    },
+                )
+            }
+            is RestoreUiState.Restoring -> {
+                Spacer(Modifier.height(8.dp))
+                Text("復旧中…", color = RecGold, fontSize = 12.sp)
+            }
+            is RestoreUiState.RestoreDone -> {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "復旧結果 — 成功：${state.result.succeededCount}件 / 失敗：${state.result.failedCount}件",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = RecInk,
+                )
+                if (state.result.failedCount > 0) {
+                    DetailToggle(state.result.outcomes.filter { !it.success }) { outcome ->
+                        "${outcome.target}：${outcome.reason}"
+                    }
+                }
+            }
+            is RestoreUiState.RestoreFailed -> {
+                Spacer(Modifier.height(8.dp))
+                Text("復旧予定の確認に失敗したにゃ：${state.reason}", color = RecGold, fontSize = 12.sp)
+            }
+        }
     }
+}
+
+private sealed class RestoreUiState {
+    object Idle : RestoreUiState()
+    object Planning : RestoreUiState()
+    data class PlanReady(val plan: AlbumRecoveryExecutor.RecoveryPlan) : RestoreUiState()
+    object Restoring : RestoreUiState()
+    data class RestoreDone(val result: AlbumRecoveryExecutor.RecoveryResult) : RestoreUiState()
+    data class RestoreFailed(val reason: String) : RestoreUiState()
 }
 
 private sealed class RecoveryUiState {

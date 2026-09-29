@@ -6,6 +6,7 @@ import com.mspg.poicat.room.RoomDriveTombstoneSync
 import com.mspg.poicat.room.RoomPhotoMetadataSync
 import java.io.File
 import java.io.IOException
+import java.security.MessageDigest
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -228,6 +229,48 @@ class PhotoRepository(private val context: Context) {
         val current = dao.byIds(listOf(photo.id)).firstOrNull()
         current?.driveFileId?.let { driveFileId ->
             syncScope.launch { RoomDriveTombstoneSync.pushTombstone(context.applicationContext, driveFileId) }
+        }
+    }
+
+    /**
+     * #POIアルバム復旧「全部復活」専用: driveFileIdへは一切紐付けない、独立した救出
+     * コピーとして保存する。通常の[importFromDrive]と違い、保存する[Photo]の
+     * driveFileIdは常にnullのまま([Photo]のデフォルト値)— [RoomDriveTombstoneSync]の
+     * 再削除ロジック([com.mspg.poicat.data.PhotoDao.byDriveFileId]検索)からこの
+     * 救出コピーが絶対に見つからないようにするため(次回アプリ起動時にtombstone
+     * リスナーが再配信されても、driveFileIdがnullなので巻き込まれない)。
+     *
+     * [recoveryMarker]は呼び出し元([com.mspg.poicat.recovery.AlbumRecoveryExecutor])が
+     * [Companion.recoveryMarker]で生成した、再実行時の重複防止用の固定長識別子。
+     * 内部保存ファイル名にだけ埋め込み、caption等のユーザー表示フィールドには一切
+     * 書き込まない — filePathは画面表示に使われない内部パスのため、識別子を
+     * 埋め込んでも見た目は汚れない。
+     */
+    suspend fun importRecoveredCopy(bytes: ByteArray, recoveryMarker: String): Photo = withContext(Dispatchers.IO) {
+        val destFile = File(
+            photoDir,
+            "photo_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(8)}_$recoveryMarker.jpg",
+        )
+        destFile.writeBytes(bytes)
+        val photo = Photo(filePath = destFile.absolutePath)
+        photo.copy(id = dao.insert(photo))
+    }
+
+    companion object {
+        /**
+         * [importRecoveredCopy]の内部保存ファイル名に埋め込む、再実行時の重複防止用の
+         * 固定長識別子。[sourceKey](driveFileIdや元ファイルパス等)をそのままファイル名に
+         * 使うと、パスとして安全でない文字が含まれる可能性があるため、SHA-256の
+         * 先頭16文字(hex、常に英数字のみ)へ変換する — 暗号的な安全性のためではなく、
+         * ファイル名として安全な固定長文字列にするための変換。同じ[prefix]/[sourceKey]
+         * からは毎回同じ識別子が生成されるため、[com.mspg.poicat.recovery.AlbumRecoveryExecutor]
+         * が既存のPhotoの内部ファイル名をこの識別子で検索するだけで「既に救出済みか」を
+         * 判定できる(Firestore/Driveへの新しい管理情報は一切書き込まない)。
+         */
+        fun recoveryMarker(prefix: String, sourceKey: String): String {
+            val digest = MessageDigest.getInstance("SHA-256").digest(sourceKey.toByteArray(Charsets.UTF_8))
+            val hash = digest.joinToString("") { "%02x".format(it) }.take(16)
+            return "$prefix$hash"
         }
     }
 }
